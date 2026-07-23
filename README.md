@@ -31,6 +31,31 @@ B1 (this increment) ships the contracts core:
 - `schemas/` — checked-in mirrors of the frozen `execution-contracts` schemas:
   `artifact-ref.v1`, `environment-descriptor.v1`, `usage-receipt.v1`.
 
-Planned for B2+ (one module each, same STANDALONE rule): `node` · `definition`
-· `catalog` · `compile` · `execute` · `store` · `memory-store` · `prompt` ·
-`gate` · `agent`.
+B2 ships the static model: `src/node.ts` (StageDescriptor + CodeStage),
+`src/definition.ts` (digest-sealed PipelineDefinition), `src/catalog.ts`
+(StageCatalog with ATOMIC register + the ContractValidator port), and
+`src/compile.ts` (compilePipeline with the compile-time parity check and gate
+terminality).
+
+B3 ships durable execution:
+
+- `src/store.ts` — the host-neutral `PipelineStore` port (definition
+  publish/load; createRun; leaseToken-fenced shard claim/heartbeat/complete/
+  fail; idempotency-key stage reservation; atomic transactional-outbox
+  persistence; dead letters; content-addressed artifacts; auxiliary work
+  leases). The append-only invariant lives in its doc comments: only leases
+  mutate.
+- `src/memory-store.ts` — a full in-memory PipelineStore for hermetic tests
+  (enforces fencing, append-only, and outbox atomicity).
+- `src/execute/durable-stage.ts` — the durable executor (idempotency key =
+  digest of {runId,itemId,stageId,version,fingerprint,inputDigest}; cached
+  reuse; bounded retries; dead-letter exactly once; retryable-vs-terminal
+  taxonomy) promoted from inbox durable-executor.ts + worker/service.ts.
+- `src/execute/shard-runner.ts` — claim ONE shard, run the compiled nodes in
+  order per item with per-item failure isolation, heartbeat, finalize,
+  release; `NodeInvoker` port (+ fake) for model/agent/gate kinds (B4/B5/B6).
+- `sql/reference/pipeline-store.sql` — documented DDL templates mirroring the
+  port. NEVER auto-applied; hosts own migrations.
+
+Planned next (same STANDALONE rule): `prompt`/`model` (B4) · `decision`/gate
+executor (B5) · `agent` step port (B6).
