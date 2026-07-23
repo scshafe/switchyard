@@ -88,3 +88,27 @@ export function assertEnum<T extends string>(value: unknown, allowed: readonly T
   }
   return value as T;
 }
+
+/**
+ * The shared content-addressed reference shape `{ id, version, digest }` used
+ * by the B4 prompt refs (component/persona/prompt-stack) and model-binding
+ * refs (model revision) — the promoted inbox `*RefSchema` shape.
+ */
+export interface VersionedDigestRef {
+  id: string;
+  version: number;
+  digest: string;
+}
+
+const VERSIONED_REF_KEYS = new Set(["id", "version", "digest"]);
+
+/** LOUD validator for a {@link VersionedDigestRef}; returns a fresh normalized ref. */
+export function assertVersionedRef(value: unknown, label: string): VersionedDigestRef {
+  const raw = assertPlainObject(value, label);
+  assertStrictKeys(raw, VERSIONED_REF_KEYS, label);
+  return {
+    id: assertIdentifier(raw.id, `${label}.id`),
+    version: assertPositiveInt(raw.version, `${label}.version`),
+    digest: assertSha256Hex(raw.digest, `${label}.digest`)
+  };
+}

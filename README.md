@@ -57,5 +57,35 @@ B3 ships durable execution:
 - `sql/reference/pipeline-store.sql` — documented DDL templates mirroring the
   port. NEVER auto-applied; hosts own migrations.
 
-Planned next (same STANDALONE rule): `prompt`/`model` (B4) · `decision`/gate
-executor (B5) · `agent` step port (B6).
+B4 ships the model node kind + prompt module:
+
+- `src/contracts/usage-receipt.ts` — the `usage-receipt.v1` runtime type +
+  LOUD validator hand-written against the frozen schema mirror, INCLUDING the
+  code-side CONVENTIONS §5 rules the schema cannot express: the non-silent-zero
+  floor (trust ∈ {estimated_tier_ceiling, unavailable} ⇒ charged ≥ 1) and
+  charged-covers-observed.
+- `src/prompt/contracts.ts` — digest-sealed PromptComponent / PersonaDefinition
+  / PromptStackDefinition (de-Zod-ed from inbox src/prompts/contracts.ts) plus
+  the CODE-OWNED `CodeOwnedPromptContract` (safety / task / output text always
+  comes from host code, never operator data).
+- `src/prompt/compiler.ts` — `compilePromptStack`: deterministic, digest-pinned
+  compilation with the FIXED ownership order — code-owned safety FIRST,
+  operator components between task and output, code-owned output-contract line
+  LAST (components can add emphasis, never remove policy / enable tools /
+  change the result schema); `validateCompiledPrompt` recomputes both the
+  rendered systemPrompt and the promptDigest.
+- `src/model/binding.ts` — the digest-sealed `ModelStageBinding`
+  (modelRevisionRef + EMBEDDED fail-closed inference parameters + optional
+  persona/promptStack refs); any recorded-parameter change changes the
+  bindingDigest → the compiled bindingFingerprint → the B3 idempotency key.
+- `src/model/invoker.ts` — the `ModelBindingResolver` port +
+  `createModelNodeInvoker` (the kind:"model" NodeInvoker arm): binding
+  resolution by fingerprint (digest must match — LOUD), the promoted
+  prompt-identity check, optional inference-concurrency leases, and THE
+  RECEIPT FLOOR — every completed call must return a valid receipt or the item
+  fails TERMINAL (closing the inbox classification silent-zero gap at
+  framework level); `createModelReceiptLedger` rides success receipts through
+  the transactional outbox.
+
+Planned next (same STANDALONE rule): `decision`/gate executor (B5) · `agent`
+step port (B6).

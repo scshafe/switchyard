@@ -17,3 +17,15 @@ export declare function assertIdentifier(value: unknown, label: string): string;
 export declare function assertPositiveInt(value: unknown, label: string): number;
 export declare function assertSha256Hex(value: unknown, label: string): string;
 export declare function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T;
+/**
+ * The shared content-addressed reference shape `{ id, version, digest }` used
+ * by the B4 prompt refs (component/persona/prompt-stack) and model-binding
+ * refs (model revision) — the promoted inbox `*RefSchema` shape.
+ */
+export interface VersionedDigestRef {
+    id: string;
+    version: number;
+    digest: string;
+}
+/** LOUD validator for a {@link VersionedDigestRef}; returns a fresh normalized ref. */
+export declare function assertVersionedRef(value: unknown, label: string): VersionedDigestRef;

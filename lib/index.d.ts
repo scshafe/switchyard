@@ -1,5 +1,6 @@
 export * from "./contracts/digest.js";
 export * from "./contracts/artifact.js";
+export * from "./contracts/usage-receipt.js";
 export * from "./node.js";
 export * from "./definition.js";
 export * from "./catalog.js";
@@ -8,3 +9,7 @@ export * from "./store.js";
 export * from "./memory-store.js";
 export * from "./execute/durable-stage.js";
 export * from "./execute/shard-runner.js";
+export * from "./prompt/contracts.js";
+export * from "./prompt/compiler.js";
+export * from "./model/binding.js";
+export * from "./model/invoker.js";

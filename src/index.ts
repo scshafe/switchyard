@@ -2,8 +2,9 @@
 // inbox-pipeline): a CLOSED catalog of digest-sealed, content-addressed pipeline
 // contracts compiled to a static DAG — no DSL. This barrel re-exports the B1
 // contracts core + the B2 node model / definition / catalog / compiler + the
-// B3 store port / memory store / durable executor / shard runner; B4+ add
-// prompt/model, gate, agent.
+// B3 store port / memory store / durable executor / shard runner + the B4
+// usage-receipt validator / prompt-component compiler / model binding +
+// resolver port; B5+ add gate (decision) and agent.
 //
 // STANDALONE RULE (import-boundary tests D+E): this package imports node:
 // builtins + its own relative files ONLY — never mc-* workspace packages, never
@@ -11,6 +12,7 @@
 
 export * from "./contracts/digest.js";
 export * from "./contracts/artifact.js";
+export * from "./contracts/usage-receipt.js";
 export * from "./node.js";
 export * from "./definition.js";
 export * from "./catalog.js";
@@ -19,3 +21,7 @@ export * from "./store.js";
 export * from "./memory-store.js";
 export * from "./execute/durable-stage.js";
 export * from "./execute/shard-runner.js";
+export * from "./prompt/contracts.js";
+export * from "./prompt/compiler.js";
+export * from "./model/binding.js";
+export * from "./model/invoker.js";
