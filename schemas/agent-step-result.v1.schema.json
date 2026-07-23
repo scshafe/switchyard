@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-pipeline.local/agent/agent-step-result.v1.schema.json",
+  "title": "AgentStepResult v1",
+  "description": "What an AgentStepExecutor returns for one agent step. `usage` is a REQUIRED array of usage-receipt.v1 (design critique finding 3: required-receipts-array wins — it fixes the silent-zero drift both repos carried). It MAY be empty ONLY for status infra_error (the invocation never usably reached a provider); any status that reached a provider records receipts, each floor-enforced by the usage-receipt validator. `output` is present exactly for status completed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "usage"],
+  "properties": {
+    "schemaVersion": { "const": "agent-step-result.v1" },
+    "status": { "enum": ["completed", "failed", "timed_out", "infra_error"] },
+    "output": {
+      "description": "The step's artifact payload — present exactly when status is completed; validated against the request brief's outputContract by the agent node invoker."
+    },
+    "usage": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "type": "object" }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "detail"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "detail": { "type": "string", "maxLength": 8000 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "completed requires output; non-completed forbids it.",
+      "if": { "properties": { "status": { "const": "completed" } }, "required": ["status"] },
+      "then": { "required": ["output"] },
+      "else": { "not": { "required": ["output"] } }
+    }
+  ]
+}

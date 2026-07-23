@@ -6,7 +6,8 @@
 // usage-receipt validator / prompt-component compiler / model binding +
 // resolver port + the B5 gate module (decision-flow compiler, termination
 // certificates, gate node executor — the module is named GATE, not decision:
-// mission-swarm owns a "decision ledger"); B6 adds agent.
+// mission-swarm owns a "decision ledger"); B6 adds the agent-step contract +
+// executor port + agent node invoker.
 //
 // STANDALONE RULE (import-boundary tests D+E): this package imports node:
 // builtins + its own relative files ONLY — never mc-* workspace packages, never
@@ -31,3 +32,7 @@ export * from "./gate/contracts.js";
 export * from "./gate/certificate.js";
 export * from "./gate/compiler.js";
 export * from "./gate/executor.js";
+// B6 — the frozen agent-step contract + executor port + agent node invoker.
+export * from "./agent/step.js";
+export * from "./agent/executor-port.js";
+export * from "./agent/fake-executor.js";

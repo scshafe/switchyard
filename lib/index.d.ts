@@ -17,3 +17,6 @@ export * from "./gate/contracts.js";
 export * from "./gate/certificate.js";
 export * from "./gate/compiler.js";
 export * from "./gate/executor.js";
+export * from "./agent/step.js";
+export * from "./agent/executor-port.js";
+export * from "./agent/fake-executor.js";
