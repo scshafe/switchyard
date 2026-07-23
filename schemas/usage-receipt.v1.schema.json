@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://execution-contracts.local/execution/usage-receipt.v1.schema.json",
+  "title": "UsageReceipt v1",
+  "description": "Normalized resource receipt for one physical model call. Carries a REQUIRED trust tier. `chargedTokens` and `chargedCostMicroUsd` are NEVER null: when telemetry is absent the charged values are the published tier ceiling. The silent-zero gap (Inbox action-pilot always reported unavailable/cost 0; JobTrack validateUsage accepts floor-0 receipts with no trust tier) is closed by a CODE-SIDE invariant, not by this schema: for trust in {estimated_tier_ceiling, unavailable} each consumer's validator MUST require chargedTokens>=1 AND chargedCostMicroUsd>=1 (config-pinned non-null floor, freeze resolution #7). This schema's `minimum:0` still admits {trust:'unavailable',chargedTokens:0,chargedCostMicroUsd:0}; the floor lives in CONVENTIONS §5. Observed values are null ONLY when trust does not carry that observation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "trust",
+    "observedInputTokens",
+    "observedOutputTokens",
+    "chargedTokens",
+    "observedCostMicroUsd",
+    "chargedCostMicroUsd",
+    "durationMs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "usage-receipt.v1" },
+    "trust": {
+      "description": "provider_signed: cryptographically attested by the provider (requires `signature`). provider_reported: provider returned usage but unsigned. estimated_tier_ceiling: no trustworthy telemetry; charged the exact published per-attempt ceiling. unavailable: no adapter plumbed provider usage AND no ceiling applies (charged values are still non-null, set by the caller's own floor policy).",
+      "enum": ["provider_signed", "provider_reported", "estimated_tier_ceiling", "unavailable"]
+    },
+    "observedInputTokens": { "$ref": "#/$defs/nullableTokenCount" },
+    "observedOutputTokens": { "$ref": "#/$defs/nullableTokenCount" },
+    "chargedTokens": { "$ref": "#/$defs/tokenCount" },
+    "observedCostMicroUsd": { "$ref": "#/$defs/nullableMicroUsd" },
+    "chargedCostMicroUsd": { "$ref": "#/$defs/microUsd" },
+    "durationMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+    "routeAlias": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "signature": {
+      "description": "Opaque provider-signed-receipt token. Present ONLY when trust=provider_signed. Never grants authority; it is verified out of band. See OPEN DECISION on signature format.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    }
+  },
+  "allOf": [
+    {
+      "description": "estimated_tier_ceiling and unavailable carry no observed telemetry.",
+      "if": {
+        "properties": { "trust": { "enum": ["estimated_tier_ceiling", "unavailable"] } },
+        "required": ["trust"]
+      },
+      "then": {
+        "properties": {
+          "observedInputTokens": { "type": "null" },
+          "observedOutputTokens": { "type": "null" },
+          "observedCostMicroUsd": { "type": "null" }
+        }
+      }
+    },
+    {
+      "description": "provider_reported and provider_signed must carry at least one observed value.",
+      "if": {
+        "properties": { "trust": { "enum": ["provider_reported", "provider_signed"] } },
+        "required": ["trust"]
+      },
+      "then": {
+        "anyOf": [
+          { "properties": { "observedInputTokens": { "type": "integer" } }, "required": ["observedInputTokens"] },
+          { "properties": { "observedOutputTokens": { "type": "integer" } }, "required": ["observedOutputTokens"] },
+          { "properties": { "observedCostMicroUsd": { "type": "integer" } }, "required": ["observedCostMicroUsd"] }
+        ]
+      }
+    },
+    {
+      "description": "A signature is present exactly when trust=provider_signed.",
+      "if": { "properties": { "trust": { "const": "provider_signed" } }, "required": ["trust"] },
+      "then": { "required": ["signature"] },
+      "else": { "not": { "required": ["signature"] } }
+    }
+  ],
+  "$defs": {
+    "tokenCount": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+    "nullableTokenCount": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        { "type": "null" }
+      ]
+    },
+    "microUsd": { "type": "integer", "minimum": 0, "maximum": 100000000000 },
+    "nullableMicroUsd": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0, "maximum": 100000000000 },
+        { "type": "null" }
+      ]
+    }
+  }
+}

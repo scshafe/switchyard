@@ -1,0 +1,28 @@
+{
+  "name": "mission-pipeline",
+  "version": "0.1.0",
+  "description": "Static compiled-DAG pipeline engine promoted from inbox-pipeline: closed catalog, digest-sealed, no DSL. STANDALONE (P2-C2 s7 tier, like mc-error-client): node: builtins + relative imports ONLY — never mc-*, never zod, never npm deps. Consumed cross-repo via file:/link: deps. B1 ships the contracts core (canonical-JSON digests + ContractId/ArtifactRef/ArtifactEnvelope) and the frozen execution-contracts schema mirrors.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./*": { "types": "./lib/*.d.ts", "default": "./lib/*.js" },
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "schemas",
+    "README.md",
+    "tsconfig.json"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib"
+  }
+}

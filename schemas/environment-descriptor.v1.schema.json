@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://execution-contracts.local/execution/environment-descriptor.v1.schema.json",
+  "title": "EnvironmentDescriptor v1",
+  "description": "Declares the sandbox posture of one execution turn. Generates runtime flags AND is asserted in tests (catches flag-drift). Config SELECTS from the closed, code-owned `capabilities` set; it never embeds new capabilities. `secretRefs` are OPAQUE handles only, never credential material.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "network", "capabilities", "mounts", "secretRefs", "io"],
+  "properties": {
+    "schemaVersion": { "const": "environment-descriptor.v1" },
+    "network": { "enum": ["none", "loopback-only", "model-endpoint", "egress-allowlist"] },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "none",
+          "network:model",
+          "decision:hierarchical",
+          "network:egress-allowlist",
+          "filesystem:corpus-ro",
+          "filesystem:workspace",
+          "network:oauth",
+          "network:mail-egress",
+          "filesystem:mail-store-ro",
+          "os:automation",
+          "mail:read",
+          "mail:draft",
+          "mail:send"
+        ]
+      }
+    },
+    "mounts": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "mode"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "mode": { "enum": ["ro", "rw"] }
+        }
+      }
+    },
+    "secretRefs": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    },
+    "imageDigest": { "$ref": "#/$defs/sha256" },
+    "io": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputContract", "outputContract"],
+      "properties": {
+        "inputContract": { "$ref": "#/$defs/contractId" },
+        "outputContract": { "$ref": "#/$defs/contractId" }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxTokens", "maxCostMicroUsd", "maxElapsedMs"],
+      "properties": {
+        "maxTokens": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "maxCostMicroUsd": { "type": "integer", "minimum": 0, "maximum": 100000000000 },
+        "maxElapsedMs": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "capability `none` is exclusive: a descriptor either grants nothing, or lists only real capabilities.",
+      "if": {
+        "properties": { "capabilities": { "contains": { "const": "none" } } },
+        "required": ["capabilities"]
+      },
+      "then": { "properties": { "capabilities": { "maxItems": 1 } } }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "contractId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-z0-9][a-z0-9._-]*\\.v[1-9][0-9]*$"
+    }
+  }
+}
