@@ -56,6 +56,12 @@ export interface ModelUsageReceiptRecord {
     attempt: number;
     bindingDigest: string;
     receipt: UsageReceipt;
+    /**
+     * Present when the receipt was charged by a MODEL STEP inside a kind:"gate"
+     * node (gate/executor.ts): one gate attempt may run several model steps, so
+     * the step id disambiguates the ledger's outbox dedupe keys.
+     */
+    gateStepId?: string;
 }
 export declare const MODEL_USAGE_RECEIPT_EVENT_TYPE = "model_usage_receipt";
 export declare const MODEL_USAGE_RECEIPT_EVENT_SCHEMA_VERSION = "model-usage-receipt-event.v1";
@@ -112,6 +118,16 @@ export interface ModelNodeInvokerOptions {
     fallback?: NodeInvoker;
     concurrency?: ModelConcurrencyOptions;
 }
+/**
+ * Verify a resolver-produced {@link ResolvedModelBinding} against its sealed
+ * binding: the invoker must exist, and when the binding names a prompt stack
+ * the resolver's compiled prompt must be digest-valid with promptStack/persona
+ * identity EQUAL to the binding's refs (the promoted prompt-identity check).
+ * Shared by createModelNodeInvoker and the gate executor's model steps
+ * (gate/executor.ts) — one check, two callers. Throws typed shard-scoped
+ * PipelineStageErrors.
+ */
+export declare function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelStageBinding): ResolvedModelBinding;
 /**
  * Build the kind:"model" NodeInvoker arm. Per invocation it:
  * 1. resolves the compiled node's bindingFingerprint to its published sealed

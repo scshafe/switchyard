@@ -105,6 +105,12 @@ export interface ModelUsageReceiptRecord {
   attempt: number;
   bindingDigest: string;
   receipt: UsageReceipt;
+  /**
+   * Present when the receipt was charged by a MODEL STEP inside a kind:"gate"
+   * node (gate/executor.ts): one gate attempt may run several model steps, so
+   * the step id disambiguates the ledger's outbox dedupe keys.
+   */
+  gateStepId?: string;
 }
 
 export const MODEL_USAGE_RECEIPT_EVENT_TYPE = "model_usage_receipt";
@@ -158,9 +164,12 @@ export function createModelReceiptLedger(): ModelReceiptLedger {
           stage: record.stage,
           attempt: record.attempt,
           bindingDigest: record.bindingDigest,
-          receipt: record.receipt
+          receipt: record.receipt,
+          ...(record.gateStepId === undefined ? {} : { gateStepId: record.gateStepId })
         },
-        dedupeKey: `model-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}`
+        dedupeKey:
+          `model-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}` +
+          (record.gateStepId === undefined ? "" : `:step:${record.gateStepId}`)
       }));
     }
   };
@@ -215,6 +224,79 @@ function assertContractValidator(value: unknown): ContractValidator {
 }
 
 /**
+ * Verify a resolver-produced {@link ResolvedModelBinding} against its sealed
+ * binding: the invoker must exist, and when the binding names a prompt stack
+ * the resolver's compiled prompt must be digest-valid with promptStack/persona
+ * identity EQUAL to the binding's refs (the promoted prompt-identity check).
+ * Shared by createModelNodeInvoker and the gate executor's model steps
+ * (gate/executor.ts) — one check, two callers. Throws typed shard-scoped
+ * PipelineStageErrors.
+ */
+export function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelStageBinding): ResolvedModelBinding {
+  if (resolvedRaw === null || typeof resolvedRaw !== "object" || typeof (resolvedRaw as ResolvedModelBinding).invoke !== "function") {
+    throw new PipelineStageError(
+      "model_resolver_invalid",
+      false,
+      new Error(`resolver returned no invoke() for binding ${binding.bindingId}@${binding.version}`),
+      "shard"
+    );
+  }
+  const resolved = resolvedRaw as ResolvedModelBinding;
+  // The promoted prompt-identity check: resolved prompt digest-valid AND
+  // identical to the binding's promptStack/persona refs.
+  if (binding.promptStackRef !== undefined) {
+    if (resolved.compiledPrompt === undefined) {
+      throw new PipelineStageError(
+        "model_prompt_identity_mismatch",
+        false,
+        new Error(
+          `binding ${binding.bindingId}@${binding.version} names prompt stack ${binding.promptStackRef.id}@${binding.promptStackRef.version} but the resolver surfaced no compiled prompt`
+        ),
+        "shard"
+      );
+    }
+    let prompt: CompiledPrompt;
+    try {
+      prompt = validateCompiledPrompt(resolved.compiledPrompt);
+    } catch (error) {
+      throw new PipelineStageError("model_prompt_identity_mismatch", false, error, "shard");
+    }
+    const stackRef = binding.promptStackRef;
+    if (
+      prompt.promptStack.id !== stackRef.id ||
+      prompt.promptStack.version !== stackRef.version ||
+      prompt.promptStack.digest !== stackRef.digest
+    ) {
+      throw new PipelineStageError(
+        "model_prompt_identity_mismatch",
+        false,
+        new Error(
+          `resolved prompt stack ${prompt.promptStack.id}@${prompt.promptStack.version} (${prompt.promptStack.digest}) does not match binding ${binding.bindingId}@${binding.version} prompt stack ${stackRef.id}@${stackRef.version} (${stackRef.digest})`
+        ),
+        "shard"
+      );
+    }
+    const personaRef = binding.personaRef;
+    if (
+      personaRef !== undefined &&
+      (prompt.persona.id !== personaRef.id ||
+        prompt.persona.version !== personaRef.version ||
+        prompt.persona.digest !== personaRef.digest)
+    ) {
+      throw new PipelineStageError(
+        "model_prompt_identity_mismatch",
+        false,
+        new Error(
+          `resolved prompt persona ${prompt.persona.id}@${prompt.persona.version} does not match binding ${binding.bindingId}@${binding.version} persona ${personaRef.id}@${personaRef.version}`
+        ),
+        "shard"
+      );
+    }
+  }
+  return resolved;
+}
+
+/**
  * Build the kind:"model" NodeInvoker arm. Per invocation it:
  * 1. resolves the compiled node's bindingFingerprint to its published sealed
  *    binding (unknown fingerprint ⇒ TERMINAL shard-scoped — immutable
@@ -265,66 +347,7 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
   async function resolveVerified(binding: ModelStageBinding): Promise<ResolvedModelBinding> {
     const cached = resolvedCache.get(binding.bindingDigest);
     if (cached) return cached;
-    const resolved = await resolver.resolve(binding);
-    if (resolved === null || typeof resolved !== "object" || typeof resolved.invoke !== "function") {
-      throw new PipelineStageError(
-        "model_resolver_invalid",
-        false,
-        new Error(`resolver returned no invoke() for binding ${binding.bindingId}@${binding.version}`),
-        "shard"
-      );
-    }
-    // The promoted prompt-identity check: resolved prompt digest-valid AND
-    // identical to the binding's promptStack/persona refs.
-    if (binding.promptStackRef !== undefined) {
-      if (resolved.compiledPrompt === undefined) {
-        throw new PipelineStageError(
-          "model_prompt_identity_mismatch",
-          false,
-          new Error(
-            `binding ${binding.bindingId}@${binding.version} names prompt stack ${binding.promptStackRef.id}@${binding.promptStackRef.version} but the resolver surfaced no compiled prompt`
-          ),
-          "shard"
-        );
-      }
-      let prompt: CompiledPrompt;
-      try {
-        prompt = validateCompiledPrompt(resolved.compiledPrompt);
-      } catch (error) {
-        throw new PipelineStageError("model_prompt_identity_mismatch", false, error, "shard");
-      }
-      const stackRef = binding.promptStackRef;
-      if (
-        prompt.promptStack.id !== stackRef.id ||
-        prompt.promptStack.version !== stackRef.version ||
-        prompt.promptStack.digest !== stackRef.digest
-      ) {
-        throw new PipelineStageError(
-          "model_prompt_identity_mismatch",
-          false,
-          new Error(
-            `resolved prompt stack ${prompt.promptStack.id}@${prompt.promptStack.version} (${prompt.promptStack.digest}) does not match binding ${binding.bindingId}@${binding.version} prompt stack ${stackRef.id}@${stackRef.version} (${stackRef.digest})`
-          ),
-          "shard"
-        );
-      }
-      const personaRef = binding.personaRef;
-      if (
-        personaRef !== undefined &&
-        (prompt.persona.id !== personaRef.id ||
-          prompt.persona.version !== personaRef.version ||
-          prompt.persona.digest !== personaRef.digest)
-      ) {
-        throw new PipelineStageError(
-          "model_prompt_identity_mismatch",
-          false,
-          new Error(
-            `resolved prompt persona ${prompt.persona.id}@${prompt.persona.version} does not match binding ${binding.bindingId}@${binding.version} persona ${personaRef.id}@${personaRef.version}`
-          ),
-          "shard"
-        );
-      }
-    }
+    const resolved = verifyResolvedModelBinding(await resolver.resolve(binding), binding);
     resolvedCache.set(binding.bindingDigest, resolved);
     return resolved;
   }

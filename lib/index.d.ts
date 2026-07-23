@@ -13,3 +13,7 @@ export * from "./prompt/contracts.js";
 export * from "./prompt/compiler.js";
 export * from "./model/binding.js";
 export * from "./model/invoker.js";
+export * from "./gate/contracts.js";
+export * from "./gate/certificate.js";
+export * from "./gate/compiler.js";
+export * from "./gate/executor.js";
