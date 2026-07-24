@@ -222,9 +222,11 @@ export interface DeadLetterInput {
 }
 /**
  * The standalone crash-replay dead-letter append carries the current shard
- * fence. Keep these coordination credentials outside {@link DeadLetterInput}:
- * that payload also rides inside persistStageFailure, whose outer input is
- * already fenced, and lease tokens are never durable dead-letter evidence.
+ * fence and refers to the exact latest nonterminal item-scoped failed attempt
+ * for an existing stage execution. Keep coordination credentials outside
+ * {@link DeadLetterInput}: that payload also rides inside persistStageFailure,
+ * whose outer input is already fenced, and lease tokens are never durable
+ * dead-letter evidence.
  */
 export interface RecordDeadLetterInput extends DeadLetterInput {
     shardId: string;
@@ -317,9 +319,11 @@ export interface ReleaseLeaseInput {
  * - persistStageFailure: fenced; appends the failed attempt. An item-terminal
  *   failure requires its dead letter in the same atomic append; shard-scoped
  *   failures are non-terminal at the item and finalize through failShard.
- * - recordDeadLetter: fenced; append-once per idempotencyKey; created:false
- *   when the key is already dead-lettered (the exactly-once guarantee under
- *   replays). The fence is checked before the idempotent no-op.
+ * - recordDeadLetter: fenced; requires an existing execution whose exact
+ *   latest attempt is a nonterminal item-scoped failure; append-once per
+ *   idempotencyKey; created:false when the key is already dead-lettered (the
+ *   exactly-once guarantee under replays). The fence is checked before the
+ *   idempotent no-op.
  * - putArtifact: verifies the envelope seal; content-addressed and idempotent
  *   (same digest twice is a no-op returning the same ref).
  * - acquireLease: undefined when contended (live lease under another token);

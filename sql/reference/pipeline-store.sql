@@ -190,6 +190,10 @@ CREATE TABLE results (
 -- Append-ONCE per idempotency key (recordDeadLetter / the deadLetter riding
 -- persistStageFailure): the exactly-once dead-letter guarantee is the UNIQUE
 -- constraint — replays observe created = false and append nothing.
+-- Standalone recordDeadLetter additionally requires attempts to equal the
+-- exact latest stage_attempts.attempt_number for this execution, with
+-- failure_scope='item' and terminal=false; hosts enforce that predicate in
+-- the fenced transaction.
 CREATE TABLE dead_letters (
   dead_letter_id  uuid        NOT NULL PRIMARY KEY,
   idempotency_key text        NOT NULL UNIQUE,
