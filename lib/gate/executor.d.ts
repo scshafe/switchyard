@@ -99,15 +99,18 @@ export interface GateEscalationLedger {
     onEscalation(record: GateHumanEscalationRecord): void;
     /**
      * Wire as (part of) ShardRunnerOptions.outboxEventsFor: drains this
-     * (itemId, nodeId)'s pending escalations into dedupe-keyed outbox events
-     * that ride ATOMICALLY with the gate node's persistStageSuccess append.
+     * exact (runId, itemId, nodeId, attempt)'s pending escalations into
+     * dedupe-keyed outbox events that ride ATOMICALLY with the gate node's
+     * persistStageSuccess append.
      * Compose with the model receipt ledger's hook when a pipeline carries both
      * node kinds: `(ctx) => [...receipts.outboxEventsFor(ctx), ...gates.outboxEventsFor(ctx)]`.
      */
     outboxEventsFor(context: {
+        runId: string;
         node: CompiledPipelineNode;
         itemId: string;
         output: unknown;
+        attempt: number;
     }): OutboxEventInput[];
 }
 /** The escalation→outbox bridge (the model receipt ledger's promoted shape). */

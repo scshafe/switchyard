@@ -55,9 +55,11 @@ export interface AgentReceiptLedger {
     readonly records: readonly AgentUsageReceiptRecord[];
     onReceipt(record: AgentUsageReceiptRecord): void;
     outboxEventsFor(context: {
+        runId: string;
         node: CompiledPipelineNode;
         itemId: string;
         output: unknown;
+        attempt: number;
     }): OutboxEventInput[];
 }
 /** The receipt→outbox bridge (identical shape to the B4 model ledger): receipts

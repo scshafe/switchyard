@@ -122,11 +122,17 @@ export interface ModelReceiptLedger {
   /** Wire as createModelNodeInvoker's onReceipt. */
   onReceipt(record: ModelUsageReceiptRecord): void;
   /**
-   * Wire as ShardRunnerOptions.outboxEventsFor: drains this (itemId, nodeId)'s
-   * pending receipts into outbox events that ride ATOMICALLY with the node's
-   * fresh persistStageSuccess append.
+   * Wire as ShardRunnerOptions.outboxEventsFor: drains this exact
+   * (runId, itemId, nodeId, attempt)'s pending receipts into outbox events
+   * that ride ATOMICALLY with the node's fresh persistStageSuccess append.
    */
-  outboxEventsFor(context: { node: CompiledPipelineNode; itemId: string; output: unknown }): OutboxEventInput[];
+  outboxEventsFor(context: {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    output: unknown;
+    attempt: number;
+  }): OutboxEventInput[];
 }
 
 /**
@@ -138,20 +144,41 @@ export interface ModelReceiptLedger {
 export function createModelReceiptLedger(): ModelReceiptLedger {
   const records: ModelUsageReceiptRecord[] = [];
   const pending = new Map<string, ModelUsageReceiptRecord[]>();
-  const keyOf = (itemId: string, nodeId: string): string => `${itemId} ${nodeId}`;
+  const keyOf = (
+    runId: string,
+    itemId: string,
+    nodeId: string,
+    attempt: number
+  ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
   return {
     get records(): readonly ModelUsageReceiptRecord[] {
       return records.slice();
     },
     onReceipt(record: ModelUsageReceiptRecord): void {
       records.push(record);
-      const key = keyOf(record.itemId, record.nodeId);
+      const key = keyOf(
+        record.runId,
+        record.itemId,
+        record.nodeId,
+        record.attempt
+      );
       const queue = pending.get(key);
       if (queue) queue.push(record);
       else pending.set(key, [record]);
     },
-    outboxEventsFor(context: { node: CompiledPipelineNode; itemId: string; output: unknown }): OutboxEventInput[] {
-      const key = keyOf(context.itemId, context.node.nodeId);
+    outboxEventsFor(context: {
+      runId: string;
+      node: CompiledPipelineNode;
+      itemId: string;
+      output: unknown;
+      attempt: number;
+    }): OutboxEventInput[] {
+      const key = keyOf(
+        context.runId,
+        context.itemId,
+        context.node.nodeId,
+        context.attempt
+      );
       const queue = pending.get(key) ?? [];
       pending.delete(key);
       return queue.map((record) => ({
@@ -478,7 +505,29 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
           bindingDigest: binding.bindingDigest,
           receipt
         });
-        return result.output;
+        const responseContract =
+          binding.inferenceProfileRef.parameters.responseContract;
+        const validatedOutput = contracts.validate(
+          responseContract,
+          result.output
+        );
+        if (!validatedOutput.ok) {
+          const details = validatedOutput.issues
+            .map((issue) =>
+              `${issue.path === undefined ? "" : `${issue.path}: `}${issue.message}`
+            )
+            .join("; ");
+          throw new PipelineStageError(
+            "model_output_contract_invalid",
+            true,
+            new Error(
+              `model response contract ${responseContract} rejected output` +
+              (details.length === 0 ? "" : `: ${details}`)
+            ),
+            "item"
+          );
+        }
+        return validatedOutput.value;
       } finally {
         if (slot) {
           try {

@@ -213,8 +213,15 @@ export interface DurableStageInput {
   invoke: (input: unknown, ctx: StageContext) => Promise<unknown>;
   /** Per-node retry budget; default {@link DEFAULT_MAX_ATTEMPTS}. at_most_once nodes never retry. */
   maxAttempts?: number;
-  /** Host hook: outbox events appended ATOMICALLY with a fresh success. */
-  outboxEvents?: (output: unknown) => readonly OutboxEventInput[];
+  /**
+   * Host hook: outbox events appended ATOMICALLY with this exact fresh attempt.
+   * The output remains the first argument for compatibility with existing
+   * one-argument host callbacks; attempt context is additive.
+   */
+  outboxEvents?: (output: unknown, context: {
+    runId: string;
+    attempt: number;
+  }) => readonly OutboxEventInput[];
   signal?: AbortSignal;
   now?: () => Date;
 }
@@ -487,7 +494,12 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
         output,
         outputDigest
       },
-      input.outboxEvents === undefined ? [] : input.outboxEvents(output)
+      input.outboxEvents === undefined
+        ? []
+        : input.outboxEvents(output, {
+            runId: input.runId,
+            attempt
+          })
     );
     return {
       status: "succeeded",

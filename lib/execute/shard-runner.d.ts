@@ -63,9 +63,11 @@ export interface ShardRunnerOptions {
      * (the transactional outbox — e.g. inbox's proposal externalization).
      */
     outboxEventsFor?: (context: {
+        runId: string;
         node: CompiledPipelineNode;
         itemId: string;
         output: unknown;
+        attempt: number;
     }) => readonly OutboxEventInput[];
     signal?: AbortSignal;
     /** Injectable clock (drives claim/heartbeat/finalize timestamps). */

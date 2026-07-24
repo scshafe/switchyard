@@ -154,7 +154,13 @@ export interface ShardRunnerOptions {
    * Host hook: outbox events to append ATOMICALLY with a node's fresh success
    * (the transactional outbox — e.g. inbox's proposal externalization).
    */
-  outboxEventsFor?: (context: { node: CompiledPipelineNode; itemId: string; output: unknown }) => readonly OutboxEventInput[];
+  outboxEventsFor?: (context: {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    output: unknown;
+    attempt: number;
+  }) => readonly OutboxEventInput[];
   signal?: AbortSignal;
   /** Injectable clock (drives claim/heartbeat/finalize timestamps). */
   now?: () => Date;
@@ -315,7 +321,16 @@ async function processClaim(
             maxAttempts: options.maxAttemptsByNode?.[node.nodeId] ?? options.maxAttempts,
             ...(options.outboxEventsFor === undefined
               ? {}
-              : { outboxEvents: (output: unknown) => options.outboxEventsFor!({ node, itemId: item.itemId, output }) }),
+              : {
+                  outboxEvents: (output, { runId, attempt }) =>
+                    options.outboxEventsFor!({
+                      runId,
+                      node,
+                      itemId: item.itemId,
+                      output,
+                      attempt
+                    })
+                }),
             ...(options.signal === undefined ? {} : { signal: options.signal }),
             now: options.now
           })

@@ -157,32 +157,60 @@ export interface GateEscalationLedger {
   onEscalation(record: GateHumanEscalationRecord): void;
   /**
    * Wire as (part of) ShardRunnerOptions.outboxEventsFor: drains this
-   * (itemId, nodeId)'s pending escalations into dedupe-keyed outbox events
-   * that ride ATOMICALLY with the gate node's persistStageSuccess append.
+   * exact (runId, itemId, nodeId, attempt)'s pending escalations into
+   * dedupe-keyed outbox events that ride ATOMICALLY with the gate node's
+   * persistStageSuccess append.
    * Compose with the model receipt ledger's hook when a pipeline carries both
    * node kinds: `(ctx) => [...receipts.outboxEventsFor(ctx), ...gates.outboxEventsFor(ctx)]`.
    */
-  outboxEventsFor(context: { node: CompiledPipelineNode; itemId: string; output: unknown }): OutboxEventInput[];
+  outboxEventsFor(context: {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    output: unknown;
+    attempt: number;
+  }): OutboxEventInput[];
 }
 
 /** The escalation→outbox bridge (the model receipt ledger's promoted shape). */
 export function createGateEscalationLedger(): GateEscalationLedger {
   const records: GateHumanEscalationRecord[] = [];
   const pending = new Map<string, GateHumanEscalationRecord[]>();
-  const keyOf = (itemId: string, nodeId: string): string => `${itemId} ${nodeId}`;
+  const keyOf = (
+    runId: string,
+    itemId: string,
+    nodeId: string,
+    attempt: number
+  ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
   return {
     get records(): readonly GateHumanEscalationRecord[] {
       return records.slice();
     },
     onEscalation(record: GateHumanEscalationRecord): void {
       records.push(record);
-      const key = keyOf(record.itemId, record.nodeId);
+      const key = keyOf(
+        record.runId,
+        record.itemId,
+        record.nodeId,
+        record.attempt
+      );
       const queue = pending.get(key);
       if (queue) queue.push(record);
       else pending.set(key, [record]);
     },
-    outboxEventsFor(context: { node: CompiledPipelineNode; itemId: string; output: unknown }): OutboxEventInput[] {
-      const key = keyOf(context.itemId, context.node.nodeId);
+    outboxEventsFor(context: {
+      runId: string;
+      node: CompiledPipelineNode;
+      itemId: string;
+      output: unknown;
+      attempt: number;
+    }): OutboxEventInput[] {
+      const key = keyOf(
+        context.runId,
+        context.itemId,
+        context.node.nodeId,
+        context.attempt
+      );
       const queue = pending.get(key) ?? [];
       pending.delete(key);
       return queue.map((record) => ({
@@ -465,7 +493,6 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
       receipt,
       gateStepId: step.stepId
     });
-
     // ── BUDGET: per-attempt tier ceilings, then accumulated bounds ────────
     if (receipt.chargedTokens > step.budget.maxTokensPerAttempt) {
       throw new PipelineStageError(
@@ -516,7 +543,29 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
         "item"
       );
     }
-    return result.output;
+    const responseContract =
+      binding.inferenceProfileRef.parameters.responseContract;
+    const validatedResponse = contracts.validate(
+      responseContract,
+      result.output
+    );
+    if (!validatedResponse.ok) {
+      const details = validatedResponse.issues
+        .map((issue) =>
+          `${issue.path === undefined ? "" : `${issue.path}: `}${issue.message}`
+        )
+        .join("; ");
+      throw new PipelineStageError(
+        "model_output_contract_invalid",
+        true,
+        new Error(
+          `gate model step ${step.stepId} response contract ${responseContract} rejected output` +
+          (details.length === 0 ? "" : `: ${details}`)
+        ),
+        "item"
+      );
+    }
+    return validatedResponse.value;
   }
 
   return {

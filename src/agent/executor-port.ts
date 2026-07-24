@@ -91,7 +91,13 @@ export interface AgentUsageReceiptRecord {
 export interface AgentReceiptLedger {
   readonly records: readonly AgentUsageReceiptRecord[];
   onReceipt(record: AgentUsageReceiptRecord): void;
-  outboxEventsFor(context: { node: CompiledPipelineNode; itemId: string; output: unknown }): OutboxEventInput[];
+  outboxEventsFor(context: {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    output: unknown;
+    attempt: number;
+  }): OutboxEventInput[];
 }
 
 /** The receipt→outbox bridge (identical shape to the B4 model ledger): receipts
@@ -100,20 +106,41 @@ export interface AgentReceiptLedger {
 export function createAgentReceiptLedger(): AgentReceiptLedger {
   const records: AgentUsageReceiptRecord[] = [];
   const pending = new Map<string, AgentUsageReceiptRecord[]>();
-  const keyOf = (itemId: string, nodeId: string): string => `${itemId} ${nodeId}`;
+  const keyOf = (
+    runId: string,
+    itemId: string,
+    nodeId: string,
+    attempt: number
+  ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
   return {
     get records(): readonly AgentUsageReceiptRecord[] {
       return records.slice();
     },
     onReceipt(record: AgentUsageReceiptRecord): void {
       records.push(record);
-      const key = keyOf(record.itemId, record.nodeId);
+      const key = keyOf(
+        record.runId,
+        record.itemId,
+        record.nodeId,
+        record.attempt
+      );
       const queue = pending.get(key);
       if (queue) queue.push(record);
       else pending.set(key, [record]);
     },
-    outboxEventsFor(context: { node: CompiledPipelineNode; itemId: string; output: unknown }): OutboxEventInput[] {
-      const key = keyOf(context.itemId, context.node.nodeId);
+    outboxEventsFor(context: {
+      runId: string;
+      node: CompiledPipelineNode;
+      itemId: string;
+      output: unknown;
+      attempt: number;
+    }): OutboxEventInput[] {
+      const key = keyOf(
+        context.runId,
+        context.itemId,
+        context.node.nodeId,
+        context.attempt
+      );
       const queue = pending.get(key) ?? [];
       pending.delete(key);
       return queue.map((record) => ({

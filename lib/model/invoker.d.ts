@@ -71,14 +71,16 @@ export interface ModelReceiptLedger {
     /** Wire as createModelNodeInvoker's onReceipt. */
     onReceipt(record: ModelUsageReceiptRecord): void;
     /**
-     * Wire as ShardRunnerOptions.outboxEventsFor: drains this (itemId, nodeId)'s
-     * pending receipts into outbox events that ride ATOMICALLY with the node's
-     * fresh persistStageSuccess append.
+     * Wire as ShardRunnerOptions.outboxEventsFor: drains this exact
+     * (runId, itemId, nodeId, attempt)'s pending receipts into outbox events
+     * that ride ATOMICALLY with the node's fresh persistStageSuccess append.
      */
     outboxEventsFor(context: {
+        runId: string;
         node: CompiledPipelineNode;
         itemId: string;
         output: unknown;
+        attempt: number;
     }): OutboxEventInput[];
 }
 /**
