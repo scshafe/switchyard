@@ -7,9 +7,10 @@
 // `previousAttempts + 1 .. maxAttempts`; dead-letter on exhaustion) MERGED
 // with the fenced per-attempt semantics of src/worker/service.ts (the
 // prepare→invoke→persist cycle; the stableFailure taxonomy — code strings,
-// retryable flags, and item/shard scopes are promoted; terminal =
-// !retryable || attempt >= maxAttempts; terminal item replays stop at the
-// same node).
+// retryable flags, and item/shard scopes are promoted; item terminal =
+// scope === "item" && (!retryable || attempt >= maxAttempts); terminal item
+// replays stop at the same node, while shard-scoped failures finalize only at
+// the shard boundary).
 // CHANGES in the promotion:
 //   - the idempotency key is digest({runId,itemId,stageId,version,fingerprint,
 //     inputDigest}) where `fingerprint` derives from the CompiledPipelineNode
@@ -39,8 +40,11 @@ import {
   ShardLeaseLostError,
   WorkLeaseLostError,
   type OutboxEventInput,
-  type PipelineStore
+  type PipelineStore,
+  type StageFailureScope
 } from "../store.js";
+
+export type { StageFailureScope } from "../store.js";
 
 /** Multi-slot composed inputs are prepared under this promoted marker contract. */
 export const COMPOSITE_INPUT_CONTRACT: ContractId = "pipeline-node-input.v1";
@@ -49,8 +53,6 @@ export const COMPOSITE_INPUT_CONTRACT: ContractId = "pipeline-node-input.v1";
 export const DEFAULT_MAX_ATTEMPTS = 2;
 
 // ── Failure taxonomy (promoted from worker/service.ts stableFailure) ──────
-
-export type StageFailureScope = "item" | "shard";
 
 export interface StageFailure {
   code: string;
@@ -253,10 +255,12 @@ export type DurableStageResult =
  *    (idempotent) + terminal;
  * 5. invoke; validate the output contract; persistStageSuccess with the
  *    caller's outbox events (atomic);
- * 6. on failure: classify; terminal = !retryable || attempt >= maxAttempts
- *    (at_most_once ⇒ maxAttempts 1); persist the failed attempt (+ the dead
- *    letter riding atomically when terminal + item-scoped); shard scope ⇒
- *    rethrow; terminal item ⇒ return terminal; else loop to the next attempt.
+ * 6. on failure: classify; item terminal = item scope AND
+ *    (!retryable || attempt >= maxAttempts), so at_most_once item failures
+ *    terminalize on their first attempt. Persist the attempt (fenced), with
+ *    every item terminal's dead letter riding atomically. Shard scope never
+ *    terminalizes the item: rethrow for failShard, promoting a retryable shard
+ *    failure to conclusive when its stage-attempt budget is exhausted.
  */
 export async function executeDurableStage(input: DurableStageInput): Promise<DurableStageResult> {
   const { store, contracts, node } = input;
@@ -321,8 +325,15 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
       };
     }
     if (prepared.disposition === "terminal") {
-      // A previous fenced attempt already terminalized this item here —
-      // replays stop at the same node without re-executing or re-dead-lettering.
+      if (prepared.scope === "shard") {
+        throw new PipelineStageError(
+          prepared.errorCode,
+          false,
+          undefined,
+          "shard"
+        );
+      }
+      // A previous fenced attempt already terminalized this item here.
       return { status: "terminal", errorCode: prepared.errorCode, idempotencyKey };
     }
     const attempt = prepared.attempt;
@@ -330,7 +341,27 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
     // 4. Budget already exhausted (a crash landed between the last failed
     //    attempt and its terminalization): dead-letter idempotently, stop.
     if (attempt > maxAttempts) {
+      if (prepared.previousFailure?.scope === "shard") {
+        throw new PipelineStageError(
+          prepared.previousFailure.errorCode,
+          false,
+          undefined,
+          "shard"
+        );
+      }
+      if (prepared.previousFailure?.scope !== "item") {
+        throw new PipelineStageError(
+          "immutable_configuration_rejected",
+          false,
+          new Error(
+            "retry budget was exhausted without persisted failure scope"
+          ),
+          "shard"
+        );
+      }
       await store.recordDeadLetter({
+        shardId: input.shardId,
+        leaseToken: input.leaseToken,
         runId: input.runId,
         itemId: input.itemId,
         nodeId: node.nodeId,
@@ -371,9 +402,11 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
         throw error; // the claim is dead — nothing may be appended under it
       }
       const failure = classifyStageFailure(error);
-      const terminal = !failure.retryable || attempt >= maxAttempts;
+      const budgetExhausted = attempt >= maxAttempts;
+      const scopeTerminal = !failure.retryable || budgetExhausted;
       const message = errorMessage(error);
-      await store.persistStageFailure({
+      const finishedAt = now().toISOString();
+      const failureBase = {
         shardId: input.shardId,
         leaseToken: input.leaseToken,
         executionId: prepared.executionId,
@@ -383,34 +416,55 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
         nodeId: node.nodeId,
         attempt,
         startedAt,
-        finishedAt: now().toISOString(),
+        finishedAt,
         errorCode: failure.code,
         errorMessage: message,
-        retryable: failure.retryable,
-        terminal,
-        // The dead letter rides ATOMICALLY with the terminal ITEM failure —
-        // exactly once (shard-scoped failures are not the item's dead letter:
-        // the shard is failed/reclaimed instead).
-        ...(terminal && failure.scope === "item"
-          ? {
-              deadLetter: {
-                runId: input.runId,
-                itemId: input.itemId,
-                nodeId: node.nodeId,
-                stage: { id: node.stage.id, version: node.stage.version },
-                idempotencyKey,
-                input: composedInput,
-                error: { code: failure.code, message },
-                attempts: attempt,
-                createdAt: now().toISOString()
-              }
+        retryable: failure.retryable
+      };
+      if (failure.scope === "item") {
+        if (scopeTerminal) {
+          await store.persistStageFailure({
+            ...failureBase,
+            scope: "item",
+            terminal: true,
+            deadLetter: {
+              runId: input.runId,
+              itemId: input.itemId,
+              nodeId: node.nodeId,
+              stage: { id: node.stage.id, version: node.stage.version },
+              idempotencyKey,
+              input: composedInput,
+              error: { code: failure.code, message },
+              attempts: attempt,
+              createdAt: finishedAt
             }
-          : {})
-      });
+          });
+        } else {
+          await store.persistStageFailure({
+            ...failureBase,
+            scope: "item",
+            terminal: false
+          });
+        }
+      } else {
+        await store.persistStageFailure({
+          ...failureBase,
+          scope: "shard",
+          terminal: scopeTerminal
+        });
+      }
       if (failure.scope === "shard") {
+        if (failure.retryable && budgetExhausted) {
+          throw new PipelineStageError(
+            failure.code,
+            false,
+            error,
+            "shard"
+          );
+        }
         throw error instanceof Error ? error : new PipelineStageError(failure.code, failure.retryable, error, "shard");
       }
-      if (terminal) {
+      if (scopeTerminal) {
         return { status: "terminal", errorCode: failure.code, idempotencyKey };
       }
       continue; // retryable item-scoped failure with budget left → next attempt

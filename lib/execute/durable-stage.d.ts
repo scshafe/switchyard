@@ -2,12 +2,12 @@ import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import type { StageContext } from "../node.js";
-import { type OutboxEventInput, type PipelineStore } from "../store.js";
+import { type OutboxEventInput, type PipelineStore, type StageFailureScope } from "../store.js";
+export type { StageFailureScope } from "../store.js";
 /** Multi-slot composed inputs are prepared under this promoted marker contract. */
 export declare const COMPOSITE_INPUT_CONTRACT: ContractId;
 /** The promoted default retry budget (inbox durable-pipeline maxAttempts ?? 2). */
 export declare const DEFAULT_MAX_ATTEMPTS = 2;
-export type StageFailureScope = "item" | "shard";
 export interface StageFailure {
     code: string;
     retryable: boolean;
@@ -134,9 +134,11 @@ export type DurableStageResult = {
  *    (idempotent) + terminal;
  * 5. invoke; validate the output contract; persistStageSuccess with the
  *    caller's outbox events (atomic);
- * 6. on failure: classify; terminal = !retryable || attempt >= maxAttempts
- *    (at_most_once ⇒ maxAttempts 1); persist the failed attempt (+ the dead
- *    letter riding atomically when terminal + item-scoped); shard scope ⇒
- *    rethrow; terminal item ⇒ return terminal; else loop to the next attempt.
+ * 6. on failure: classify; item terminal = item scope AND
+ *    (!retryable || attempt >= maxAttempts), so at_most_once item failures
+ *    terminalize on their first attempt. Persist the attempt (fenced), with
+ *    every item terminal's dead letter riding atomically. Shard scope never
+ *    terminalizes the item: rethrow for failShard, promoting a retryable shard
+ *    failure to conclusive when its stage-attempt budget is exhausted.
  */
 export declare function executeDurableStage(input: DurableStageInput): Promise<DurableStageResult>;

@@ -1,6 +1,6 @@
 import { type ArtifactEnvelope, type ArtifactRef } from "./contracts/artifact.js";
 import { type PipelineDefinition } from "./definition.js";
-import { type AcquireLeaseInput, type ClaimNextShardInput, type CompleteShardInput, type CreateRunInput, type DeadLetterInput, type FailShardInput, type HeartbeatLeaseInput, type HeartbeatShardInput, type OutboxEventInput, type PersistStageFailureInput, type PersistStageSuccessInput, type PersistedStageResult, type PipelineStore, type PrepareStageExecutionInput, type ShardClaim, type ShardFinalization, type StagePreparation, type ReleaseLeaseInput, type WorkLease } from "./store.js";
+import { type AcquireLeaseInput, type ClaimNextShardInput, type CompleteShardInput, type CreateRunInput, type DeadLetterInput, type FailShardInput, type HeartbeatLeaseInput, type HeartbeatShardInput, type OutboxEventInput, type PersistStageFailureInput, type PersistStageSuccessInput, type PersistedStageResult, type PipelineStore, type PrepareStageExecutionInput, type RecordDeadLetterInput, type ShardClaim, type StageFailureScope, type ShardFinalization, type StagePreparation, type ReleaseLeaseInput, type WorkLease } from "./store.js";
 interface LeaseRow {
     leaseOwner: string;
     leaseToken: string;
@@ -16,6 +16,7 @@ export interface StageAttemptRecord {
     errorCode?: string;
     errorMessage?: string;
     retryable?: boolean;
+    scope?: StageFailureScope;
     terminal?: boolean;
 }
 export interface DeadLetterRecord extends DeadLetterInput {
@@ -49,7 +50,7 @@ export declare class MemoryPipelineStore implements PipelineStore {
     prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
     persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
     persistStageFailure(input: PersistStageFailureInput): Promise<void>;
-    recordDeadLetter(input: DeadLetterInput): Promise<{
+    recordDeadLetter(input: RecordDeadLetterInput): Promise<{
         created: boolean;
     }>;
     putArtifact(envelopeRaw: ArtifactEnvelope): Promise<ArtifactRef>;

@@ -32,10 +32,11 @@
 // ── THE FENCING INVARIANT ─────────────────────────────────────────────────
 // claimNextShard mints a fresh, unguessable leaseToken per claim. EVERY
 // subsequent operation under that claim — heartbeatShard, completeShard,
-// failShard, prepareStageExecution, persistStageSuccess, persistStageFailure —
-// carries the token and MUST be rejected with the typed ShardLeaseLostError
-// when the lease is missing, expired (at the operation's effective time), or
-// held under a DIFFERENT token (a newer claimant fenced this worker out).
+// failShard, prepareStageExecution, persistStageSuccess, persistStageFailure,
+// recordDeadLetter — carries the token and MUST be rejected with the typed
+// ShardLeaseLostError when the lease is missing, expired (at the operation's
+// effective time), or held under a DIFFERENT token (a newer claimant fenced
+// this worker out).
 // Auxiliary leases fence identically via WorkLeaseLostError. A fenced-out
 // worker can therefore never append conflicting evidence: the reclaim path is
 // safe because cached successes are reused by idempotency key and everything
@@ -212,18 +213,33 @@ export interface PrepareStageExecutionInput {
 /**
  * The three-armed reservation result:
  * - "cached"   — a success already exists for the key: reuse it, execute nothing.
- * - "terminal" — a previous FENCED attempt already terminalized this item at
- *                this node (terminal failure or dead letter). Replays stop at
- *                the same node without re-executing or re-dead-lettering
- *                (promoted from the inbox terminalErrorCode arm).
+ * - "terminal" — a previous FENCED attempt exhausted its item or shard scope.
+ *                Item scope replays stop at this node; shard scope is surfaced
+ *                back to failShard without another invocation.
  * - "reserved" — an attempt slot is reserved; `attempt` is the 1-based attempt
  *                number (prior attempts + 1) surviving crashes, so the retry
- *                budget is enforced across reclaims.
+ *                budget is enforced across reclaims. `previousFailure`, when
+ *                present, lets a lowered-budget replay preserve item-vs-shard
+ *                routing without inventing an item dead letter.
  */
+export type StageFailureScope = "item" | "shard";
+
 export type StagePreparation =
   | { disposition: "cached"; output: unknown; outputDigest: string }
-  | { disposition: "terminal"; errorCode: string }
-  | { disposition: "reserved"; executionId: string; attempt: number };
+  | {
+      disposition: "terminal";
+      errorCode: string;
+      scope: StageFailureScope;
+    }
+  | {
+      disposition: "reserved";
+      executionId: string;
+      attempt: number;
+      previousFailure?: {
+        errorCode: string;
+        scope: StageFailureScope;
+      };
+    };
 
 export interface PersistStageSuccessInput {
   shardId: string;
@@ -274,7 +290,18 @@ export interface DeadLetterInput {
   createdAt: string;
 }
 
-export interface PersistStageFailureInput {
+/**
+ * The standalone crash-replay dead-letter append carries the current shard
+ * fence. Keep these coordination credentials outside {@link DeadLetterInput}:
+ * that payload also rides inside persistStageFailure, whose outer input is
+ * already fenced, and lease tokens are never durable dead-letter evidence.
+ */
+export interface RecordDeadLetterInput extends DeadLetterInput {
+  shardId: string;
+  leaseToken: string;
+}
+
+interface PersistStageFailureBase {
   shardId: string;
   leaseToken: string;
   executionId: string;
@@ -288,15 +315,19 @@ export interface PersistStageFailureInput {
   errorCode: string;
   errorMessage?: string;
   retryable: boolean;
-  /** true ⇒ this item is terminalized at this node: later prepares return the "terminal" arm. */
-  terminal: boolean;
-  /**
-   * When terminal, the dead letter may ride ATOMICALLY with the failed attempt
-   * (same append), mirroring persistStageSuccess's atomic outboxEvents — a
-   * crash can then never separate the terminal attempt from its dead letter.
-   */
-  deadLetter?: DeadLetterInput;
+  scope: StageFailureScope;
 }
+
+/**
+ * Item terminalization is inseparable from its dead letter: both append in one
+ * fenced transaction. A shard-terminal attempt never creates an item dead
+ * letter; it is surfaced back to failShard after a crash/reclaim.
+ */
+export type PersistStageFailureInput = PersistStageFailureBase & (
+  | { scope: "item"; terminal: false; deadLetter?: never }
+  | { scope: "item"; terminal: true; deadLetter: DeadLetterInput }
+  | { scope: "shard"; terminal: boolean; deadLetter?: never }
+);
 
 // ── Auxiliary work leases (inference fences and friends) ──────────────────
 
@@ -356,10 +387,12 @@ export interface ReleaseLeaseInput {
  * - persistStageSuccess: fenced; verifies outputDigest; appends attempt +
  *   result + outboxEvents ATOMICALLY (all or nothing — a fencing rejection
  *   appends no event), or returns created:false appending nothing.
- * - persistStageFailure: fenced; appends the failed attempt (+ optional atomic
- *   dead letter when terminal).
- * - recordDeadLetter: append-once per idempotencyKey; created:false when the
- *   key is already dead-lettered (the exactly-once guarantee under replays).
+ * - persistStageFailure: fenced; appends the failed attempt. An item-terminal
+ *   failure requires its dead letter in the same atomic append; shard-scoped
+ *   failures are non-terminal at the item and finalize through failShard.
+ * - recordDeadLetter: fenced; append-once per idempotencyKey; created:false
+ *   when the key is already dead-lettered (the exactly-once guarantee under
+ *   replays). The fence is checked before the idempotent no-op.
  * - putArtifact: verifies the envelope seal; content-addressed and idempotent
  *   (same digest twice is a no-op returning the same ref).
  * - acquireLease: undefined when contended (live lease under another token);
@@ -382,7 +415,7 @@ export interface PipelineStore {
   prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
   persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
   persistStageFailure(input: PersistStageFailureInput): Promise<void>;
-  recordDeadLetter(input: DeadLetterInput): Promise<{ created: boolean }>;
+  recordDeadLetter(input: RecordDeadLetterInput): Promise<{ created: boolean }>;
 
   putArtifact(envelope: ArtifactEnvelope): Promise<ArtifactRef>;
   getArtifact(ref: ArtifactRef): Promise<ArtifactEnvelope | undefined>;

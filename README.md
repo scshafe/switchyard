@@ -42,9 +42,9 @@ B3 ships durable execution:
 - `src/store.ts` — the host-neutral `PipelineStore` port (definition
   publish/load; createRun; leaseToken-fenced shard claim/heartbeat/complete/
   fail; idempotency-key stage reservation; atomic transactional-outbox
-  persistence; dead letters; content-addressed artifacts; auxiliary work
-  leases). The append-only invariant lives in its doc comments: only leases
-  mutate.
+  persistence; shard-fenced standalone dead-letter recording; content-addressed
+  artifacts; auxiliary work leases). The append-only invariant lives in its
+  doc comments: only leases mutate.
 - `src/memory-store.ts` — a full in-memory PipelineStore for hermetic tests
   (enforces fencing, append-only, and outbox atomicity).
 - `src/execute/durable-stage.ts` — the durable executor (idempotency key =

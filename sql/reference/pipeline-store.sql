@@ -26,8 +26,8 @@
 -- (UPDATE), or released (DELETE) without touching any audit record.
 --
 -- THE FENCING INVARIANT: claimNextShard mints a fresh lease_token per claim;
--- heartbeat/complete/fail/prepare/persist all match on the token AND
--- expires_at > now — a stale token or an expired lease is the typed
+-- heartbeat/complete/fail/prepare/persist/record-dead-letter all match on the
+-- token AND expires_at > now — a stale token or an expired lease is the typed
 -- ShardLeaseLostError / WorkLeaseLostError, and the fenced-out worker appends
 -- nothing.
 -- ============================================================================
@@ -136,7 +136,10 @@ CREATE TABLE executions (
 
 -- Append-only. One row per persisted attempt (persistStageSuccess appends a
 -- 'succeeded' row atomically with the result; persistStageFailure appends a
--- 'failed' row, terminal = true marking the item terminal at this node).
+-- 'failed' row). failure_scope preserves whether the failure belongs to the
+-- item or the shard. terminal = true means terminal WITHIN that scope: an item
+-- terminal requires its dead letter in the same transaction, while a shard
+-- terminal is surfaced back to failShard and never creates an item dead letter.
 CREATE TABLE attempts (
   execution_id   uuid        NOT NULL REFERENCES executions(execution_id),
   attempt_number integer     NOT NULL CHECK (attempt_number >= 1),
@@ -146,9 +149,27 @@ CREATE TABLE attempts (
   error_code     text,
   error_message  text,
   retryable      boolean,
+  failure_scope  text        CHECK (failure_scope IN ('item', 'shard')),
   terminal       boolean,
   PRIMARY KEY (execution_id, attempt_number),
-  CHECK ((status = 'failed') = (error_code IS NOT NULL AND retryable IS NOT NULL AND terminal IS NOT NULL)),
+  CHECK (
+    (
+      status = 'succeeded'
+      AND error_code IS NULL
+      AND error_message IS NULL
+      AND retryable IS NULL
+      AND failure_scope IS NULL
+      AND terminal IS NULL
+    )
+    OR
+    (
+      status = 'failed'
+      AND error_code IS NOT NULL
+      AND retryable IS NOT NULL
+      AND failure_scope IS NOT NULL
+      AND terminal IS NOT NULL
+    )
+  ),
   CHECK (finished_at >= started_at)
 );
 
@@ -224,8 +245,9 @@ CREATE TABLE artifacts (
 --     expires_at > now — zero rows updated = the typed LeaseLost rejection;
 --   - release/finalize: DELETE WHERE lease_token matches (a foreign token is
 --     LeaseLost; an absent row is a no-op for releaseLease).
--- Every fenced evidence append (prepare/persist/complete/fail) re-checks this
--- row's token + expiry in the same transaction as its insert.
+-- Every fenced evidence append (prepare/persist/record-dead-letter/
+-- complete/fail) re-checks this row's token + expiry in the same transaction
+-- as its insert.
 CREATE TABLE work_leases (
   lease_key    text        NOT NULL PRIMARY KEY,
   lease_owner  text        NOT NULL,
