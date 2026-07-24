@@ -20,10 +20,9 @@
 // Receipts reach persistence two ways (both host-visible):
 //   - `onReceipt` fires for EVERY validated receipt (including attempts whose
 //     output later fails contract validation);
-//   - createModelReceiptLedger() pairs an onReceipt collector with an
-//     `outboxEventsFor` hook for ShardRunnerOptions, so the SUCCESS receipt
-//     rides ATOMICALLY with persistStageSuccess through the transactional
-//     outbox.
+//   - createModelReceiptLedger() pairs an onReceipt collector with success and
+//     failure attempt hooks for ShardRunnerOptions, so every admitted receipt
+//     rides ATOMICALLY with the exact attempt that incurred it.
 //
 // INFERENCE CONCURRENCY (optional): the promoted worker capacity fence, re-cut
 // over the PipelineStore auxiliary leases — slot keys
@@ -116,6 +115,15 @@ export interface ModelUsageReceiptRecord {
 export const MODEL_USAGE_RECEIPT_EVENT_TYPE = "model_usage_receipt";
 export const MODEL_USAGE_RECEIPT_EVENT_SCHEMA_VERSION = "model-usage-receipt-event.v1";
 
+export interface ModelReceiptOutboxContext {
+  runId: string;
+  node: CompiledPipelineNode;
+  itemId: string;
+  /** Retained for source compatibility with the original success-only hook. */
+  output?: unknown;
+  attempt: number;
+}
+
 export interface ModelReceiptLedger {
   /** Every validated receipt observed, in order (failed-output attempts included). */
   readonly records: readonly ModelUsageReceiptRecord[];
@@ -126,20 +134,18 @@ export interface ModelReceiptLedger {
    * (runId, itemId, nodeId, attempt)'s pending receipts into outbox events
    * that ride ATOMICALLY with the node's fresh persistStageSuccess append.
    */
-  outboxEventsFor(context: {
-    runId: string;
-    node: CompiledPipelineNode;
-    itemId: string;
-    output: unknown;
-    attempt: number;
-  }): OutboxEventInput[];
+  outboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
+  /**
+   * Wire as ShardRunnerOptions.failureOutboxEventsFor: the same exact-tuple
+   * drain, used when a provider call was billable but its attempt failed.
+   */
+  failureOutboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
 }
 
 /**
  * The receipt→outbox bridge: receipts recorded during an attempt ride the
- * SAME atomic append as the stage success. Receipts whose attempt never
- * reaches persistStageSuccess (e.g. the output later fails its contract) stay
- * in `records` for host-side persistence.
+ * SAME atomic append as that attempt's success or failure. `records` remains
+ * the immutable observation history; each exact tuple drains at most once.
  */
 export function createModelReceiptLedger(): ModelReceiptLedger {
   const records: ModelUsageReceiptRecord[] = [];
@@ -150,6 +156,33 @@ export function createModelReceiptLedger(): ModelReceiptLedger {
     nodeId: string,
     attempt: number
   ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
+  const drain = (context: ModelReceiptOutboxContext): OutboxEventInput[] => {
+    const key = keyOf(
+      context.runId,
+      context.itemId,
+      context.node.nodeId,
+      context.attempt
+    );
+    const queue = pending.get(key) ?? [];
+    pending.delete(key);
+    return queue.map((record) => ({
+      eventType: MODEL_USAGE_RECEIPT_EVENT_TYPE,
+      payload: {
+        schemaVersion: MODEL_USAGE_RECEIPT_EVENT_SCHEMA_VERSION,
+        runId: record.runId,
+        itemId: record.itemId,
+        nodeId: record.nodeId,
+        stage: record.stage,
+        attempt: record.attempt,
+        bindingDigest: record.bindingDigest,
+        receipt: record.receipt,
+        ...(record.gateStepId === undefined ? {} : { gateStepId: record.gateStepId })
+      },
+      dedupeKey:
+        `model-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}` +
+        (record.gateStepId === undefined ? "" : `:step:${record.gateStepId}`)
+    }));
+  };
   return {
     get records(): readonly ModelUsageReceiptRecord[] {
       return records.slice();
@@ -166,39 +199,8 @@ export function createModelReceiptLedger(): ModelReceiptLedger {
       if (queue) queue.push(record);
       else pending.set(key, [record]);
     },
-    outboxEventsFor(context: {
-      runId: string;
-      node: CompiledPipelineNode;
-      itemId: string;
-      output: unknown;
-      attempt: number;
-    }): OutboxEventInput[] {
-      const key = keyOf(
-        context.runId,
-        context.itemId,
-        context.node.nodeId,
-        context.attempt
-      );
-      const queue = pending.get(key) ?? [];
-      pending.delete(key);
-      return queue.map((record) => ({
-        eventType: MODEL_USAGE_RECEIPT_EVENT_TYPE,
-        payload: {
-          schemaVersion: MODEL_USAGE_RECEIPT_EVENT_SCHEMA_VERSION,
-          runId: record.runId,
-          itemId: record.itemId,
-          nodeId: record.nodeId,
-          stage: record.stage,
-          attempt: record.attempt,
-          bindingDigest: record.bindingDigest,
-          receipt: record.receipt,
-          ...(record.gateStepId === undefined ? {} : { gateStepId: record.gateStepId })
-        },
-        dedupeKey:
-          `model-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}` +
-          (record.gateStepId === undefined ? "" : `:step:${record.gateStepId}`)
-      }));
-    }
+    outboxEventsFor: drain,
+    failureOutboxEventsFor: drain
   };
 }
 

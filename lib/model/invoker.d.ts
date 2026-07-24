@@ -65,6 +65,14 @@ export interface ModelUsageReceiptRecord {
 }
 export declare const MODEL_USAGE_RECEIPT_EVENT_TYPE = "model_usage_receipt";
 export declare const MODEL_USAGE_RECEIPT_EVENT_SCHEMA_VERSION = "model-usage-receipt-event.v1";
+export interface ModelReceiptOutboxContext {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    /** Retained for source compatibility with the original success-only hook. */
+    output?: unknown;
+    attempt: number;
+}
 export interface ModelReceiptLedger {
     /** Every validated receipt observed, in order (failed-output attempts included). */
     readonly records: readonly ModelUsageReceiptRecord[];
@@ -75,19 +83,17 @@ export interface ModelReceiptLedger {
      * (runId, itemId, nodeId, attempt)'s pending receipts into outbox events
      * that ride ATOMICALLY with the node's fresh persistStageSuccess append.
      */
-    outboxEventsFor(context: {
-        runId: string;
-        node: CompiledPipelineNode;
-        itemId: string;
-        output: unknown;
-        attempt: number;
-    }): OutboxEventInput[];
+    outboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
+    /**
+     * Wire as ShardRunnerOptions.failureOutboxEventsFor: the same exact-tuple
+     * drain, used when a provider call was billable but its attempt failed.
+     */
+    failureOutboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
 }
 /**
  * The receipt→outbox bridge: receipts recorded during an attempt ride the
- * SAME atomic append as the stage success. Receipts whose attempt never
- * reaches persistStageSuccess (e.g. the output later fails its contract) stay
- * in `records` for host-side persistence.
+ * SAME atomic append as that attempt's success or failure. `records` remains
+ * the immutable observation history; each exact tuple drains at most once.
  */
 export declare function createModelReceiptLedger(): ModelReceiptLedger;
 /** Optional inference-concurrency fencing over the store's auxiliary leases. */

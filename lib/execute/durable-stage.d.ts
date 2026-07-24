@@ -67,6 +67,17 @@ export interface ResolvedSlotValue {
     contract: ContractId;
     value: unknown;
 }
+/** Exact failed-attempt context for transactional-outbox projection. */
+export interface StageFailureOutboxContext {
+    runId: string;
+    itemId: string;
+    node: CompiledPipelineNode;
+    attempt: number;
+    errorCode: string;
+    retryable: boolean;
+    scope: StageFailureScope;
+    terminal: boolean;
+}
 /**
  * Compose the invocation input from resolved slots — promoted verbatim from
  * worker/service.ts: ONE slot passes its bare value; several compose an
@@ -105,6 +116,12 @@ export interface DurableStageInput {
         runId: string;
         attempt: number;
     }) => readonly OutboxEventInput[];
+    /**
+     * Host hook: outbox events appended ATOMICALLY with this exact failed
+     * attempt. This is deliberately distinct from the success hook: provider
+     * usage can be billable even when a response or agent result is unusable.
+     */
+    failureOutboxEvents?: (context: StageFailureOutboxContext) => readonly OutboxEventInput[];
     signal?: AbortSignal;
     now?: () => Date;
 }

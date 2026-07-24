@@ -88,21 +88,26 @@ export interface AgentUsageReceiptRecord {
   receipt: UsageReceipt;
 }
 
+export interface AgentReceiptOutboxContext {
+  runId: string;
+  node: CompiledPipelineNode;
+  itemId: string;
+  /** Retained for source compatibility with the original success-only hook. */
+  output?: unknown;
+  attempt: number;
+}
+
 export interface AgentReceiptLedger {
   readonly records: readonly AgentUsageReceiptRecord[];
   onReceipt(record: AgentUsageReceiptRecord): void;
-  outboxEventsFor(context: {
-    runId: string;
-    node: CompiledPipelineNode;
-    itemId: string;
-    output: unknown;
-    attempt: number;
-  }): OutboxEventInput[];
+  outboxEventsFor(context: AgentReceiptOutboxContext): OutboxEventInput[];
+  failureOutboxEventsFor(context: AgentReceiptOutboxContext): OutboxEventInput[];
 }
 
-/** The receipt→outbox bridge (identical shape to the B4 model ledger): receipts
- *  recorded during an attempt ride the SAME atomic append as the stage success;
- *  receipts whose attempt never reaches persistStageSuccess stay in `records`. */
+/**
+ * The receipt→outbox bridge (identical shape to the B4 model ledger):
+ * receipts ride the SAME atomic append as their attempt's success or failure.
+ */
 export function createAgentReceiptLedger(): AgentReceiptLedger {
   const records: AgentUsageReceiptRecord[] = [];
   const pending = new Map<string, AgentUsageReceiptRecord[]>();
@@ -112,6 +117,31 @@ export function createAgentReceiptLedger(): AgentReceiptLedger {
     nodeId: string,
     attempt: number
   ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
+  const drain = (context: AgentReceiptOutboxContext): OutboxEventInput[] => {
+    const key = keyOf(
+      context.runId,
+      context.itemId,
+      context.node.nodeId,
+      context.attempt
+    );
+    const queue = pending.get(key) ?? [];
+    pending.delete(key);
+    return queue.map((record) => ({
+      eventType: AGENT_USAGE_RECEIPT_EVENT_TYPE,
+      payload: {
+        schemaVersion: AGENT_USAGE_RECEIPT_EVENT_SCHEMA_VERSION,
+        runId: record.runId,
+        itemId: record.itemId,
+        nodeId: record.nodeId,
+        stage: record.stage,
+        attempt: record.attempt,
+        idempotencyKey: record.idempotencyKey,
+        receiptIndex: record.receiptIndex,
+        receipt: record.receipt
+      },
+      dedupeKey: `agent-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}:${record.receiptIndex}`
+    }));
+  };
   return {
     get records(): readonly AgentUsageReceiptRecord[] {
       return records.slice();
@@ -128,37 +158,8 @@ export function createAgentReceiptLedger(): AgentReceiptLedger {
       if (queue) queue.push(record);
       else pending.set(key, [record]);
     },
-    outboxEventsFor(context: {
-      runId: string;
-      node: CompiledPipelineNode;
-      itemId: string;
-      output: unknown;
-      attempt: number;
-    }): OutboxEventInput[] {
-      const key = keyOf(
-        context.runId,
-        context.itemId,
-        context.node.nodeId,
-        context.attempt
-      );
-      const queue = pending.get(key) ?? [];
-      pending.delete(key);
-      return queue.map((record) => ({
-        eventType: AGENT_USAGE_RECEIPT_EVENT_TYPE,
-        payload: {
-          schemaVersion: AGENT_USAGE_RECEIPT_EVENT_SCHEMA_VERSION,
-          runId: record.runId,
-          itemId: record.itemId,
-          nodeId: record.nodeId,
-          stage: record.stage,
-          attempt: record.attempt,
-          idempotencyKey: record.idempotencyKey,
-          receiptIndex: record.receiptIndex,
-          receipt: record.receipt
-        },
-        dedupeKey: `agent-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}:${record.receiptIndex}`
-      }));
-    }
+    outboxEventsFor: drain,
+    failureOutboxEventsFor: drain
   };
 }
 

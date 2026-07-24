@@ -40,6 +40,7 @@ import {
   ShardLeaseLostError,
   WorkLeaseLostError,
   type OutboxEventInput,
+  type PersistStageFailureInput,
   type PipelineStore,
   type StageFailureScope
 } from "../store.js";
@@ -179,6 +180,18 @@ export interface ResolvedSlotValue {
   value: unknown;
 }
 
+/** Exact failed-attempt context for transactional-outbox projection. */
+export interface StageFailureOutboxContext {
+  runId: string;
+  itemId: string;
+  node: CompiledPipelineNode;
+  attempt: number;
+  errorCode: string;
+  retryable: boolean;
+  scope: StageFailureScope;
+  terminal: boolean;
+}
+
 /**
  * Compose the invocation input from resolved slots — promoted verbatim from
  * worker/service.ts: ONE slot passes its bare value; several compose an
@@ -222,6 +235,12 @@ export interface DurableStageInput {
     runId: string;
     attempt: number;
   }) => readonly OutboxEventInput[];
+  /**
+   * Host hook: outbox events appended ATOMICALLY with this exact failed
+   * attempt. This is deliberately distinct from the success hook: provider
+   * usage can be billable even when a response or agent result is unusable.
+   */
+  failureOutboxEvents?: (context: StageFailureOutboxContext) => readonly OutboxEventInput[];
   signal?: AbortSignal;
   now?: () => Date;
 }
@@ -428,9 +447,25 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
         errorMessage: message,
         retryable: failure.retryable
       };
+      const failureOutboxEvents = input.failureOutboxEvents?.({
+        runId: input.runId,
+        itemId: input.itemId,
+        node,
+        attempt,
+        errorCode: failure.code,
+        retryable: failure.retryable,
+        scope: failure.scope,
+        terminal: scopeTerminal
+      });
+      const persistFailure = (
+        failureInput: PersistStageFailureInput
+      ): Promise<void> =>
+        failureOutboxEvents === undefined
+          ? store.persistStageFailure(failureInput)
+          : store.persistStageFailure(failureInput, failureOutboxEvents);
       if (failure.scope === "item") {
         if (scopeTerminal) {
-          await store.persistStageFailure({
+          await persistFailure({
             ...failureBase,
             scope: "item",
             terminal: true,
@@ -447,14 +482,14 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
             }
           });
         } else {
-          await store.persistStageFailure({
+          await persistFailure({
             ...failureBase,
             scope: "item",
             terminal: false
           });
         }
       } else {
-        await store.persistStageFailure({
+        await persistFailure({
           ...failureBase,
           scope: "shard",
           terminal: scopeTerminal

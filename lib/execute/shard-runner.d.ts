@@ -1,6 +1,7 @@
 import { type CompiledPipelineNode } from "../compile.js";
 import type { StageCatalog } from "../catalog.js";
 import { type OutboxEventInput, type PipelineStore } from "../store.js";
+import { type StageFailureOutboxContext } from "./durable-stage.js";
 export interface NodeInvocation {
     runId: string;
     itemId: string;
@@ -69,6 +70,12 @@ export interface ShardRunnerOptions {
         output: unknown;
         attempt: number;
     }) => readonly OutboxEventInput[];
+    /**
+     * Host hook: outbox events to append ATOMICALLY with a node's failed
+     * attempt. Provider/model/agent usage receipts belong here; success-only
+     * business events (for example a human-escalation projection) do not.
+     */
+    failureOutboxEventsFor?: (context: StageFailureOutboxContext) => readonly OutboxEventInput[];
     signal?: AbortSignal;
     /** Injectable clock (drives claim/heartbeat/finalize timestamps). */
     now?: () => Date;

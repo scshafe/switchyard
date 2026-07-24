@@ -270,7 +270,10 @@ export interface PersistedStageResult {
   created: boolean;
 }
 
-/** One transactional-outbox event, appended ATOMICALLY with the stage success. */
+/**
+ * One transactional-outbox event, appended ATOMICALLY with the stage attempt
+ * that produced it (success or failure).
+ */
 export interface OutboxEventInput {
   eventType: string;
   payload: unknown;
@@ -389,9 +392,10 @@ export interface ReleaseLeaseInput {
  * - persistStageSuccess: fenced; verifies outputDigest; appends attempt +
  *   result + outboxEvents ATOMICALLY (all or nothing — a fencing rejection
  *   appends no event), or returns created:false appending nothing.
- * - persistStageFailure: fenced; appends the failed attempt. An item-terminal
- *   failure requires its dead letter in the same atomic append; shard-scoped
- *   failures are non-terminal at the item and finalize through failShard.
+ * - persistStageFailure: fenced; appends the failed attempt + outboxEvents
+ *   ATOMICALLY. An item-terminal failure requires its dead letter in the same
+ *   atomic append; shard-scoped failures are non-terminal at the item and
+ *   finalize through failShard.
  * - recordDeadLetter: fenced; requires an existing execution whose exact
  *   latest attempt is a nonterminal item-scoped failure; append-once per
  *   idempotencyKey; created:false when the key is already dead-lettered (the
@@ -418,7 +422,7 @@ export interface PipelineStore {
 
   prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
   persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
-  persistStageFailure(input: PersistStageFailureInput): Promise<void>;
+  persistStageFailure(input: PersistStageFailureInput, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;
   recordDeadLetter(input: RecordDeadLetterInput): Promise<{ created: boolean }>;
 
   putArtifact(envelope: ArtifactEnvelope): Promise<ArtifactRef>;

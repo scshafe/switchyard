@@ -51,20 +51,24 @@ export interface AgentUsageReceiptRecord {
     receiptIndex: number;
     receipt: UsageReceipt;
 }
+export interface AgentReceiptOutboxContext {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    /** Retained for source compatibility with the original success-only hook. */
+    output?: unknown;
+    attempt: number;
+}
 export interface AgentReceiptLedger {
     readonly records: readonly AgentUsageReceiptRecord[];
     onReceipt(record: AgentUsageReceiptRecord): void;
-    outboxEventsFor(context: {
-        runId: string;
-        node: CompiledPipelineNode;
-        itemId: string;
-        output: unknown;
-        attempt: number;
-    }): OutboxEventInput[];
+    outboxEventsFor(context: AgentReceiptOutboxContext): OutboxEventInput[];
+    failureOutboxEventsFor(context: AgentReceiptOutboxContext): OutboxEventInput[];
 }
-/** The receipt→outbox bridge (identical shape to the B4 model ledger): receipts
- *  recorded during an attempt ride the SAME atomic append as the stage success;
- *  receipts whose attempt never reaches persistStageSuccess stay in `records`. */
+/**
+ * The receipt→outbox bridge (identical shape to the B4 model ledger):
+ * receipts ride the SAME atomic append as their attempt's success or failure.
+ */
 export declare function createAgentReceiptLedger(): AgentReceiptLedger;
 export interface AgentNodeInvokerOptions {
     executor: AgentStepExecutor;

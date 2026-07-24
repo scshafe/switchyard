@@ -101,7 +101,8 @@ export interface GateEscalationLedger {
      * Wire as (part of) ShardRunnerOptions.outboxEventsFor: drains this
      * exact (runId, itemId, nodeId, attempt)'s pending escalations into
      * dedupe-keyed outbox events that ride ATOMICALLY with the gate node's
-     * persistStageSuccess append.
+     * persistStageSuccess append. There is intentionally no failure drain:
+     * generic escalation is a successful proven terminal, not failure telemetry.
      * Compose with the model receipt ledger's hook when a pipeline carries both
      * node kinds: `(ctx) => [...receipts.outboxEventsFor(ctx), ...gates.outboxEventsFor(ctx)]`.
      */

@@ -20,8 +20,10 @@
 //     identity checks) and the SAME receipt floor: every completed call MUST
 //     yield a valid usage-receipt.v1 (validateUsageReceipt; missing/malformed/
 //     silent-zero ⇒ TERMINAL) reported through onReceipt with `gateStepId`
-//     set, so the B4 receipt ledger persists gate-step receipts through the
-//     same transactional outbox;
+//     set, so the B4 receipt ledger persists gate-step receipts with the exact
+//     successful OR failed gate attempt through the same transactional outbox.
+//     Generic human-escalation events remain success-only because escalation
+//     is itself a successful proven terminal, never failure telemetry;
 //   - every step yields { outcome, output }: the outcome must be one of the
 //     step's declared outcome codes and the output must satisfy the step's
 //     outputContract (the injected ContractValidator) — then the compiled
@@ -159,7 +161,8 @@ export interface GateEscalationLedger {
    * Wire as (part of) ShardRunnerOptions.outboxEventsFor: drains this
    * exact (runId, itemId, nodeId, attempt)'s pending escalations into
    * dedupe-keyed outbox events that ride ATOMICALLY with the gate node's
-   * persistStageSuccess append.
+   * persistStageSuccess append. There is intentionally no failure drain:
+   * generic escalation is a successful proven terminal, not failure telemetry.
    * Compose with the model receipt ledger's hook when a pipeline carries both
    * node kinds: `(ctx) => [...receipts.outboxEventsFor(ctx), ...gates.outboxEventsFor(ctx)]`.
    */

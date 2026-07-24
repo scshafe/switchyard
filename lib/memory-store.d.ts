@@ -49,7 +49,7 @@ export declare class MemoryPipelineStore implements PipelineStore {
     failShard(input: FailShardInput): Promise<void>;
     prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
     persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
-    persistStageFailure(input: PersistStageFailureInput): Promise<void>;
+    persistStageFailure(input: PersistStageFailureInput, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;
     recordDeadLetter(input: RecordDeadLetterInput): Promise<{
         created: boolean;
     }>;

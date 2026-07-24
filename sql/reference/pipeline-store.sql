@@ -136,10 +136,12 @@ CREATE TABLE executions (
 
 -- Append-only. One row per persisted attempt (persistStageSuccess appends a
 -- 'succeeded' row atomically with the result; persistStageFailure appends a
--- 'failed' row). failure_scope preserves whether the failure belongs to the
--- item or the shard. terminal = true means terminal WITHIN that scope: an item
--- terminal requires its dead letter in the same transaction, while a shard
--- terminal is surfaced back to failShard and never creates an item dead letter.
+-- 'failed' row). Either append may carry transactional-outbox rows produced by
+-- that exact attempt. failure_scope preserves whether the failure belongs to
+-- the item or the shard. terminal = true means terminal WITHIN that scope: an
+-- item terminal requires its dead letter in the same transaction, while a
+-- shard terminal is surfaced back to failShard and never creates an item dead
+-- letter.
 CREATE TABLE attempts (
   execution_id   uuid        NOT NULL REFERENCES executions(execution_id),
   attempt_number integer     NOT NULL CHECK (attempt_number >= 1),
@@ -210,10 +212,11 @@ CREATE TABLE dead_letters (
   FOREIGN KEY (run_id, item_id) REFERENCES run_items(run_id, item_id)
 );
 
--- ── Transactional outbox (persistStageSuccess's outboxEvents parameter) ─────
--- Append-only. Rows are inserted IN THE SAME TRANSACTION as the results row —
--- the atomicity the port guarantees; host relays consume and acknowledge
--- elsewhere (consumption state is the host's, never a mutation of this table).
+-- ── Transactional outbox (both stage-persist methods' outboxEvents) ──────────
+-- Append-only. Rows are inserted IN THE SAME TRANSACTION as the success result
+-- OR failed attempt (+ item-terminal dead letter when applicable) — the
+-- atomicity the port guarantees. Host relays consume and acknowledge elsewhere
+-- (consumption state is the host's, never a mutation of this table).
 CREATE TABLE outbox_events (
   outbox_event_id uuid        NOT NULL PRIMARY KEY,
   run_id          text        NOT NULL,

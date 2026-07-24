@@ -84,8 +84,9 @@ B4 ships the model node kind + prompt module:
   prompt-identity check, optional inference-concurrency leases, and THE
   RECEIPT FLOOR — every completed call must return a valid receipt or the item
   fails TERMINAL (closing the inbox classification silent-zero gap at
-  framework level); `createModelReceiptLedger` rides success receipts through
-  the transactional outbox.
+  framework level); `createModelReceiptLedger` rides every admitted receipt
+  through the transactional outbox with its exact successful or failed
+  attempt.
 
 Planned next (same STANDALONE rule): `decision`/gate executor (B5) · `agent`
 step port (B6).
