@@ -217,6 +217,45 @@ export type ShardRunOutcome =
   | { status: "cancelled"; runId: string; shardId: string; reasonCode: string }
   | { status: "failed"; runId: string; shardId: string; retryable: boolean; errorCode: string };
 
+async function settleShardControl(
+  error: unknown,
+  claim: ShardClaim,
+  store: PipelineStore,
+  now: () => Date
+): Promise<ShardRunOutcome | undefined> {
+  if (error instanceof PipelineShardDeferredError) {
+    // A control outcome is true only after its fenced durable settlement.
+    // Lost fences therefore propagate instead of manufacturing audit truth.
+    await store.deferShard({
+      shardId: claim.shardId,
+      leaseToken: claim.leaseToken,
+      reasonCode: error.reasonCode,
+      at: now().toISOString()
+    });
+    return {
+      status: "deferred",
+      runId: claim.runId,
+      shardId: claim.shardId,
+      reasonCode: error.reasonCode
+    };
+  }
+  if (error instanceof PipelineShardCancelledError) {
+    await store.cancelShard({
+      shardId: claim.shardId,
+      leaseToken: claim.leaseToken,
+      reasonCode: error.reasonCode,
+      at: now().toISOString()
+    });
+    return {
+      status: "cancelled",
+      runId: claim.runId,
+      shardId: claim.shardId,
+      reasonCode: error.reasonCode
+    };
+  }
+  return undefined;
+}
+
 /**
  * Claim and process AT MOST ONE shard (idle when nothing is claimable).
  * Per-item failure isolation: a terminal item breaks out of ITS node loop
@@ -254,40 +293,13 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
   try {
     return await processClaim(claim, { ...options, leaseDurationMs, heartbeatEveryMs, maxAttempts, now });
   } catch (error) {
-    if (error instanceof PipelineShardDeferredError) {
-      // Unlike failure finalization below, control settlement must not swallow
-      // a lost fence: returning "deferred" without its durable outcome would
-      // claim an audit fact that was never appended.
-      await options.store.deferShard({
-        shardId: claim.shardId,
-        leaseToken: claim.leaseToken,
-        reasonCode: error.reasonCode,
-        at: now().toISOString()
-      });
-      return {
-        status: "deferred",
-        runId: claim.runId,
-        shardId: claim.shardId,
-        reasonCode: error.reasonCode
-      };
-    }
-    if (error instanceof PipelineShardCancelledError) {
-      // Cancellation is only true after the fenced conclusive outcome lands.
-      // Propagate a lost fence so callers cannot mistake an uncommitted
-      // cancellation for durable truth.
-      await options.store.cancelShard({
-        shardId: claim.shardId,
-        leaseToken: claim.leaseToken,
-        reasonCode: error.reasonCode,
-        at: now().toISOString()
-      });
-      return {
-        status: "cancelled",
-        runId: claim.runId,
-        shardId: claim.shardId,
-        reasonCode: error.reasonCode
-      };
-    }
+    const controlOutcome = await settleShardControl(
+      error,
+      claim,
+      options.store,
+      now
+    );
+    if (controlOutcome) return controlOutcome;
     const failure = classifyStageFailure(error);
     try {
       await options.store.failShard({
@@ -300,7 +312,20 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
     } catch (finishError) {
       // Promoted: a lost lease during failure finalization is swallowed —
       // the new claimant owns the shard now.
-      if (!(finishError instanceof ShardLeaseLostError)) throw finishError;
+      if (!(finishError instanceof ShardLeaseLostError)) {
+        // A host may discover authoritative defer/cancel state only while
+        // revalidating inside failShard's settlement transaction. Route that
+        // late control through the same fenced settlement instead of appending
+        // or reporting a false shard failure.
+        const lateControlOutcome = await settleShardControl(
+          finishError,
+          claim,
+          options.store,
+          now
+        );
+        if (lateControlOutcome) return lateControlOutcome;
+        throw finishError;
+      }
     }
     return { status: "failed", runId: claim.runId, shardId: claim.shardId, retryable: failure.retryable, errorCode: failure.code };
   }
