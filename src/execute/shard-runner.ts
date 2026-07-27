@@ -128,14 +128,28 @@ export async function runWithShardHeartbeat<T>(input: {
       });
   }, input.everyMs);
   timer.unref();
+  let operationOutcome!:
+    | { ok: true; value: T }
+    | { ok: false; error: unknown };
   try {
-    const result = await input.operation();
-    if (heartbeatInFlight) await heartbeatInFlight;
-    if (heartbeatError !== undefined) throw heartbeatError;
-    return result;
+    operationOutcome = {
+      ok: true,
+      value: await input.operation()
+    };
+  } catch (error) {
+    operationOutcome = { ok: false, error };
   } finally {
     clearInterval(timer);
+    // Snapshot then join the last single-flight heartbeat. Its catch handler
+    // records the authoritative lease/control error and resolves this promise.
+    const finalHeartbeat = heartbeatInFlight;
+    if (finalHeartbeat) await finalHeartbeat;
   }
+  // Heartbeat authority wins even when the operation also rejected. Otherwise
+  // a concurrent supersession/cancel could be misreported as defer/failure.
+  if (heartbeatError !== undefined) throw heartbeatError;
+  if (!operationOutcome.ok) throw operationOutcome.error;
+  return operationOutcome.value;
 }
 
 // ── The one-shot shard runner ─────────────────────────────────────────────
