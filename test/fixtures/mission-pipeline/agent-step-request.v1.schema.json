@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-pipeline.local/agent/agent-step-request.v1.schema.json",
+  "title": "AgentStepRequest v1",
+  "description": "The frozen contract mission-pipeline hands an AgentStepExecutor to run one kind:\"agent\" node. mission-pipeline OWNS this contract (design critique finding 3); the EAL ships the single adapter that maps it onto a TurnExecutor and asserts the required `environment` is a subset of what the bound environment grants. The `environment` field carries the descriptor the step REQUIRES (an environment-descriptor.v1 value); mission-pipeline never interprets its capabilities — it is a data carrier here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "stage", "environment", "brief", "idempotencyKey", "deadlineMs"],
+  "properties": {
+    "schemaVersion": { "const": "agent-step-request.v1" },
+    "stage": { "$ref": "#/$defs/stageRef" },
+    "environment": {
+      "description": "The environment-descriptor.v1 the step requires. Validated structurally as a descriptor; capability semantics are the EAL adapter's concern.",
+      "type": "object"
+    },
+    "brief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instructions", "inputArtifacts", "outputContract"],
+      "properties": {
+        "instructions": { "type": "string", "minLength": 1, "maxLength": 100000 },
+        "inputArtifacts": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/artifactRef" }
+        },
+        "outputContract": { "$ref": "#/$defs/contractId" }
+      }
+    },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxTokens": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "maxCostMicroUsd": { "type": "integer", "minimum": 0, "maximum": 100000000000 },
+        "maxElapsedMs": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+      }
+    },
+    "deadlineMs": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "contractId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-z0-9][a-z0-9._-]*\\.v[1-9][0-9]*$"
+    },
+    "stageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stageId", "version"],
+      "properties": {
+        "stageId": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[a-z0-9][a-z0-9._:-]*$" },
+        "version": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractId", "digest"],
+      "properties": {
+        "contractId": { "$ref": "#/$defs/contractId" },
+        "digest": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    }
+  }
+}

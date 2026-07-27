@@ -9,9 +9,9 @@
 // mission-swarm owns a "decision ledger"); B6 adds the agent-step contract +
 // executor port + agent node invoker.
 //
-// STANDALONE RULE (import-boundary tests D+E): this package imports node:
-// builtins + its own relative files ONLY — never mc-* workspace packages, never
-// zod, never any npm dep. Other codebases consume it alone via file:/link:.
+// STANDALONE RULE: this package imports node: builtins + its own relative files
+// ONLY — never mc-* packages, never zod, never any production npm dependency.
+// Other codebases consume an independently versioned release.
 
 export * from "./contracts/digest.js";
 export * from "./contracts/artifact.js";

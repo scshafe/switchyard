@@ -1,7 +1,7 @@
 # mission-pipeline
 
 The static compiled-DAG pipeline engine, promoted from the `inbox-pipeline` repo
-into a standalone Mission Control workspace package: pipelines are a CLOSED
+into an independently versioned package: pipelines are a CLOSED
 catalog of digest-sealed, content-addressed definitions compiled to a static DAG
 and executed node-by-node — there is deliberately NO DSL, no dynamic stage
 loading, and no runtime mutation of a published definition. Every contract
@@ -9,17 +9,16 @@ artifact (definitions, bindings, node inputs/outputs) is addressed by the
 canonical-JSON SHA-256 rule shared with the frozen `execution-contracts`
 package, so digests are byte-identical across repos.
 
-**STANDALONE constraint** (enforced by `test/import-boundary.test.mjs`, tests
-D+E): this package imports `node:` builtins and its own relative files ONLY —
-never `mc-*` workspace packages, never `zod`, never any npm dependency. Other
-codebases consume it ALONE via `file:`/`link:` deps (`mc-error-client` is the
-precedent). The frozen JSON Schemas it speaks are MIRRORED under `schemas/`
-(pin-tested byte-for-byte against `test/fixtures/mission-pipeline/`), never
-imported.
+**STANDALONE constraint** (enforced by `test/import-boundary.test.mjs`): this
+package imports `node:` builtins and its own relative files ONLY — never
+`mc-*` packages, never `zod`, and never any production npm dependency.
+Consumers install a versioned release of this repository. The frozen JSON
+Schemas it speaks are MIRRORED under `schemas/` (pin-tested byte-for-byte
+against `test/fixtures/mission-pipeline/`), never imported.
 
 ## Module map
 
-B1 (this increment) ships the contracts core:
+B1 ships the contracts core:
 
 - `src/contracts/digest.ts` — canonical-JSON serialization + SHA-256 digests
   (`canonicalJson` / `digest` / `rawBodyDigest`), ported byte-identically in
@@ -91,5 +90,39 @@ B4 ships the model node kind + prompt module:
   through the transactional outbox with its exact successful or failed
   attempt.
 
-Planned next (same STANDALONE rule): `decision`/gate executor (B5) · `agent`
-step port (B6).
+B5 ships the decision/gate executor:
+
+- `src/gate/contracts.ts` — digest-sealed goal, objective, validity, budget,
+  flow, transition, and step-outcome contracts.
+- `src/gate/compiler.ts` — static decision-flow compilation with cycle,
+  terminal-exhaustiveness, escalation-monotonicity, and budget proofs.
+- `src/gate/certificate.ts` — recomputed termination certificates.
+- `src/gate/executor.ts` — closed-registry gate execution, model receipt
+  enforcement, and deduplicated human-escalation evidence.
+
+B6 ships the frozen agent-step contract and executor port:
+
+- `src/agent/step.ts` — strict request/result validation against the frozen
+  agent-step schema mirrors.
+- `src/agent/executor-port.ts` — the agent node invoker, output-contract
+  coupling, deadline/status routing, and transactional usage-receipt ledger.
+- `src/agent/fake-executor.ts` — a deterministic hermetic test executor.
+
+## Development
+
+Use the Node version pinned in `.node-version`.
+
+```sh
+npm ci
+npm run check
+```
+
+`npm run check` rebuilds the committed `lib/` artifacts, runs the independent
+contract, model, durable-execution, gate, agent, and import-boundary suites,
+then verifies the package payload with `npm pack --dry-run`.
+
+## History
+
+This repository was extracted with package-level history from
+`packages/mission-pipeline` in Mission Control through source commit
+`74081469646d8d50f1e5922e28f818a4330306fb`.

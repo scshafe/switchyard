@@ -1,0 +1,95 @@
+{
+  "generatedBy": "RUNNING inbox-pipeline's hash implementation (dist/src/hash.js, byte-equal to src/hash.ts) — see the pipeline B1 commit",
+  "source": "inbox-pipeline/src/hash.ts (canonicalJson / digest / rawBodyDigest)",
+  "note": "inputJson is RAW JSON text: parse it (preserves authored key order and -0), run the port, and byte-compare canonical + digest. rawBodyVectors exercise the raw-bytes (no JSON quoting) rule.",
+  "vectors": [
+    {
+      "name": "empty-object",
+      "inputJson": "{}",
+      "canonical": "{}",
+      "digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "empty-string",
+      "inputJson": "\"\"",
+      "canonical": "\"\"",
+      "digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+    },
+    {
+      "name": "empty-array",
+      "inputJson": "[]",
+      "canonical": "[]",
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "null",
+      "inputJson": "null",
+      "canonical": "null",
+      "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "nested-objects",
+      "inputJson": "{\"b\":1,\"a\":{\"d\":[2,{\"y\":true,\"x\":false}],\"c\":3}}",
+      "canonical": "{\"a\":{\"c\":3,\"d\":[2,{\"x\":false,\"y\":true}]},\"b\":1}",
+      "digest": "bc11048f78bf9942824ad7d10ee5b413e208847d2c43d15ba32c990841b1259c"
+    },
+    {
+      "name": "nested-objects-permuted",
+      "inputJson": "{\"a\":{\"c\":3,\"d\":[2,{\"x\":false,\"y\":true}]},\"b\":1}",
+      "canonical": "{\"a\":{\"c\":3,\"d\":[2,{\"x\":false,\"y\":true}]},\"b\":1}",
+      "digest": "bc11048f78bf9942824ad7d10ee5b413e208847d2c43d15ba32c990841b1259c"
+    },
+    {
+      "name": "punctuation-case-keys",
+      "inputJson": "{\"a-b\":1,\"a_b\":2,\"a.b\":3,\"a:b\":4,\"A\":5,\"a\":6,\"a0\":7,\"aA\":8,\"Z\":9,\"z\":10}",
+      "canonical": "{\"A\":5,\"Z\":9,\"a\":6,\"a-b\":1,\"a.b\":3,\"a0\":7,\"a:b\":4,\"aA\":8,\"a_b\":2,\"z\":10}",
+      "digest": "7dc2b7b3db0d538394591657eec8d6299632f68169b5bcd9a4e217160c7d7eba"
+    },
+    {
+      "name": "unicode",
+      "inputJson": "{\"é\":\"naïve ☃ 日本語\",\"emoji\":\"👍🏽\",\"währung\":\"€\"}",
+      "canonical": "{\"emoji\":\"👍🏽\",\"währung\":\"€\",\"é\":\"naïve ☃ 日本語\"}",
+      "digest": "7569ec0c0d58a1c7f9d2e7ac1d163bd59b64d7ad63a48ea4b00ad86f50ac20e8"
+    },
+    {
+      "name": "numbers-edge",
+      "inputJson": "[-0,0,1e21,-1e21,1e-7,9007199254740991,-9007199254740991,0.1,2.5e-10]",
+      "canonical": "[0,0,1e+21,-1e+21,1e-7,9007199254740991,-9007199254740991,0.1,2.5e-10]",
+      "digest": "6fa3bb39e4f54eca1f9bbd657077c01c9d4cb48016c523fce19811ecea19c9ac"
+    },
+    {
+      "name": "string-escapes",
+      "inputJson": "\"line\\nbreak\\ttab \\\"quote\\\" back\\\\slash nul\\u0000 esc\\u001b us\\u001f end\"",
+      "canonical": "\"line\\nbreak\\ttab \\\"quote\\\" back\\\\slash nul\\u0000 esc\\u001b us\\u001f end\"",
+      "digest": "dac5afe66720f491728900c37fd81eae1d61aa881b81b499f571d28c69768132"
+    },
+    {
+      "name": "mixed-deep",
+      "inputJson": "{\"items\":[{\"id\":\"a.v1\",\"ok\":true,\"n\":null},{\"id\":\"b.v2\",\"ok\":false,\"n\":0.5}],\"meta\":{\"tags\":[\"x\",\"y\"],\"empty\":{},\"list\":[]}}",
+      "canonical": "{\"items\":[{\"id\":\"a.v1\",\"n\":null,\"ok\":true},{\"id\":\"b.v2\",\"n\":0.5,\"ok\":false}],\"meta\":{\"empty\":{},\"list\":[],\"tags\":[\"x\",\"y\"]}}",
+      "digest": "2912f2b13578db8c1402af9f05207e85d73dbe71dcab0a0721fd086c68491f28"
+    }
+  ],
+  "rawBodyVectors": [
+    {
+      "name": "empty",
+      "input": "",
+      "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "ascii",
+      "input": "hello world",
+      "digest": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    },
+    {
+      "name": "unicode",
+      "input": "naïve ☃ 👍🏽 日本語",
+      "digest": "728b7bf470d055ecb3bb2be233b21e597d444ecc3ff27a2ed637fd8135482faf"
+    },
+    {
+      "name": "multiline-quoted",
+      "input": "line one\nline \"two\"\t\\backslash\n",
+      "digest": "3c68d92cc43528610011f64f3d77a6e3624aa36a70eb48d05f5c392a6875986b"
+    }
+  ]
+}
