@@ -1,6 +1,6 @@
 import { type ArtifactEnvelope, type ArtifactRef } from "./contracts/artifact.js";
 import { type PipelineDefinition } from "./definition.js";
-import { type AcquireLeaseInput, type ClaimNextShardInput, type CompleteShardInput, type CreateRunInput, type DeadLetterInput, type FailShardInput, type HeartbeatLeaseInput, type HeartbeatShardInput, type OutboxEventInput, type PersistStageFailureInput, type PersistStageSuccessInput, type PersistedStageResult, type PipelineStore, type PrepareStageExecutionInput, type RecordDeadLetterInput, type ShardClaim, type StageFailureScope, type ShardFinalization, type StagePreparation, type ReleaseLeaseInput, type WorkLease } from "./store.js";
+import { type AcquireLeaseInput, type ClaimNextShardInput, type CompleteShardInput, type CancelShardInput, type CreateRunInput, type DeadLetterInput, type DeferShardInput, type FailShardInput, type HeartbeatLeaseInput, type HeartbeatShardInput, type OutboxEventInput, type PersistStageFailureInput, type PersistStageSuccessInput, type PersistedStageResult, type PipelineStore, type PrepareStageExecutionInput, type RecordDeadLetterInput, type ShardClaim, type StageFailureScope, type ShardFinalization, type StagePreparation, type ReleaseLeaseInput, type WorkLease } from "./store.js";
 interface LeaseRow {
     leaseOwner: string;
     leaseToken: string;
@@ -47,6 +47,8 @@ export declare class MemoryPipelineStore implements PipelineStore {
     heartbeatShard(input: HeartbeatShardInput): Promise<void>;
     completeShard(input: CompleteShardInput): Promise<ShardFinalization>;
     failShard(input: FailShardInput): Promise<void>;
+    deferShard(input: DeferShardInput): Promise<void>;
+    cancelShard(input: CancelShardInput): Promise<void>;
     prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
     persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
     persistStageFailure(input: PersistStageFailureInput, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;

@@ -92,24 +92,30 @@ CREATE TABLE shard_members (
   FOREIGN KEY (run_id, item_id) REFERENCES run_items(run_id, item_id)
 );
 
--- Append-only OUTCOME EVENT LOG (completeShard / failShard). A shard is
+-- Append-only OUTCOME EVENT LOG
+-- (completeShard / failShard / deferShard / cancelShard). A shard is
 -- claimable while it has no CONCLUSIVE outcome: 'completed', 'partial', or a
--- 'failed' row with retryable = false. Retryable failures append an audit row
--- and return the shard to the pool. Counts must cover the shard exactly
+-- 'failed' row with retryable = false, or 'cancelled'. Retryable failures and
+-- deferred outcomes append an audit row and return the shard to the pool.
+-- Deferral/cancellation are explicitly NOT stage/shard failures and therefore
+-- carry a reason_code instead of error/retry evidence. Counts must cover the shard exactly
 -- (completed_item_count + terminal_item_count = item_count) and
 -- status 'completed' iff terminal_item_count = 0.
 CREATE TABLE shard_outcomes (
   shard_outcome_id     uuid        NOT NULL PRIMARY KEY,
   shard_id             text        NOT NULL REFERENCES shards(shard_id),
-  status               text        NOT NULL CHECK (status IN ('completed', 'partial', 'failed')),
+  status               text        NOT NULL CHECK (status IN ('completed', 'partial', 'failed', 'deferred', 'cancelled')),
   retryable            boolean,                        -- failed rows only
   error_code           text,                           -- failed rows only
+  reason_code          text,                           -- deferred/cancelled rows only
   item_count           integer,                        -- completed/partial rows only
   completed_item_count integer,
   terminal_item_count  integer,
   recorded_at          timestamptz NOT NULL,
   CHECK ((status = 'failed') = (retryable IS NOT NULL AND error_code IS NOT NULL)),
-  CHECK ((status <> 'failed') = (item_count IS NOT NULL)),
+  CHECK ((status IN ('deferred', 'cancelled')) = (reason_code IS NOT NULL)),
+  CHECK (reason_code IS NULL OR reason_code ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$'),
+  CHECK ((status IN ('completed', 'partial')) = (item_count IS NOT NULL)),
   CHECK (item_count IS NULL OR completed_item_count + terminal_item_count = item_count),
   CHECK (status <> 'completed' OR terminal_item_count = 0),
   CHECK (status <> 'partial' OR terminal_item_count >= 1)

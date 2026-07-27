@@ -46,6 +46,10 @@ import {
   type ResolvedSlotValue,
   type StageFailureOutboxContext
 } from "./durable-stage.js";
+import {
+  PipelineShardCancelledError,
+  PipelineShardDeferredError
+} from "./control.js";
 
 // ── NodeInvoker: the non-code execution port (B4/B5/B6 implement it) ──────
 
@@ -64,7 +68,9 @@ export interface NodeInvocation {
  * owns idempotency, retries, dead letters, and contract validation around
  * every call — an invoker only performs ONE attempt and returns the raw
  * output (B4: model binding resolution + usage receipts; B5: gate decision
- * flows; B6: agent steps).
+ * flows; B6: agent steps). A control outcome may bypass that outer attempt
+ * only before any unrecorded side effect/usage; independently durable and
+ * idempotent inner work is safe, but at_most_once effects are not replayable.
  */
 export interface NodeInvoker {
   invoke(invocation: NodeInvocation): Promise<unknown>;
@@ -193,6 +199,8 @@ export type ShardRunOutcome =
       stageExecutionCount: number;
       reusedStageCount: number;
     }
+  | { status: "deferred"; runId: string; shardId: string; reasonCode: string }
+  | { status: "cancelled"; runId: string; shardId: string; reasonCode: string }
   | { status: "failed"; runId: string; shardId: string; retryable: boolean; errorCode: string };
 
 /**
@@ -232,6 +240,40 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
   try {
     return await processClaim(claim, { ...options, leaseDurationMs, heartbeatEveryMs, maxAttempts, now });
   } catch (error) {
+    if (error instanceof PipelineShardDeferredError) {
+      // Unlike failure finalization below, control settlement must not swallow
+      // a lost fence: returning "deferred" without its durable outcome would
+      // claim an audit fact that was never appended.
+      await options.store.deferShard({
+        shardId: claim.shardId,
+        leaseToken: claim.leaseToken,
+        reasonCode: error.reasonCode,
+        at: now().toISOString()
+      });
+      return {
+        status: "deferred",
+        runId: claim.runId,
+        shardId: claim.shardId,
+        reasonCode: error.reasonCode
+      };
+    }
+    if (error instanceof PipelineShardCancelledError) {
+      // Cancellation is only true after the fenced conclusive outcome lands.
+      // Propagate a lost fence so callers cannot mistake an uncommitted
+      // cancellation for durable truth.
+      await options.store.cancelShard({
+        shardId: claim.shardId,
+        leaseToken: claim.leaseToken,
+        reasonCode: error.reasonCode,
+        at: now().toISOString()
+      });
+      return {
+        status: "cancelled",
+        runId: claim.runId,
+        shardId: claim.shardId,
+        reasonCode: error.reasonCode
+      };
+    }
     const failure = classifyStageFailure(error);
     try {
       await options.store.failShard({

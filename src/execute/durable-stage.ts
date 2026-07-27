@@ -44,6 +44,7 @@ import {
   type PipelineStore,
   type StageFailureScope
 } from "../store.js";
+import { isPipelineShardControlError } from "./control.js";
 
 export type { StageFailureScope } from "../store.js";
 
@@ -424,8 +425,12 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
       output = validated.value;
     } catch (error) {
       // 6. Failure routing (promoted terminal rule + taxonomy).
-      if (error instanceof ShardLeaseLostError || error instanceof WorkLeaseLostError) {
-        throw error; // the claim is dead — nothing may be appended under it
+      if (
+        error instanceof ShardLeaseLostError
+        || error instanceof WorkLeaseLostError
+        || isPipelineShardControlError(error)
+      ) {
+        throw error; // no failed-attempt evidence may be appended for these signals
       }
       const failure = classifyStageFailure(error);
       const budgetExhausted = attempt >= maxAttempts;

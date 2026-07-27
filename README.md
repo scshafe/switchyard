@@ -41,7 +41,7 @@ B3 ships durable execution:
 
 - `src/store.ts` — the host-neutral `PipelineStore` port (definition
   publish/load; createRun; leaseToken-fenced shard claim/heartbeat/complete/
-  fail; idempotency-key stage reservation; atomic transactional-outbox
+  fail/defer/cancel; idempotency-key stage reservation; atomic transactional-outbox
   persistence; shard-fenced standalone dead-letter recording; content-addressed
   artifacts; auxiliary work leases). The append-only invariant lives in its
   doc comments: only leases mutate.
@@ -51,6 +51,9 @@ B3 ships durable execution:
   digest of {runId,itemId,stageId,version,fingerprint,inputDigest}; cached
   reuse; bounded retries; dead-letter exactly once; retryable-vs-terminal
   taxonomy) promoted from inbox durable-executor.ts + worker/service.ts.
+- `src/execute/control.ts` — typed non-failure shard control outcomes:
+  transient host-authority contention defers/requeues without an attempt, while
+  obsolete work is conclusively cancelled without fabricated failure evidence.
 - `src/execute/shard-runner.ts` — claim ONE shard, run the compiled nodes in
   order per item with per-item failure isolation, heartbeat, finalize,
   release; `NodeInvoker` port (+ fake) for model/agent/gate kinds (B4/B5/B6).

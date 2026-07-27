@@ -105,6 +105,30 @@ export interface FailShardInput {
     errorCode: string;
     at?: string;
 }
+export interface DeferShardInput {
+    shardId: string;
+    leaseToken: string;
+    /**
+     * Stable host reason for yielding the claim. Deferral appends coordination
+     * evidence and returns the shard to the claimable pool; it is NOT a failed
+     * stage attempt and consumes no stage retry budget. Must match
+     * `[A-Za-z0-9][A-Za-z0-9._:-]{0,199}`.
+     */
+    reasonCode: string;
+    at?: string;
+}
+export interface CancelShardInput {
+    shardId: string;
+    leaseToken: string;
+    /**
+     * Stable host reason why the claimed work became obsolete. Cancellation is
+     * conclusive, but it is NOT a stage/shard failure (source supersession is
+     * the canonical use). Must match
+     * `[A-Za-z0-9][A-Za-z0-9._:-]{0,199}`.
+     */
+    reasonCode: string;
+    at?: string;
+}
 /**
  * The append-only finalization record (promoted from inbox
  * pipeline-shard-finalization.v1): counts must cover the whole shard, and
@@ -309,11 +333,15 @@ export interface ReleaseLeaseInput {
  *   claimable while it has NO conclusive finalization (completed | partial |
  *   failed non-retryable) and no live lease; an EXPIRED lease is silently
  *   replaced (crash reclaim) — the fence, not the claim, protects evidence.
- * - heartbeatShard/completeShard/failShard: fenced (ShardLeaseLostError).
+ * - heartbeatShard/completeShard/failShard/deferShard/cancelShard: fenced
+ *   (ShardLeaseLostError).
  *   completeShard derives the finalization from persisted evidence
  *   (terminal items vs completed items), appends it once, and releases the
  *   lease; it REQUIRES every member item resolved (all nodes succeeded, or
  *   item terminalized) and rejects premature finalization loudly.
+ *   deferShard appends a non-failure yield/requeue outcome and releases the
+ *   lease without consuming a stage attempt. cancelShard appends a conclusive
+ *   non-failure cancellation and releases the lease.
  * - prepareStageExecution: fenced idempotency-key reservation + cached-result
  *   lookup (see StagePreparation).
  * - persistStageSuccess: fenced; verifies outputDigest; appends attempt +
@@ -344,6 +372,8 @@ export interface PipelineStore {
     heartbeatShard(input: HeartbeatShardInput): Promise<void>;
     completeShard(input: CompleteShardInput): Promise<ShardFinalization>;
     failShard(input: FailShardInput): Promise<void>;
+    deferShard(input: DeferShardInput): Promise<void>;
+    cancelShard(input: CancelShardInput): Promise<void>;
     prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
     persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
     persistStageFailure(input: PersistStageFailureInput, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;

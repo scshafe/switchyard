@@ -22,6 +22,7 @@ export * from "./catalog.js";
 export * from "./compile.js";
 export * from "./store.js";
 export * from "./memory-store.js";
+export * from "./execute/control.js";
 export * from "./execute/durable-stage.js";
 export * from "./execute/shard-runner.js";
 export * from "./prompt/contracts.js";
