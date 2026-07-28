@@ -3,22 +3,24 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version-file: .node-version
+          node-version: 22.22.0
           cache: npm
       - run: npm ci
-      - run: npm run check
+      - run: npm run verify

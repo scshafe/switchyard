@@ -1,6 +1,6 @@
 {
   "name": "mission-pipeline",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standalone, dependency-free, digest-sealed compiled-DAG pipeline engine for Mission Control projects.",
   "type": "module",
   "license": "MIT",
@@ -21,8 +21,9 @@
     "pipeline"
   ],
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.22.0 <23"
   },
+  "packageManager": "npm@10.9.4",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
@@ -43,11 +44,14 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf lib",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "check": "npm run test && npm run pack:check",
-    "pack:check": "npm pack --dry-run --json",
-    "prepublishOnly": "npm run check"
+    "clean": "node scripts/clean.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:payload": "node scripts/check-package-payload.mjs",
+    "test:install": "node scripts/check-pack-install.mjs",
+    "check": "npm run build && npm run test && npm run test:payload && npm run test:install",
+    "verify": "npm run clean && npm run check && git diff --exit-code -- lib",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

@@ -114,12 +114,14 @@ Use the Node version pinned in `.node-version`.
 
 ```sh
 npm ci
-npm run check
+npm run verify
 ```
 
-`npm run check` rebuilds the committed `lib/` artifacts, runs the independent
-contract, model, durable-execution, gate, agent, and import-boundary suites,
-then verifies the package payload with `npm pack --dry-run`.
+`npm run verify` removes and rebuilds the committed `lib/` artifacts, runs the
+independent contract, model, durable-execution, gate, agent, and import-boundary
+suites, proves that the tracked build is reproducible, checks the exact package
+payload, and installs the resulting tarball into a fresh consumer for a runtime
+export smoke test.
 
 ## History
 
