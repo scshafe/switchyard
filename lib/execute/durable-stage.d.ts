@@ -2,7 +2,7 @@ import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import type { StageContext } from "../node.js";
-import { type OutboxEventInput, type PipelineStore, type StageFailureScope } from "../store.js";
+import { type BoundPipelineEvidenceStore, type OutboxEventInput, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
 export type { StageFailureScope } from "../store.js";
 /** Multi-slot composed inputs are prepared under this promoted marker contract. */
 export declare const COMPOSITE_INPUT_CONTRACT: ContractId;
@@ -88,7 +88,8 @@ export declare function composeStageInput(slots: readonly ResolvedSlotValue[]): 
     inputContract: ContractId;
 };
 export interface DurableStageInput {
-    store: PipelineStore;
+    /** Evidence-only port; lease lifecycle authority is deliberately absent. */
+    store: PipelineStageEvidenceStore;
     /** The injected payload-validation port (usually catalog.contracts). */
     contracts: ContractValidator;
     /** Fencing pair from the shard claim. */
@@ -166,3 +167,21 @@ export type DurableStageResult = {
  *    failure to conclusive when its stage-attempt budget is exhausted.
  */
 export declare function executeDurableStage(input: DurableStageInput): Promise<DurableStageResult>;
+/**
+ * The externally fenced form of {@link DurableStageInput}. `fence` is an
+ * opaque host value: Mission Pipeline passes the exact value to every evidence
+ * operation without inspecting or retaining it. The supplied store has no
+ * lease lifecycle methods.
+ */
+export interface BoundDurableStageInput<TFence> extends Omit<DurableStageInput, "store" | "shardId" | "leaseToken"> {
+    evidenceStore: BoundPipelineEvidenceStore<TFence>;
+    fence: TFence;
+}
+/**
+ * Execute one durable stage under a host-owned fence.
+ *
+ * This is a thin binding adapter over the established durable executor, not a
+ * second retry/idempotency implementation. The private legacy marker pair is
+ * consumed by the adapter and never reaches the host evidence store.
+ */
+export declare function executeBoundDurableStage<TFence>(input: BoundDurableStageInput<TFence>): Promise<DurableStageResult>;

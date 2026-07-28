@@ -1,6 +1,8 @@
 // execute/durable-stage.ts — the durable stage executor: idempotency-keyed,
 // cached-reusing, retry-bounded, dead-lettering execution of ONE compiled node
-// for ONE run item, fenced through the PipelineStore port.
+// for ONE run item, fenced through an evidence-only store port. The legacy
+// entry accepts Pipeline's shard-token pair; executeBoundDurableStage passes
+// through a host-owned opaque fence without lease lifecycle authority.
 //
 // PROMOTED from inbox-pipeline/src/durable-executor.ts (the idempotency-key
 // digest; cached-success reuse with reused=true; the bounded attempt loop
@@ -39,9 +41,10 @@ import type { StageContext } from "../node.js";
 import {
   ShardLeaseLostError,
   WorkLeaseLostError,
+  type BoundPipelineEvidenceStore,
   type OutboxEventInput,
   type PersistStageFailureInput,
-  type PipelineStore,
+  type PipelineStageEvidenceStore,
   type StageFailureScope
 } from "../store.js";
 import { isPipelineShardControlError } from "./control.js";
@@ -208,7 +211,8 @@ export function composeStageInput(slots: readonly ResolvedSlotValue[]): { input:
 }
 
 export interface DurableStageInput {
-  store: PipelineStore;
+  /** Evidence-only port; lease lifecycle authority is deliberately absent. */
+  store: PipelineStageEvidenceStore;
   /** The injected payload-validation port (usually catalog.contracts). */
   contracts: ContractValidator;
   /** Fencing pair from the shard claim. */
@@ -552,4 +556,63 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
       attempts: attempt
     };
   }
+}
+
+/**
+ * The externally fenced form of {@link DurableStageInput}. `fence` is an
+ * opaque host value: Mission Pipeline passes the exact value to every evidence
+ * operation without inspecting or retaining it. The supplied store has no
+ * lease lifecycle methods.
+ */
+export interface BoundDurableStageInput<TFence>
+  extends Omit<DurableStageInput, "store" | "shardId" | "leaseToken"> {
+  evidenceStore: BoundPipelineEvidenceStore<TFence>;
+  fence: TFence;
+}
+
+/**
+ * Execute one durable stage under a host-owned fence.
+ *
+ * This is a thin binding adapter over the established durable executor, not a
+ * second retry/idempotency implementation. The private legacy marker pair is
+ * consumed by the adapter and never reaches the host evidence store.
+ */
+export async function executeBoundDurableStage<TFence>(
+  input: BoundDurableStageInput<TFence>
+): Promise<DurableStageResult> {
+  const { evidenceStore, fence, ...stageInput } = input;
+  const store: PipelineStageEvidenceStore = {
+    prepareStageExecution: ({
+      shardId: _shardId,
+      leaseToken: _leaseToken,
+      ...evidence
+    }) => evidenceStore.prepareStageExecution({ ...evidence, fence }),
+    persistStageSuccess: (
+      {
+        shardId: _shardId,
+        leaseToken: _leaseToken,
+        ...evidence
+      },
+      outboxEvents
+    ) => evidenceStore.persistStageSuccess({ ...evidence, fence }, outboxEvents),
+    persistStageFailure: (
+      {
+        shardId: _shardId,
+        leaseToken: _leaseToken,
+        ...evidence
+      },
+      outboxEvents
+    ) => evidenceStore.persistStageFailure({ ...evidence, fence }, outboxEvents),
+    recordDeadLetter: ({
+      shardId: _shardId,
+      leaseToken: _leaseToken,
+      ...evidence
+    }) => evidenceStore.recordDeadLetter({ ...evidence, fence })
+  };
+  return executeDurableStage({
+    ...stageInput,
+    store,
+    shardId: "__externally_bound__",
+    leaseToken: "__externally_bound__"
+  });
 }

@@ -1,6 +1,6 @@
 import { type CompiledPipelineNode } from "../compile.js";
 import type { StageCatalog } from "../catalog.js";
-import { type OutboxEventInput, type PipelineStore } from "../store.js";
+import { type BoundPipelineEvidenceStore, type BoundPipelineShard, type OutboxEventInput, type PipelineStore } from "../store.js";
 import { type StageFailureOutboxContext } from "./durable-stage.js";
 export interface NodeInvocation {
     runId: string;
@@ -118,6 +118,53 @@ export type ShardRunOutcome = {
     errorCode: string;
 };
 /**
+ * Runner options for work whose lease/fence is owned by the host.
+ *
+ * Ownership options from {@link ShardRunnerOptions} are structurally absent:
+ * no lease owner, duration, heartbeat cadence, or exact-claim selector can be
+ * supplied. `fence` is passed through by identity to `evidenceStore`.
+ */
+export type BoundShardRunnerOptions<TFence> = Omit<ShardRunnerOptions, "store" | "leaseOwner" | "leaseDurationMs" | "heartbeatEveryMs" | "runId" | "shardId" | "now"> & {
+    shard: BoundPipelineShard;
+    evidenceStore: BoundPipelineEvidenceStore<TFence>;
+    fence: TFence;
+    /** Injectable clock for append evidence timestamps. */
+    now?: () => Date;
+};
+/**
+ * Host settlement instruction returned by {@link runBoundShard}. No arm
+ * mutates or releases the external fence.
+ */
+export type BoundShardRunOutcome = {
+    status: "completed";
+    runId: string;
+    shardId: string;
+    itemCount: number;
+    stageExecutionCount: number;
+    reusedStageCount: number;
+} | {
+    status: "partial";
+    runId: string;
+    shardId: string;
+    itemCount: number;
+    completedItemCount: number;
+    terminalItemCount: number;
+    stageExecutionCount: number;
+    reusedStageCount: number;
+} | {
+    status: "control";
+    runId: string;
+    shardId: string;
+    /** Opaque payload returned verbatim for host validation and settlement. */
+    control: unknown;
+} | {
+    status: "failed";
+    runId: string;
+    shardId: string;
+    retryable: boolean;
+    errorCode: string;
+};
+/**
  * Claim and process AT MOST ONE shard (idle when nothing is claimable).
  * Per-item failure isolation: a terminal item breaks out of ITS node loop
  * (downstream nodes skipped) while the other items continue; only shard-scoped
@@ -126,3 +173,19 @@ export type ShardRunOutcome = {
  * by completeShard once every member is resolved.
  */
 export declare function runOneShard(options: ShardRunnerOptions): Promise<ShardRunOutcome>;
+/**
+ * Execute an already-bound shard under a host-owned fence.
+ *
+ * The runner performs only digest/contract validation, durable stage evidence,
+ * invocation, retry routing, and deterministic node traversal. It cannot
+ * claim, heartbeat, defer, cancel, complete, fail, or release host work
+ * because those operations do not exist on {@link BoundPipelineEvidenceStore}.
+ * The host validates the returned outcome and performs its one authoritative
+ * settlement transaction.
+ */
+export declare function runBoundShard<TFence>(options: BoundShardRunnerOptions<TFence>): Promise<BoundShardRunOutcome>;
+/**
+ * Descriptive alias for hosts that call the pre-bound input an externally
+ * claimed shard. This is the same implementation, not a second lifecycle.
+ */
+export declare const executeClaimedShard: typeof runBoundShard;

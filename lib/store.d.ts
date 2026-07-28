@@ -21,6 +21,17 @@ export declare class WorkLeaseLostError extends Error {
     readonly code = "work_lease_lost";
     constructor(leaseKey: string);
 }
+/**
+ * A host adapter throws this when an externally owned execution fence is no
+ * longer authoritative. Mission Pipeline cannot inspect a host's opaque
+ * fence, so the adapter is the sole validator and this typed rejection crosses
+ * the engine unchanged. In particular, the bound runner never translates it
+ * into a stage failure or attempts any lease settlement.
+ */
+export declare class ExternalFenceRejectedError extends Error {
+    readonly code = "external_fence_rejected";
+    constructor(message?: string, cause?: unknown);
+}
 /** One pipeline input item of a run. `inputDigest` MUST equal digest(input). */
 export interface PipelineRunItem {
     itemId: string;
@@ -85,6 +96,17 @@ export interface ShardClaim {
     expiresAt: string;
     compiled: CompiledPipeline;
     items: ShardClaimItem[];
+}
+/**
+ * Immutable work supplied to {@link import("./execute/shard-runner.js").runBoundShard}
+ * after a host has acquired its own execution fence. Unlike {@link ShardClaim},
+ * this value contains no Pipeline-owned lease owner, token, or expiry.
+ */
+export interface BoundPipelineShard {
+    runId: string;
+    shardId: string;
+    compiled: CompiledPipeline;
+    items: readonly ShardClaimItem[];
 }
 export interface HeartbeatShardInput {
     shardId: string;
@@ -259,6 +281,42 @@ export interface RecordDeadLetterInput extends DeadLetterInput {
     shardId: string;
     leaseToken: string;
 }
+/**
+ * Remove Pipeline's legacy shard-lease pair from a stage-evidence operation
+ * and replace it with a host-owned, opaque fence. The engine passes `fence`
+ * through by identity and never reads, mutates, renews, or releases it.
+ */
+type ExternalizeStageFence<TInput, TFence> = TInput extends unknown ? Omit<TInput, "shardId" | "leaseToken"> & {
+    fence: TFence;
+} : never;
+export type PrepareBoundStageExecutionInput<TFence> = ExternalizeStageFence<PrepareStageExecutionInput, TFence>;
+export type PersistBoundStageSuccessInput<TFence> = ExternalizeStageFence<PersistStageSuccessInput, TFence>;
+export type PersistBoundStageFailureInput<TFence> = ExternalizeStageFence<PersistStageFailureInput, TFence>;
+export type RecordBoundDeadLetterInput<TFence> = ExternalizeStageFence<RecordDeadLetterInput, TFence>;
+/**
+ * Evidence-only persistence seam for externally fenced execution.
+ *
+ * This port intentionally contains no claim, heartbeat, release, completion,
+ * failure-settlement, defer, or cancellation operation. A host adapter MUST
+ * validate its live fence in the same transaction as every append. Rejection
+ * should use {@link ExternalFenceRejectedError}; successful completion,
+ * parking, cancellation, and lease release remain a separate host
+ * transaction after the runner returns.
+ */
+export interface BoundPipelineEvidenceStore<TFence> {
+    prepareStageExecution(input: PrepareBoundStageExecutionInput<TFence>): Promise<StagePreparation>;
+    persistStageSuccess(input: PersistBoundStageSuccessInput<TFence>, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
+    persistStageFailure(input: PersistBoundStageFailureInput<TFence>, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;
+    recordDeadLetter(input: RecordBoundDeadLetterInput<TFence>): Promise<{
+        created: boolean;
+    }>;
+}
+/**
+ * The legacy shard-token form of the same evidence-only seam. Kept as a
+ * named narrow port so the durable stage executor does not depend on claim,
+ * heartbeat, or settlement authority even when called by `runOneShard`.
+ */
+export type PipelineStageEvidenceStore = Pick<PipelineStore, "prepareStageExecution" | "persistStageSuccess" | "persistStageFailure" | "recordDeadLetter">;
 interface PersistStageFailureBase {
     shardId: string;
     leaseToken: string;

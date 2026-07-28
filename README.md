@@ -42,8 +42,10 @@ B3 ships durable execution:
   publish/load; createRun; leaseToken-fenced shard claim/heartbeat/complete/
   fail/defer/cancel; idempotency-key stage reservation; atomic transactional-outbox
   persistence; shard-fenced standalone dead-letter recording; content-addressed
-  artifacts; auxiliary work leases). The append-only invariant lives in its
-  doc comments: only leases mutate.
+  artifacts; auxiliary work leases), plus the ownership-free
+  `BoundPipelineEvidenceStore<TFence>` port for a host that already owns the
+  execution fence. The append-only invariant lives in its doc comments: only
+  leases mutate.
 - `src/memory-store.ts` — a full in-memory PipelineStore for hermetic tests
   (enforces fencing, append-only, and outbox atomicity).
 - `src/execute/durable-stage.ts` — the durable executor (idempotency key =
@@ -56,8 +58,44 @@ B3 ships durable execution:
 - `src/execute/shard-runner.ts` — claim ONE shard, run the compiled nodes in
   order per item with per-item failure isolation, heartbeat, finalize,
   release; `NodeInvoker` port (+ fake) for model/agent/gate kinds (B4/B5/B6).
+  It also exports `runBoundShard` (`executeClaimedShard` alias): the same
+  node-walk and durable-stage implementation under an externally owned fence,
+  with no claim/heartbeat/settlement authority.
 - `sql/reference/pipeline-store.sql` — documented DDL templates mirroring the
   port. NEVER auto-applied; hosts own migrations.
+
+### Externally fenced execution
+
+Use `runBoundShard` when the host scheduler—not Mission Pipeline—owns the work
+lease. The API makes the authority split structural:
+
+```text
+host claim/fence
+      │
+      ▼
+runBoundShard
+  ├─ validates sealed compiled DAG + item digests
+  ├─ invokes nodes and applies Pipeline retry/idempotency policy
+  ├─ appends through BoundPipelineEvidenceStore<TFence>
+  └─ returns completed | partial | failed | opaque control
+      │
+      ▼
+host validates outcome and atomically settles/releases its lease
+```
+
+`BoundPipelineEvidenceStore<TFence>` contains only
+`prepareStageExecution`, `persistStageSuccess`, `persistStageFailure`, and
+`recordDeadLetter`. Every operation receives the exact opaque `fence` value.
+The host adapter must verify that fence in the same transaction as the
+evidence append and throw `ExternalFenceRejectedError` when stale. Pipeline
+passes that rejection through unchanged.
+
+The bound runner never claims, heartbeats, completes, fails, defers, cancels,
+or releases work. A node can throw `PipelineControlOutcomeError(payload)` to
+return `status: "control"` with `payload` uninspected and unchanged; the host
+validates its own dependency/continuation/delivery contract and parks or
+settles work itself. Existing `runOneShard` remains the compatibility path for
+hosts that deliberately use Pipeline-owned shard leases.
 
 B4 ships the model node kind + prompt module:
 

@@ -1,9 +1,10 @@
-// execute/shard-runner.ts — claim ONE shard and drive it to a finalization:
-// execute the compiled nodes in array order per item (CompiledPipeline.nodes
-// are already topologically ordered), isolate per-item failures (a terminal
-// item skips its downstream nodes while the other items continue), heartbeat
-// the shard lease while stages run, finalize once every member is resolved
-// (completed vs partial), and release the lease.
+// execute/shard-runner.ts — execute ONE shard through a single shared node
+// walk. runOneShard owns the legacy Pipeline claim/heartbeat/finalize/release
+// lifecycle. runBoundShard accepts host-bound work + an opaque external fence,
+// appends only stage evidence, and returns an outcome for host settlement.
+// Both execute compiled nodes in array order per item (CompiledPipeline.nodes
+// are already topologically ordered) and isolate per-item failures (a terminal
+// item skips its downstream nodes while the other items continue).
 //
 // PROMOTED from inbox-pipeline/src/worker/service.ts runOneShotPipelineWorker
 // (the claim-one-shard shape with idle outcome; option validation — attempt
@@ -33,20 +34,28 @@
 
 import { validateCompiledPipeline, type CompiledPipelineNode } from "../compile.js";
 import type { StageCatalog } from "../catalog.js";
+import { digest } from "../contracts/digest.js";
 import type { StageContext } from "../node.js";
 import {
+  ExternalFenceRejectedError,
   ShardLeaseLostError,
+  type BoundPipelineEvidenceStore,
+  type BoundPipelineShard,
   type OutboxEventInput,
   type PipelineStore,
-  type ShardClaim
+  type ShardClaim,
+  type ShardClaimItem
 } from "../store.js";
 import {
   classifyStageFailure,
+  executeBoundDurableStage,
   executeDurableStage,
+  type DurableStageResult,
   type ResolvedSlotValue,
   type StageFailureOutboxContext
 } from "./durable-stage.js";
 import {
+  PipelineControlOutcomeError,
   PipelineShardCancelledError,
   PipelineShardDeferredError
 } from "./control.js";
@@ -217,6 +226,226 @@ export type ShardRunOutcome =
   | { status: "cancelled"; runId: string; shardId: string; reasonCode: string }
   | { status: "failed"; runId: string; shardId: string; retryable: boolean; errorCode: string };
 
+/**
+ * Runner options for work whose lease/fence is owned by the host.
+ *
+ * Ownership options from {@link ShardRunnerOptions} are structurally absent:
+ * no lease owner, duration, heartbeat cadence, or exact-claim selector can be
+ * supplied. `fence` is passed through by identity to `evidenceStore`.
+ */
+export type BoundShardRunnerOptions<TFence> = Omit<
+  ShardRunnerOptions,
+  | "store"
+  | "leaseOwner"
+  | "leaseDurationMs"
+  | "heartbeatEveryMs"
+  | "runId"
+  | "shardId"
+  | "now"
+> & {
+  shard: BoundPipelineShard;
+  evidenceStore: BoundPipelineEvidenceStore<TFence>;
+  fence: TFence;
+  /** Injectable clock for append evidence timestamps. */
+  now?: () => Date;
+};
+
+/**
+ * Host settlement instruction returned by {@link runBoundShard}. No arm
+ * mutates or releases the external fence.
+ */
+export type BoundShardRunOutcome =
+  | {
+      status: "completed";
+      runId: string;
+      shardId: string;
+      itemCount: number;
+      stageExecutionCount: number;
+      reusedStageCount: number;
+    }
+  | {
+      status: "partial";
+      runId: string;
+      shardId: string;
+      itemCount: number;
+      completedItemCount: number;
+      terminalItemCount: number;
+      stageExecutionCount: number;
+      reusedStageCount: number;
+    }
+  | {
+      status: "control";
+      runId: string;
+      shardId: string;
+      /** Opaque payload returned verbatim for host validation and settlement. */
+      control: unknown;
+    }
+  | {
+      status: "failed";
+      runId: string;
+      shardId: string;
+      retryable: boolean;
+      errorCode: string;
+    };
+
+interface ShardExecutionMetrics {
+  itemCount: number;
+  completedItemCount: number;
+  terminalItemCount: number;
+  stageExecutionCount: number;
+  reusedStageCount: number;
+}
+
+interface ExecuteShardNodesInput {
+  shard: BoundPipelineShard;
+  catalog: StageCatalog;
+  invoker?: NodeInvoker;
+  executeStage(input: {
+    item: ShardClaimItem;
+    node: CompiledPipelineNode;
+    slots: readonly ResolvedSlotValue[];
+    invoke: (input: unknown, ctx: StageContext) => Promise<unknown>;
+  }): Promise<DurableStageResult>;
+}
+
+/**
+ * The single node-walk implementation shared by Pipeline-owned and
+ * externally fenced runners. It contains no lease lifecycle operations.
+ */
+async function executeShardNodes(
+  input: ExecuteShardNodesInput
+): Promise<ShardExecutionMetrics> {
+  const { shard } = input;
+  const compiled = validateCompiledPipeline(shard.compiled);
+  if (
+    typeof shard.runId !== "string"
+    || shard.runId.length === 0
+    || typeof shard.shardId !== "string"
+    || shard.shardId.length === 0
+  ) {
+    throw new Error(
+      "Bound pipeline shard immutable configuration requires non-empty runId and shardId"
+    );
+  }
+  if (shard.items.length === 0) {
+    throw new Error(
+      "Bound pipeline shard immutable configuration must contain at least one item"
+    );
+  }
+  const itemIds = new Set<string>();
+  const ordinals = new Set<number>();
+  let lastOrdinal = 0;
+  for (const item of shard.items) {
+    if (
+      typeof item.itemId !== "string"
+      || item.itemId.length === 0
+      || itemIds.has(item.itemId)
+    ) {
+      throw new Error(
+        "Bound pipeline shard immutable configuration requires non-empty, unique itemId values"
+      );
+    }
+    if (
+      !Number.isInteger(item.ordinal)
+      || item.ordinal < 1
+      || ordinals.has(item.ordinal)
+      || item.ordinal <= lastOrdinal
+    ) {
+      throw new Error(
+        "Bound pipeline shard immutable configuration requires positive, unique, ascending ordinals"
+      );
+    }
+    let actualInputDigest: string;
+    try {
+      actualInputDigest = digest(item.input);
+    } catch (error) {
+      throw new Error(
+        `Bound pipeline shard item ${item.itemId} input is not digestable immutable configuration`,
+        { cause: error }
+      );
+    }
+    if (actualInputDigest !== item.inputDigest) {
+      throw new Error(
+        `Bound pipeline shard item ${item.itemId} inputDigest does not match its input`
+      );
+    }
+    itemIds.add(item.itemId);
+    ordinals.add(item.ordinal);
+    lastOrdinal = item.ordinal;
+  }
+
+  let stageExecutionCount = 0;
+  let reusedStageCount = 0;
+  let terminalItemCount = 0;
+
+  for (const item of shard.items) {
+    const artifacts = new Map<string, unknown>();
+    for (const node of compiled.nodes) {
+      const slots: ResolvedSlotValue[] = node.inputs.map((nodeInput) => ({
+        slot: nodeInput.slot,
+        contract: nodeInput.contract,
+        value:
+          nodeInput.source.kind === "pipeline_input"
+            ? item.input
+            : artifacts.get(nodeInput.source.nodeId)
+      }));
+      if (slots.some(({ value }) => value === undefined)) {
+        throw new Error(
+          `Pipeline node ${node.nodeId} resolved an undefined input artifact — compiled topology violated`
+        );
+      }
+
+      const executable = input.catalog.resolveExecutable(
+        node.stage.id,
+        node.stage.version
+      );
+      let invoke: (value: unknown, ctx: StageContext) => Promise<unknown>;
+      if (node.kind === "code") {
+        const run = executable.run;
+        if (typeof run !== "function") {
+          throw new Error(
+            `Stage ${node.stage.id}@${node.stage.version} is kind "code" but its executable has no run() function`
+          );
+        }
+        invoke = (value, ctx) => run.call(executable, value, ctx);
+      } else {
+        const invoker = input.invoker;
+        if (!invoker) {
+          throw new Error(
+            `No NodeInvoker is configured for non-code pipeline node ${node.nodeId} (kind "${node.kind}")`
+          );
+        }
+        invoke = (value, ctx) =>
+          invoker.invoke({
+            runId: shard.runId,
+            itemId: item.itemId,
+            node,
+            input: value,
+            attempt: ctx.attempt ?? 1,
+            ...(ctx.signal === undefined ? {} : { signal: ctx.signal })
+          });
+      }
+
+      const result = await input.executeStage({ item, node, slots, invoke });
+      stageExecutionCount += 1;
+      if (result.status === "terminal") {
+        terminalItemCount += 1;
+        break;
+      }
+      if (result.reused) reusedStageCount += 1;
+      artifacts.set(node.nodeId, result.output);
+    }
+  }
+
+  return {
+    itemCount: shard.items.length,
+    completedItemCount: shard.items.length - terminalItemCount,
+    terminalItemCount,
+    stageExecutionCount,
+    reusedStageCount
+  };
+}
+
 async function settleShardControl(
   error: unknown,
   claim: ShardClaim,
@@ -293,6 +522,9 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
   try {
     return await processClaim(claim, { ...options, leaseDurationMs, heartbeatEveryMs, maxAttempts, now });
   } catch (error) {
+    // This signal exists exclusively for the external-fence runner. Legacy
+    // ownership must not reinterpret it as a failed shard and release a lease.
+    if (error instanceof PipelineControlOutcomeError) throw error;
     const controlOutcome = await settleShardControl(
       error,
       claim,
@@ -331,64 +563,149 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
   }
 }
 
+/**
+ * Execute an already-bound shard under a host-owned fence.
+ *
+ * The runner performs only digest/contract validation, durable stage evidence,
+ * invocation, retry routing, and deterministic node traversal. It cannot
+ * claim, heartbeat, defer, cancel, complete, fail, or release host work
+ * because those operations do not exist on {@link BoundPipelineEvidenceStore}.
+ * The host validates the returned outcome and performs its one authoritative
+ * settlement transaction.
+ */
+export async function runBoundShard<TFence>(
+  options: BoundShardRunnerOptions<TFence>
+): Promise<BoundShardRunOutcome> {
+  const maxAttempts = options.maxAttempts ?? 2;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
+    throw new Error(
+      "runBoundShard: maxAttempts must be an integer from 1 through 10"
+    );
+  }
+  const now = options.now ?? (() => new Date());
+
+  try {
+    const metrics = await executeShardNodes({
+      shard: options.shard,
+      catalog: options.catalog,
+      ...(options.invoker === undefined ? {} : { invoker: options.invoker }),
+      executeStage: ({ item, node, slots, invoke }) =>
+        executeBoundDurableStage({
+          evidenceStore: options.evidenceStore,
+          fence: options.fence,
+          contracts: options.catalog.contracts,
+          runId: options.shard.runId,
+          itemId: item.itemId,
+          node,
+          slots,
+          invoke,
+          maxAttempts:
+            options.maxAttemptsByNode?.[node.nodeId] ?? maxAttempts,
+          ...(options.outboxEventsFor === undefined
+            ? {}
+            : {
+                outboxEvents: (output, { runId, attempt }) =>
+                  options.outboxEventsFor!({
+                    runId,
+                    node,
+                    itemId: item.itemId,
+                    output,
+                    attempt
+                  })
+              }),
+          ...(options.failureOutboxEventsFor === undefined
+            ? {}
+            : {
+                failureOutboxEvents: options.failureOutboxEventsFor
+              }),
+          ...(options.signal === undefined
+            ? {}
+            : { signal: options.signal }),
+          now
+        })
+    });
+
+    if (metrics.terminalItemCount > 0) {
+      return {
+        status: "partial",
+        runId: options.shard.runId,
+        shardId: options.shard.shardId,
+        itemCount: metrics.itemCount,
+        completedItemCount: metrics.completedItemCount,
+        terminalItemCount: metrics.terminalItemCount,
+        stageExecutionCount: metrics.stageExecutionCount,
+        reusedStageCount: metrics.reusedStageCount
+      };
+    }
+    return {
+      status: "completed",
+      runId: options.shard.runId,
+      shardId: options.shard.shardId,
+      itemCount: metrics.itemCount,
+      stageExecutionCount: metrics.stageExecutionCount,
+      reusedStageCount: metrics.reusedStageCount
+    };
+  } catch (error) {
+    // External authority failures are not stage outcomes. The host needs the
+    // original typed rejection to decide whether its task was fenced/reclaimed.
+    if (error instanceof ExternalFenceRejectedError) throw error;
+    if (error instanceof PipelineControlOutcomeError) {
+      return {
+        status: "control",
+        runId: options.shard.runId,
+        shardId: options.shard.shardId,
+        control: error.outcome
+      };
+    }
+    if (error instanceof PipelineShardDeferredError) {
+      return {
+        status: "control",
+        runId: options.shard.runId,
+        shardId: options.shard.shardId,
+        control: {
+          kind: "deferred",
+          reasonCode: error.reasonCode
+        }
+      };
+    }
+    if (error instanceof PipelineShardCancelledError) {
+      return {
+        status: "control",
+        runId: options.shard.runId,
+        shardId: options.shard.shardId,
+        control: {
+          kind: "cancelled",
+          reasonCode: error.reasonCode
+        }
+      };
+    }
+    const failure = classifyStageFailure(error);
+    return {
+      status: "failed",
+      runId: options.shard.runId,
+      shardId: options.shard.shardId,
+      retryable: failure.retryable,
+      errorCode: failure.code
+    };
+  }
+}
+
+/**
+ * Descriptive alias for hosts that call the pre-bound input an externally
+ * claimed shard. This is the same implementation, not a second lifecycle.
+ */
+export const executeClaimedShard: typeof runBoundShard = runBoundShard;
+
 async function processClaim(
   claim: ShardClaim,
   options: ShardRunnerOptions & { leaseDurationMs: number; heartbeatEveryMs: number; maxAttempts: number; now: () => Date }
 ): Promise<ShardRunOutcome> {
-  // Store round-trip proof: the claimed compiled pipeline must still be sealed.
-  const compiled = validateCompiledPipeline(claim.compiled);
-  let stageExecutionCount = 0;
-  let reusedStageCount = 0;
-
-  for (const item of claim.items) {
-    const artifacts = new Map<string, unknown>();
-    for (const node of compiled.nodes) {
-      // Resolve the node's input slots (promoted pipeline_input/node_output rule).
-      const slots: ResolvedSlotValue[] = node.inputs.map((nodeInput) => ({
-        slot: nodeInput.slot,
-        contract: nodeInput.contract,
-        value: nodeInput.source.kind === "pipeline_input" ? item.input : artifacts.get(nodeInput.source.nodeId)
-      }));
-      if (slots.some(({ value }) => value === undefined)) {
-        // Topologically impossible unless the compiled pipeline was tampered
-        // with — promoted LOUD immutable-configuration rejection (shard scope).
-        throw new Error(
-          `Pipeline node ${node.nodeId} resolved an undefined input artifact — compiled topology violated`
-        );
-      }
-
-      // The LOUD parity lookup for EVERY kind, then kind dispatch.
-      const executable = options.catalog.resolveExecutable(node.stage.id, node.stage.version);
-      let invoke: (input: unknown, ctx: StageContext) => Promise<unknown>;
-      if (node.kind === "code") {
-        const run = executable.run;
-        if (typeof run !== "function") {
-          throw new Error(
-            `Stage ${node.stage.id}@${node.stage.version} is kind "code" but its executable has no run() function`
-          );
-        }
-        invoke = (input, ctx) => run.call(executable, input, ctx);
-      } else {
-        const invoker = options.invoker;
-        if (!invoker) {
-          // Promoted from "No hierarchical decision executor is configured for
-          // a decision-bound pipeline node" — non-retryable configuration failure.
-          throw new Error(
-            `No NodeInvoker is configured for non-code pipeline node ${node.nodeId} (kind "${node.kind}")`
-          );
-        }
-        invoke = (input, ctx) =>
-          invoker.invoke({
-            runId: claim.runId,
-            itemId: item.itemId,
-            node,
-            input,
-            attempt: ctx.attempt ?? 1,
-            ...(ctx.signal === undefined ? {} : { signal: ctx.signal })
-          });
-      }
-
-      const result = await runWithShardHeartbeat({
+  const metrics = await executeShardNodes({
+    shard: claim,
+    catalog: options.catalog,
+    ...(options.invoker === undefined ? {} : { invoker: options.invoker }),
+    executeStage: ({ item, node, slots, invoke }) =>
+      runWithShardHeartbeat({
         store: options.store,
         shardId: claim.shardId,
         leaseToken: claim.leaseToken,
@@ -406,7 +723,8 @@ async function processClaim(
             node,
             slots,
             invoke,
-            maxAttempts: options.maxAttemptsByNode?.[node.nodeId] ?? options.maxAttempts,
+            maxAttempts:
+              options.maxAttemptsByNode?.[node.nodeId] ?? options.maxAttempts,
             ...(options.outboxEventsFor === undefined
               ? {}
               : {
@@ -424,20 +742,13 @@ async function processClaim(
               : {
                   failureOutboxEvents: options.failureOutboxEventsFor
                 }),
-            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            ...(options.signal === undefined
+              ? {}
+              : { signal: options.signal }),
             now: options.now
           })
-      });
-      stageExecutionCount += 1;
-      if (result.status === "terminal") {
-        // Per-item isolation: this item stops here; its downstream nodes are
-        // skipped; the OTHER items continue (promoted break-and-continue).
-        break;
-      }
-      if (result.reused) reusedStageCount += 1;
-      artifacts.set(node.nodeId, result.output);
-    }
-  }
+      })
+  });
 
   const finalization = await options.store.completeShard({
     shardId: claim.shardId,
@@ -452,8 +763,8 @@ async function processClaim(
       itemCount: finalization.itemCount,
       completedItemCount: finalization.completedItemCount,
       terminalItemCount: finalization.terminalItemCount,
-      stageExecutionCount,
-      reusedStageCount
+      stageExecutionCount: metrics.stageExecutionCount,
+      reusedStageCount: metrics.reusedStageCount
     };
   }
   return {
@@ -461,7 +772,7 @@ async function processClaim(
     runId: claim.runId,
     shardId: claim.shardId,
     itemCount: finalization.itemCount,
-    stageExecutionCount,
-    reusedStageCount
+    stageExecutionCount: metrics.stageExecutionCount,
+    reusedStageCount: metrics.reusedStageCount
   };
 }
