@@ -364,7 +364,11 @@ export interface GateNodeInvokerOptions {
   onReceipt?: (record: ModelUsageReceiptRecord) => void;
   /** Fires for every human_escalation terminal (wire the escalation ledger here). */
   onEscalation?: (record: GateHumanEscalationRecord) => void;
-  /** Non-gate node kinds delegate here (chain with createModelNodeInvoker); absent ⇒ LOUD. */
+  /**
+   * Non-gate node kinds delegate here (chain with createModelNodeInvoker); absent ⇒ LOUD.
+   * This is an intentionally extensible capability object: only its `invoke`
+   * data-property method is captured; unrelated members are ignored.
+   */
   fallback?: NodeInvoker;
   /** Millisecond clock for elapsed accounting (injectable for tests). */
   now?: () => number;

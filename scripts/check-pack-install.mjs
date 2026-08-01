@@ -83,7 +83,7 @@ try {
     'import { createGateTerminationCertificate } from "mission-pipeline/gate/certificate";',
     'import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "mission-pipeline/agent/step";',
     'import { createRetrySafeOutboxEvents, combineOutboxEvents } from "mission-pipeline/execute/outbox";',
-    'import { StageEvidenceAssemblyError, OutboxEvidenceNotCommittedError, StageResultConflictError } from "mission-pipeline/execute/durable-stage";',
+    'import { StageEvidenceAssemblyError, OutboxEvidenceNotCommittedError, StageResultConflictError, executeBoundDurableStage } from "mission-pipeline/execute/durable-stage";',
     'import { createBoundPipelineExecutionIdentity, validateBoundPipelineExecutionIdentity, runBoundShard, executeClaimedShard, runWithShardHeartbeat, snapshotNodeInvocation } from "mission-pipeline/execute/shard-runner";',
     'import { BoundEvidencePersistenceError, EvidenceConflictError, ShardSettlementUncertainError, outboxEventDigest } from "mission-pipeline/store";',
     'import schema from "mission-pipeline/schemas/pipeline-definition.v2.schema.json" with { type: "json" };',
@@ -94,7 +94,7 @@ try {
     "if (typeof createGateTerminationCertificate !== 'function') throw new Error('gate export missing');",
     "if (AGENT_STEP_REQUEST_SCHEMA_VERSION !== 'agent-step-request.v1') throw new Error('agent export mismatch');",
     "if (typeof createRetrySafeOutboxEvents !== 'function' || typeof combineOutboxEvents !== 'function') throw new Error('outbox exports missing');",
-    "if (typeof StageEvidenceAssemblyError !== 'function' || typeof OutboxEvidenceNotCommittedError !== 'function' || typeof StageResultConflictError !== 'function') throw new Error('durable evidence errors missing');",
+    "if (typeof StageEvidenceAssemblyError !== 'function' || typeof OutboxEvidenceNotCommittedError !== 'function' || typeof StageResultConflictError !== 'function' || typeof executeBoundDurableStage !== 'function') throw new Error('durable evidence exports missing');",
     "if (typeof createBoundPipelineExecutionIdentity !== 'function' || typeof validateBoundPipelineExecutionIdentity !== 'function') throw new Error('bound identity exports missing');",
     "if (typeof runBoundShard !== 'function' || executeClaimedShard !== runBoundShard || typeof runWithShardHeartbeat !== 'function' || typeof snapshotNodeInvocation !== 'function') throw new Error('runner exports missing');",
     "if (typeof BoundEvidencePersistenceError !== 'function' || typeof EvidenceConflictError !== 'function' || typeof ShardSettlementUncertainError !== 'function' || typeof outboxEventDigest !== 'function') throw new Error('store evidence exports missing');",
@@ -114,6 +114,7 @@ try {
       combineOutboxEvents,
       createBoundPipelineExecutionIdentity,
       createRetrySafeOutboxEvents,
+      executeBoundDurableStage,
       executeClaimedShard,
       outboxEventDigest,
       runBoundShard,
@@ -122,6 +123,8 @@ try {
       validateCompiledPipelineNode,
       validateBoundPipelineExecutionIdentity,
       type BoundPipelineExecutionIdentity,
+      type BoundPipelineShard,
+      type BoundDurableStageInput,
       type OutboxEvents,
       type RetrySafeOutboxEvents
     } from "mission-pipeline";
@@ -136,6 +139,7 @@ try {
       combineOutboxEvents,
       createBoundPipelineExecutionIdentity,
       createRetrySafeOutboxEvents,
+      executeBoundDurableStage,
       executeClaimedShard,
       outboxEventDigest,
       runBoundShard,
@@ -147,10 +151,13 @@ try {
     const events: OutboxEvents = [];
     const retrySafe: RetrySafeOutboxEvents = createRetrySafeOutboxEvents([], () => {});
     const identity = undefined as unknown as BoundPipelineExecutionIdentity;
+    const directInput = undefined as unknown as BoundDurableStageInput<{ generation: number }>;
+    const directShard: BoundPipelineShard = directInput.shard;
     void exported;
     void events;
     void retrySafe;
     void identity;
+    void directShard;
   `;
   await writeFile(join(consumer, "smoke.ts"), typeSmoke);
   await writeFile(

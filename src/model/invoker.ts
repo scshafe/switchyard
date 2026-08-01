@@ -324,7 +324,11 @@ export interface ModelNodeInvokerOptions {
   catalogContracts: ContractValidator;
   /** Fires for EVERY validated receipt (see the module header). */
   onReceipt?: (record: ModelUsageReceiptRecord) => void;
-  /** Non-model node kinds delegate here (B5 gate / B6 agent arms); absent ⇒ LOUD. */
+  /**
+   * Non-model node kinds delegate here (B5 gate / B6 agent arms); absent ⇒ LOUD.
+   * This is an intentionally extensible capability object: only its `invoke`
+   * data-property method is captured; unrelated members are ignored.
+   */
   fallback?: NodeInvoker;
   concurrency?: ModelConcurrencyOptions;
 }
@@ -481,7 +485,12 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
       });
   const concurrency = (() => {
     if (options.concurrency === undefined) return undefined;
-    const raw = options.concurrency;
+    const raw = captureCapabilityRecord(
+      options.concurrency,
+      ["store", "leaseOwner", "slots", "leaseDurationMs", "acquireTimeoutMs", "pollMs", "now"],
+      ["store", "leaseOwner"],
+      "model concurrency options"
+    );
     const store = captureCapabilityDataProperty(
       raw,
       "store",

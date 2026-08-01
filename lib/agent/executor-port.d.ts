@@ -84,7 +84,11 @@ export interface AgentNodeInvokerOptions {
      *  parity with the model/gate arms). */
     catalogContracts: ContractValidator;
     onReceipt?: (record: AgentUsageReceiptRecord) => void;
-    /** Non-agent node kinds delegate here (chain with the model/gate arms). */
+    /**
+     * Non-agent node kinds delegate here (chain with the model/gate arms).
+     * This is an intentionally extensible capability object: only its `invoke`
+     * data-property method is captured; unrelated members are ignored.
+     */
     fallback?: NodeInvoker;
     /** Injectable clock + timer for deadline racing (tests). Defaults to real. */
     now?: () => number;

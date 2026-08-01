@@ -65,6 +65,15 @@ test("golden vectors: key order never changes a digest (permuted twin collapses)
   assert.equal(digest(a), digest(b));
 });
 
+test("foundational canonicalJson/digest retain the published non-plain-object acceptance", () => {
+  const epoch = new Date(0);
+  assert.equal(canonicalJson(epoch), "{}");
+  assert.equal(
+    digest(epoch),
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  );
+});
+
 // ── 2. ContractId grammar ──
 
 test("contract id grammar: accepts <name>.v<number> and parses name/version", () => {

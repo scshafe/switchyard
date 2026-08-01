@@ -24,6 +24,12 @@ export declare function snapshotNodeInvocation(value: unknown): NodeInvocation;
  * only before any unrecorded side effect/usage; independently durable and
  * idempotent inner work is safe. v0.2 rejects at_most_once before invocation;
  * honest support requires durable intent plus indeterminate reconciliation.
+ *
+ * This is intentionally an open structural capability interface, not a
+ * closed options record. Invoker factories capture only the `invoke` method
+ * once and do not enumerate, retain, or inspect unrelated capability members.
+ * That permits composed invokers to expose additional capabilities without
+ * silently granting those capabilities to the fallback chain.
  */
 export interface NodeInvoker {
     invoke(invocation: NodeInvocation): Promise<unknown>;

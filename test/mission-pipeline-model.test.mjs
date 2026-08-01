@@ -525,6 +525,23 @@ test("model invoker happy path: resolves the sealed binding, invokes once, valid
 
 test("model factory and invoke boundaries reject dynamic caller authority without reading getters", async () => {
   const { binding, compiledPrompt } = makeBinding();
+  const baseOptions = () => ({
+    resolver: { resolve: () => ({ invoke: async () => ({}) }) },
+    bindings: [binding],
+    catalogContracts: fakeContracts()
+  });
+  assert.throws(
+    () => createModelNodeInvoker({ ...baseOptions(), unexpectedAuthority: true }),
+    /createModelNodeInvoker options: unknown key/
+  );
+  assert.throws(
+    () => createModelNodeInvoker(Object.assign(
+      Object.create({ unexpectedAuthority: true }),
+      baseOptions()
+    )),
+    /createModelNodeInvoker options must be a plain non-Proxy data object/
+  );
+
   let bindingsReads = 0;
   const options = {
     resolver: { resolve: () => ({ invoke: async () => ({}) }) },
@@ -542,6 +559,75 @@ test("model factory and invoke boundaries reject dynamic caller authority withou
     /createModelNodeInvoker options\.bindings must be an enumerable data property/
   );
   assert.equal(bindingsReads, 0);
+
+  const concurrencyStore = new MemoryPipelineStore();
+  assert.throws(
+    () => createModelNodeInvoker({
+      ...baseOptions(),
+      concurrency: {
+        store: concurrencyStore,
+        leaseOwner: "w1",
+        unexpectedAuthority: true
+      }
+    }),
+    /model concurrency options: unknown key/
+  );
+  const symbolConcurrency = {
+    store: concurrencyStore,
+    leaseOwner: "w1",
+    [Symbol("unexpectedAuthority")]: true
+  };
+  assert.throws(
+    () => createModelNodeInvoker({
+      ...baseOptions(),
+      concurrency: symbolConcurrency
+    }),
+    /model concurrency options: unknown key/
+  );
+  assert.throws(
+    () => createModelNodeInvoker({
+      ...baseOptions(),
+      concurrency: Object.assign(
+        Object.create({ unexpectedAuthority: true }),
+        { store: concurrencyStore, leaseOwner: "w1" }
+      )
+    }),
+    /model concurrency options must be a plain non-Proxy data object/
+  );
+  let concurrencyStoreReads = 0;
+  const accessorConcurrency = { leaseOwner: "w1" };
+  Object.defineProperty(accessorConcurrency, "store", {
+    enumerable: true,
+    get() {
+      concurrencyStoreReads += 1;
+      return concurrencyStore;
+    }
+  });
+  assert.throws(
+    () => createModelNodeInvoker({
+      ...baseOptions(),
+      concurrency: accessorConcurrency
+    }),
+    /model concurrency options\.store must be an enumerable data property/
+  );
+  assert.equal(concurrencyStoreReads, 0);
+  let concurrencyTrapReads = 0;
+  const proxyConcurrency = new Proxy(
+    { store: concurrencyStore, leaseOwner: "w1" },
+    {
+      get() { concurrencyTrapReads += 1; },
+      getPrototypeOf() { concurrencyTrapReads += 1; return Object.prototype; },
+      ownKeys() { concurrencyTrapReads += 1; return []; }
+    }
+  );
+  assert.throws(
+    () => createModelNodeInvoker({
+      ...baseOptions(),
+      concurrency: proxyConcurrency
+    }),
+    /model concurrency options must be a plain non-Proxy data object/
+  );
+  assert.equal(concurrencyTrapReads, 0);
 
   let requestMutationRejected = false;
   const receipts = [];

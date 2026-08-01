@@ -362,14 +362,26 @@ test("agent invoker: a thrown executor is retryable infra (never usably ran)", a
 
 test("agent invoker: wrong kind delegates to the fallback (model→gate→agent chain)", async () => {
   let fellBack = false;
+  let unrelatedReads = 0;
+  const fallback = {
+    invoke: async () => { fellBack = true; return { fallback: true }; }
+  };
+  Object.defineProperty(fallback, "unrelatedCapability", {
+    enumerable: true,
+    get() {
+      unrelatedReads += 1;
+      return "must-not-be-inspected";
+    }
+  });
   const { invoker } = agentInvokerSetup(
     () => ({ schemaVersion: AGENT_STEP_RESULT_SCHEMA_VERSION, status: "completed", output: {}, usage: [fakeUsageReceipt()] }),
-    { fallback: { invoke: async () => { fellBack = true; return { fallback: true }; } } }
+    { fallback }
   );
   const codeNode = { ...agentNode(), kind: "code" };
   const out = await invoker.invoke(invocation({ node: codeNode }));
   assert.deepEqual(out, { fallback: true });
   assert.ok(fellBack);
+  assert.equal(unrelatedReads, 0, "fallback is an open capability; unrelated members are ignored");
 });
 
 // ── 4. End-to-end on the memory store through the fallback chain ───────────

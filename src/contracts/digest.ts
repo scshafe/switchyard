@@ -10,7 +10,6 @@
 // STANDALONE: node:crypto + relative imports only (no npm deps).
 
 import { createHash } from "node:crypto";
-import { deepFrozenClone } from "../internal/evidence.js";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -31,8 +30,7 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function canonicalJson(value: unknown): string {
-  const snapshot = deepFrozenClone(value, "canonical JSON input");
-  return JSON.stringify(canonicalize(snapshot));
+  return JSON.stringify(canonicalize(value));
 }
 
 /**

@@ -68,7 +68,8 @@ function descriptor(
 async function fixture({
   stageA,
   items = [{ value: 2 }],
-  deliverySemantics = "at_least_once_idempotent"
+  deliverySemantics = "at_least_once_idempotent",
+  pipelineId = "bound-runner.fixture"
 } = {}) {
   const invocations = [];
   const catalog = new StageCatalog({
@@ -112,7 +113,7 @@ async function fixture({
   });
   const definition = createPipelineDefinition({
     schemaVersion: "pipeline-definition.v2",
-    pipelineId: "bound-runner.fixture",
+    pipelineId,
     version: 1,
     description: "Externally fenced runner fixture",
     inputContract: "item.v1",
@@ -753,6 +754,7 @@ test("direct bound-stage execution validates and canonicalizes its sealed identi
     executeBoundDurableStage({
       evidenceStore: rejectingStore,
       fence,
+      shard: ctx.shard,
       executionIdentity: {
         identityDigest: "d".repeat(64),
         marker: "forged"
@@ -812,6 +814,7 @@ test("direct bound-stage execution validates and canonicalizes its sealed identi
   const result = await executeBoundDurableStage({
     evidenceStore,
     fence,
+    shard: ctx.shard,
     executionIdentity: originalIdentity,
     contracts: ctx.catalog.contracts,
     runId: ctx.shard.runId,
@@ -826,6 +829,86 @@ test("direct bound-stage execution validates and canonicalizes its sealed identi
   assert.equal(new Set(observedIdentities).size, 1);
   assert.ok(observedIdentities.every((identity) => Object.isFrozen(identity)));
   assert.ok(observedFences.every((presented) => presented === fence));
+});
+
+test("direct bound-stage execution rejects foreign item, node, and pipeline coordinates before every effect boundary", async (t) => {
+  const ctx = await fixture();
+  const foreignCtx = await fixture({ pipelineId: "bound-runner.foreign" });
+  const identity = createBoundPipelineExecutionIdentity({
+    hostActionId: "host-action-coordinate-proof",
+    shard: ctx.shard
+  });
+  const node = ctx.shard.compiled.nodes[0];
+  const item = ctx.shard.items[0];
+  const cases = [
+    {
+      name: "foreign item",
+      overrides: { itemId: "foreign-item" },
+      pattern: /itemId is not a member of the immutable shard/
+    },
+    {
+      name: "foreign node",
+      overrides: { node: { ...node, nodeId: "foreign-node" } },
+      pattern: /node is not the exact compiled shard node/
+    },
+    {
+      name: "foreign item input",
+      overrides: {
+        slots: [{ slot: "item", contract: "item.v1", value: { value: 999 } }]
+      },
+      pattern: /pipeline-input slot does not match the sealed item/
+    },
+    {
+      name: "foreign pipeline",
+      overrides: {
+        shard: foreignCtx.shard,
+        node: foreignCtx.shard.compiled.nodes[0]
+      },
+      pattern: /identity does not match the immutable stage shard/
+    }
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const effects = [];
+      const evidenceStore = {
+        async prepareStageExecution() { effects.push("prepare"); },
+        async persistStageSuccess() { effects.push("success"); },
+        async persistStageFailure() { effects.push("failure"); },
+        async recordDeadLetter() { effects.push("dead-letter"); }
+      };
+      const selectedNode = scenario.overrides.node ?? node;
+      const selectedShard = scenario.overrides.shard ?? ctx.shard;
+      await assert.rejects(
+        executeBoundDurableStage({
+          evidenceStore,
+          fence: { taskLeaseId: `coordinate-${scenario.name}` },
+          shard: selectedShard,
+          executionIdentity: identity,
+          contracts: ctx.catalog.contracts,
+          runId: ctx.shard.runId,
+          itemId: scenario.overrides.itemId ?? item.itemId,
+          node: selectedNode,
+          slots: scenario.overrides.slots
+            ?? [{ slot: "item", contract: "item.v1", value: item.input }],
+          invoke: async () => {
+            effects.push("invoke");
+            return { impossible: true };
+          },
+          outboxEvents: () => {
+            effects.push("success-outbox");
+            return [];
+          },
+          failureOutboxEvents: () => {
+            effects.push("failure-outbox");
+            return [];
+          }
+        }),
+        scenario.pattern
+      );
+      assert.deepEqual(effects, []);
+    });
+  }
 });
 
 test("bound execution rejects at_most_once nodes before evidence or invocation", async () => {

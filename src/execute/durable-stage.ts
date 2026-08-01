@@ -40,6 +40,7 @@ import { digest } from "../contracts/digest.js";
 import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
 import {
+  validateCompiledPipeline,
   validateCompiledPipelineNode,
   type CompiledPipelineNode
 } from "../compile.js";
@@ -54,6 +55,7 @@ import {
   type BoundEvidenceOperation,
   type BoundPipelineEvidenceStore,
   type BoundPipelineExecutionIdentity,
+  type BoundPipelineShard,
   type OutboxEvents,
   type PersistedStageResult,
   type PersistStageFailureInput,
@@ -995,6 +997,8 @@ export interface BoundDurableStageInput<TFence>
   extends Omit<DurableStageInput, "store" | "shardId" | "leaseToken"> {
   evidenceStore: BoundPipelineEvidenceStore<TFence>;
   fence: TFence;
+  /** Exact immutable shard whose seal authorizes this item and compiled node. */
+  shard: BoundPipelineShard;
   executionIdentity: BoundPipelineExecutionIdentity;
 }
 
@@ -1013,6 +1017,7 @@ export async function executeBoundDurableStage<TFence>(
     [
       "evidenceStore",
       "fence",
+      "shard",
       "executionIdentity",
       "contracts",
       "runId",
@@ -1032,17 +1037,21 @@ export async function executeBoundDurableStage<TFence>(
   );
   const evidenceStore = raw.evidenceStore as BoundPipelineEvidenceStore<TFence>;
   const fence = raw.fence as TFence;
-  const runId = assertEvidenceString(raw.runId, "executeBoundDurableStage input.runId");
-  const executionIdentity = validateBoundStageExecutionIdentity(
+  const coordinates = validateBoundStageExecutionCoordinates(
     raw.executionIdentity,
-    runId
+    raw.shard,
+    raw.runId,
+    raw.itemId,
+    raw.node,
+    raw.slots
   );
+  const { executionIdentity, runId, itemId, node, slots } = coordinates;
   const stageInput = Object.freeze({
     contracts: raw.contracts as ContractValidator,
     runId,
-    itemId: raw.itemId as string,
-    node: raw.node as CompiledPipelineNode,
-    slots: raw.slots as readonly ResolvedSlotValue[],
+    itemId,
+    node,
+    slots,
     invoke: raw.invoke as DurableStageInput["invoke"],
     ...(raw.maxAttempts === undefined ? {} : { maxAttempts: raw.maxAttempts as number }),
     ...(raw.outboxEvents === undefined ? {} : { outboxEvents: raw.outboxEvents as DurableStageInput["outboxEvents"] }),
@@ -1309,6 +1318,175 @@ function validateBoundStageExecutionIdentity(
     return value as BoundPipelineExecutionIdentity;
   }
   return canonical;
+}
+
+interface BoundStageExecutionCoordinates {
+  readonly executionIdentity: BoundPipelineExecutionIdentity;
+  readonly runId: string;
+  readonly itemId: string;
+  readonly node: CompiledPipelineNode;
+  readonly slots: readonly ResolvedSlotValue[];
+}
+
+/**
+ * Bind the exported one-stage adapter to the same immutable shard coordinates
+ * that {@code runBoundShard} validates. A self-consistent identity seal alone
+ * is insufficient: the selected item and node must belong to that exact
+ * compiled shard before any evidence capability or callback can be reached.
+ */
+function validateBoundStageExecutionCoordinates(
+  identityRaw: unknown,
+  shardRaw: unknown,
+  runIdRaw: unknown,
+  itemIdRaw: unknown,
+  nodeRaw: unknown,
+  slotsRaw: unknown
+): BoundStageExecutionCoordinates {
+  const shardSnapshot = deepFrozenClone(shardRaw, "bound stage shard");
+  const shard = snapshotEvidenceResult(
+    shardSnapshot,
+    ["runId", "shardId", "compiled", "items"],
+    [],
+    "bound stage shard"
+  );
+  const runId = assertEvidenceString(runIdRaw, "executeBoundDurableStage input.runId");
+  const shardRunId = assertEvidenceString(shard.runId, "bound stage shard.runId");
+  const shardId = assertEvidenceString(shard.shardId, "bound stage shard.shardId");
+  if (runId !== shardRunId) {
+    throw new Error("executeBoundDurableStage input.runId does not match the immutable shard");
+  }
+  const compiled = deepFrozenClone(
+    validateCompiledPipeline(shard.compiled),
+    "bound stage compiled pipeline"
+  );
+  const itemValues = captureDenseArrayItems(
+    shard.items,
+    "bound stage shard.items"
+  );
+  if (itemValues.length < 1) {
+    throw new Error("bound stage shard.items must be non-empty");
+  }
+  const seenItemIds = new Set<string>();
+  const seenOrdinals = new Set<number>();
+  let previousOrdinal = 0;
+  const items = itemValues.map((itemRaw, index) => {
+    const item = snapshotEvidenceResult(
+      itemRaw,
+      ["itemId", "ordinal", "input", "inputDigest"],
+      [],
+      `bound stage shard.items[${index}]`
+    );
+    const itemId = assertEvidenceString(
+      item.itemId,
+      `bound stage shard.items[${index}].itemId`
+    );
+    if (seenItemIds.has(itemId)) {
+      throw new Error("bound stage shard itemId values must be unique");
+    }
+    if (
+      !Number.isInteger(item.ordinal)
+      || (item.ordinal as number) < 1
+      || seenOrdinals.has(item.ordinal as number)
+      || (item.ordinal as number) <= previousOrdinal
+    ) {
+      throw new Error("bound stage shard ordinals must be positive, unique, and ascending");
+    }
+    const inputDigest = assertEvidenceDigest(
+      item.inputDigest,
+      `bound stage shard.items[${index}].inputDigest`
+    );
+    const input = deepFrozenClone(
+      item.input,
+      `bound stage shard.items[${index}].input`
+    );
+    if (digest(input) !== inputDigest) {
+      throw new Error(`bound stage shard item ${itemId} inputDigest does not match input`);
+    }
+    seenItemIds.add(itemId);
+    seenOrdinals.add(item.ordinal as number);
+    previousOrdinal = item.ordinal as number;
+    return Object.freeze({
+      itemId,
+      ordinal: item.ordinal as number,
+      input,
+      inputDigest
+    });
+  });
+
+  const executionIdentity = validateBoundStageExecutionIdentity(identityRaw, runId);
+  const expectedItemSetDigest = digest(items.map((item) => ({
+    itemId: item.itemId,
+    ordinal: item.ordinal,
+    inputDigest: item.inputDigest
+  })));
+  if (
+    executionIdentity.runId !== shardRunId
+    || executionIdentity.shardId !== shardId
+    || executionIdentity.pipeline.id !== compiled.pipeline.id
+    || executionIdentity.pipeline.version !== compiled.pipeline.version
+    || executionIdentity.pipeline.definitionDigest !== compiled.pipeline.digest
+    || executionIdentity.compiledDigest !== compiled.compiledDigest
+    || executionIdentity.itemCount !== items.length
+    || executionIdentity.itemSetDigest !== expectedItemSetDigest
+  ) {
+    throw new Error("bound execution identity does not match the immutable stage shard");
+  }
+
+  const itemId = assertEvidenceString(itemIdRaw, "executeBoundDurableStage input.itemId");
+  const selectedItem = items.find((item) => item.itemId === itemId);
+  if (selectedItem === undefined) {
+    throw new Error("executeBoundDurableStage input.itemId is not a member of the immutable shard");
+  }
+  const node = deepFrozenClone(
+    validateCompiledPipelineNode(nodeRaw, "executeBoundDurableStage input.node"),
+    "executeBoundDurableStage input.node"
+  );
+  const compiledNode = compiled.nodes.find((candidate) => candidate.nodeId === node.nodeId);
+  if (compiledNode === undefined || digest(compiledNode) !== digest(node)) {
+    throw new Error("executeBoundDurableStage input.node is not the exact compiled shard node");
+  }
+
+  const slotValues = captureDenseArrayItems(
+    slotsRaw,
+    "executeBoundDurableStage input.slots"
+  );
+  if (slotValues.length !== node.inputs.length) {
+    throw new Error("executeBoundDurableStage input.slots do not match the compiled node inputs");
+  }
+  const slots = slotValues.map((slotRaw, index) => {
+    const slot = snapshotEvidenceResult(
+      slotRaw,
+      ["slot", "contract", "value"],
+      [],
+      `executeBoundDurableStage input.slots[${index}]`
+    );
+    const expected = node.inputs[index]!;
+    if (slot.slot !== expected.slot || slot.contract !== expected.contract) {
+      throw new Error("executeBoundDurableStage input.slots do not match the compiled node inputs");
+    }
+    const value = deepFrozenClone(
+      slot.value,
+      `executeBoundDurableStage input.slots[${index}].value`
+    );
+    if (
+      expected.source.kind === "pipeline_input"
+      && digest(value) !== selectedItem.inputDigest
+    ) {
+      throw new Error("executeBoundDurableStage pipeline-input slot does not match the sealed item");
+    }
+    return Object.freeze({
+      slot: expected.slot,
+      contract: expected.contract,
+      value
+    });
+  });
+  return Object.freeze({
+    executionIdentity,
+    runId,
+    itemId,
+    node,
+    slots: Object.freeze(slots)
+  });
 }
 
 function validateStagePreparationResult(value: unknown): StagePreparation {

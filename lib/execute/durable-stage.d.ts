@@ -2,7 +2,7 @@ import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
 import { type CompiledPipelineNode } from "../compile.js";
 import type { StageContext } from "../node.js";
-import { type BoundPipelineEvidenceStore, type BoundPipelineExecutionIdentity, type OutboxEvents, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
+import { type BoundPipelineEvidenceStore, type BoundPipelineExecutionIdentity, type BoundPipelineShard, type OutboxEvents, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
 export type { StageFailureScope } from "../store.js";
 /** Multi-slot composed inputs are prepared under this promoted marker contract. */
 export declare const COMPOSITE_INPUT_CONTRACT: ContractId;
@@ -207,6 +207,8 @@ export declare function executeDurableStage(input: DurableStageInput): Promise<D
 export interface BoundDurableStageInput<TFence> extends Omit<DurableStageInput, "store" | "shardId" | "leaseToken"> {
     evidenceStore: BoundPipelineEvidenceStore<TFence>;
     fence: TFence;
+    /** Exact immutable shard whose seal authorizes this item and compiled node. */
+    shard: BoundPipelineShard;
     executionIdentity: BoundPipelineExecutionIdentity;
 }
 /**
