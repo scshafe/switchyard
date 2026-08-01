@@ -17,7 +17,13 @@ import { createPipelineDefinition } from "mission-pipeline/definition";
 import { StageCatalog } from "mission-pipeline/catalog";
 import { compilePipeline } from "mission-pipeline/compile";
 import { MemoryPipelineStore } from "mission-pipeline/memory-store";
-import { PipelineStageError, classifyStageFailure } from "mission-pipeline/execute/durable-stage";
+import {
+  OutboxEvidenceNotCommittedError,
+  PipelineStageError,
+  classifyStageFailure,
+  executeDurableStage,
+  stageIdempotencyKey
+} from "mission-pipeline/execute/durable-stage";
 import { runOneShard } from "mission-pipeline/execute/shard-runner";
 import {
   createPromptComponent,
@@ -175,12 +181,92 @@ const NODE_STUB = (bindingFingerprint) => ({
   bindingFingerprint
 });
 
+test("a created:false success race preserves this attempt's pending provider receipt", async () => {
+  const ledger = createModelReceiptLedger();
+  const node = NODE_STUB("a".repeat(64));
+  const actionIdempotencyKey = stageIdempotencyKey({
+    runId: "run-race",
+    itemId: "item-race",
+    node,
+    inputDigest: digest({ id: "email" })
+  });
+  ledger.onReceipt({
+    runId: "run-race",
+    itemId: "item-race",
+    nodeId: node.nodeId,
+    stage: node.stage,
+    attempt: 1,
+    idempotencyKey: actionIdempotencyKey,
+    providerIdempotencyKey: digest({
+      test: "created-false-provider-call",
+      actionIdempotencyKey,
+      attempt: 1
+    }),
+    bindingDigest: node.bindingFingerprint,
+    receipt: providerReportedReceipt()
+  });
+  let presentedEvents;
+  await assert.rejects(executeDurableStage({
+    store: {
+      async prepareStageExecution() {
+        return {
+          disposition: "reserved",
+          executionId: "execution-race",
+          attempt: 1
+        };
+      },
+      async persistStageSuccess(input, outboxEvents) {
+        presentedEvents = outboxEvents;
+        return {
+          output: input.output,
+          outputDigest: input.outputDigest,
+          created: false
+        };
+      },
+      async persistStageFailure() {
+        throw new Error("unexpected failure persistence");
+      },
+      async recordDeadLetter() {
+        throw new Error("unexpected dead-letter persistence");
+      }
+    },
+    contracts: fakeContracts(),
+    shardId: "shard-race",
+    leaseToken: "lease-race",
+    runId: "run-race",
+    itemId: "item-race",
+    node,
+    slots: [{ slot: "email", contract: "email.v1", value: { id: "email" } }],
+    invoke: async () => ({ classification: "job" }),
+    outboxEvents: (_output, context) => ledger.outboxEventsFor({
+      runId: context.runId,
+      itemId: "item-race",
+      node,
+      attempt: context.attempt,
+      idempotencyKey: context.idempotencyKey
+    })
+  }), OutboxEvidenceNotCommittedError);
+  assert.equal(presentedEvents.length, 1);
+  assert.equal(
+    ledger.outboxEventsFor({
+      runId: "run-race",
+      itemId: "item-race",
+      node,
+      attempt: 1,
+      idempotencyKey: actionIdempotencyKey
+    }).length,
+    1,
+    "the racing winner did not prove this receipt was appended"
+  );
+});
+
 const invocation = (node, overrides = {}) => ({
   runId: "run-1",
   itemId: "i1",
   node,
   input: { email: "hello" },
   attempt: 1,
+  idempotencyKey: digest({ test: "model-stage-action" }),
   ...overrides
 });
 
@@ -759,10 +845,12 @@ test("model node end-to-end: the shard runner executes the bound node and the re
     assert.equal(event.payload.receipt.trust, "provider_reported");
     assert.equal(event.payload.receipt.chargedTokens, 1_000);
   }
-  assert.deepEqual(
-    new Set(events.map((e) => e.dedupeKey)),
-    new Set(["model-receipt:run-1:i1:classify:1", "model-receipt:run-1:i2:classify:1"])
-  );
+  for (const event of events) {
+    assert.match(
+      event.dedupeKey,
+      new RegExp(`^model-receipt:run-1:${event.payload.itemId}:classify:1:action:[a-f0-9]{64}:call:[a-f0-9]{64}:evidence:[a-f0-9]{64}$`)
+    );
+  }
 });
 
 test("model node retry persists the failed attempt receipt and the successful retry receipt under their exact tuples", async () => {
@@ -812,22 +900,22 @@ test("model node retry persists the failed attempt receipt and the successful re
     (event) => event.eventType === MODEL_USAGE_RECEIPT_EVENT_TYPE
   );
   assert.deepEqual(
-    events.map((event) => [
-      event.payload.attempt,
-      event.payload.receipt.chargedTokens,
-      event.dedupeKey
-    ]),
-    [
-      [1, 1_001, "model-receipt:run-1:i1:classify:1"],
-      [2, 1_002, "model-receipt:run-1:i1:classify:2"]
-    ]
+    events.map((event) => [event.payload.attempt, event.payload.receipt.chargedTokens]),
+    [[1, 1_001], [2, 1_002]]
   );
+  for (const event of events) {
+    assert.match(
+      event.dedupeKey,
+      new RegExp(`^model-receipt:run-1:i1:classify:${event.payload.attempt}:action:[a-f0-9]{64}:call:[a-f0-9]{64}:evidence:[a-f0-9]{64}$`)
+    );
+  }
   assert.deepEqual(
     ctx.ledger.failureOutboxEventsFor({
       runId: "run-1",
       itemId: "i1",
       node: ctx.compiled.nodes[0],
-      attempt: 1
+      attempt: 1,
+      idempotencyKey: events[0].payload.idempotencyKey
     }),
     [],
     "a persisted failure drains its exact pending tuple instead of leaking into later attempts"

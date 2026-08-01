@@ -134,7 +134,16 @@ const agentNode = () => ({
   bindingFingerprint: "none"
 });
 
-const invocation = (over = {}) => ({ runId: "run-1", itemId: "i1", node: agentNode(), input: { item: "hi" }, attempt: 1, ...over });
+const AGENT_STAGE_IDEMPOTENCY_KEY = digest({ test: "agent-stage-action" });
+const invocation = (over = {}) => ({
+  runId: "run-1",
+  itemId: "i1",
+  node: agentNode(),
+  input: { item: "hi" },
+  attempt: 1,
+  idempotencyKey: AGENT_STAGE_IDEMPOTENCY_KEY,
+  ...over
+});
 
 test("agent invoker: builds a faithful request (instructions, sealed input artifact, outputContract, idempotencyKey)", async () => {
   const receipts = [];
@@ -147,7 +156,11 @@ test("agent invoker: builds a faithful request (instructions, sealed input artif
   const req = seenRequests[0];
   assert.equal(req.brief.instructions, "Draft a reply.");
   assert.equal(req.brief.outputContract, "draft.v1");
-  assert.equal(req.idempotencyKey, "run-1:i1:draft:1");
+  assert.equal(req.idempotencyKey, digest({
+    schemaVersion: "agent-provider-attempt-idempotency.v1",
+    stageIdempotencyKey: AGENT_STAGE_IDEMPOTENCY_KEY,
+    attempt: 1
+  }));
   assert.equal(req.brief.inputArtifacts.length, 1);
   assert.equal(req.brief.inputArtifacts[0].contractId, "routed-item.v1");
   assert.equal(req.brief.inputArtifacts[0].digest, digest({ item: "hi" }), "the composed input is sealed content-addressed");
@@ -273,8 +286,9 @@ test("agent node end-to-end: failed and successful attempt receipts each ride th
 
   const store = new MemoryPipelineStore();
   const ledger = createAgentReceiptLedger();
+  let executorAttempt = 0;
   const executor = createFakeAgentStepExecutor({
-    default: (request) => request.idempotencyKey.endsWith(":1")
+    default: () => ++executorAttempt === 1
       ? {
           schemaVersion: AGENT_STEP_RESULT_SCHEMA_VERSION,
           status: "timed_out",
@@ -312,22 +326,20 @@ test("agent node end-to-end: failed and successful attempt receipts each ride th
   assert.equal(outcome.itemCount, 1);
   // Both provider-bearing attempts rode their respective atomic appends.
   const receiptEvents = store.outboxEventRecords.filter((e) => e.eventType === AGENT_USAGE_RECEIPT_EVENT_TYPE);
-  assert.deepEqual(
-    receiptEvents.map((event) => [
-      event.payload.attempt,
-      event.dedupeKey
-    ]),
-    [
-      [1, "agent-receipt:run-1:i1:draft:1:0"],
-      [2, "agent-receipt:run-1:i1:draft:2:0"]
-    ]
-  );
+  assert.deepEqual(receiptEvents.map((event) => event.payload.attempt), [1, 2]);
+  for (const event of receiptEvents) {
+    assert.match(
+      event.dedupeKey,
+      new RegExp(`^agent-receipt:run-1:i1:draft:${event.payload.attempt}:0:action:[a-f0-9]{64}:call:[a-f0-9]{64}:evidence:[a-f0-9]{64}$`)
+    );
+  }
   assert.deepEqual(
     ledger.failureOutboxEventsFor({
       runId: "run-1",
       itemId: "i1",
       node: compiled.nodes[0],
-      attempt: 1
+      attempt: 1,
+      idempotencyKey: receiptEvents[0].payload.idempotencyKey
     }),
     []
   );

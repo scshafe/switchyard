@@ -2,7 +2,7 @@ import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import type { PipelineNodeBindingRef } from "../definition.js";
-import type { OutboxEventInput } from "../store.js";
+import type { RetrySafeOutboxEvents } from "../store.js";
 import type { NodeInvoker } from "../execute/shard-runner.js";
 import { type ModelBindingResolver, type ModelUsageReceiptRecord } from "../model/invoker.js";
 import type { GateStepKind } from "./contracts.js";
@@ -81,6 +81,8 @@ export interface GateHumanEscalationRecord {
         version: number;
     };
     attempt: number;
+    /** Stable durable-stage action namespace. */
+    idempotencyKey: string;
     flow: {
         id: string;
         version: number;
@@ -101,8 +103,9 @@ export interface GateEscalationLedger {
      * Wire as (part of) ShardRunnerOptions.outboxEventsFor: drains this
      * exact (runId, itemId, nodeId, attempt)'s pending escalations into
      * dedupe-keyed outbox events that ride ATOMICALLY with the gate node's
-     * persistStageSuccess append. There is intentionally no failure drain:
-     * generic escalation is a successful proven terminal, not failure telemetry.
+     * persistStageSuccess append. The failure hook exists only for an
+     * indeterminate conflicting replay: it preserves the first pending
+     * escalation proof with that failed attempt instead of losing it on restart.
      * Compose with the model receipt ledger's hook when a pipeline carries both
      * node kinds: `(ctx) => [...receipts.outboxEventsFor(ctx), ...gates.outboxEventsFor(ctx)]`.
      */
@@ -112,7 +115,15 @@ export interface GateEscalationLedger {
         itemId: string;
         output: unknown;
         attempt: number;
-    }): OutboxEventInput[];
+        idempotencyKey: string;
+    }): RetrySafeOutboxEvents;
+    failureOutboxEventsFor(context: {
+        runId: string;
+        node: CompiledPipelineNode;
+        itemId: string;
+        attempt: number;
+        idempotencyKey: string;
+    }): RetrySafeOutboxEvents;
 }
 /** The escalation→outbox bridge (the model receipt ledger's promoted shape). */
 export declare function createGateEscalationLedger(): GateEscalationLedger;

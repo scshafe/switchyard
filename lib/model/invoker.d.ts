@@ -1,7 +1,7 @@
 import { type UsageReceipt } from "../contracts/usage-receipt.js";
 import type { ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
-import { type OutboxEventInput, type PipelineStore } from "../store.js";
+import { type PipelineStore, type RetrySafeOutboxEvents } from "../store.js";
 import type { NodeInvoker } from "../execute/shard-runner.js";
 import { type CompiledPrompt } from "../prompt/compiler.js";
 import { type ModelStageBinding } from "./binding.js";
@@ -15,6 +15,12 @@ export interface ModelInvocationRequest {
         version: number;
     };
     attempt: number;
+    /**
+     * Stable provider-attempt key. A kind:"model" node derives it from the
+     * durable stage action key plus attempt number; gate model steps also bind
+     * flow/step/model positions (see gate/executor.ts).
+     */
+    idempotencyKey: string;
     /** The composed, contract-validated stage input. */
     input: unknown;
     /** The sealed binding this invoker was resolved from (identity convenience). */
@@ -54,6 +60,13 @@ export interface ModelUsageReceiptRecord {
         version: number;
     };
     attempt: number;
+    /** Stable durable-stage action namespace. */
+    idempotencyKey: string;
+    /**
+     * Exact provider-attempt key, deterministically derived from idempotencyKey
+     * and the attempt (plus gate step positions for an embedded model step).
+     */
+    providerIdempotencyKey: string;
     bindingDigest: string;
     receipt: UsageReceipt;
     /**
@@ -72,6 +85,8 @@ export interface ModelReceiptOutboxContext {
     /** Retained for source compatibility with the original success-only hook. */
     output?: unknown;
     attempt: number;
+    /** Stable durable-stage action namespace. */
+    idempotencyKey: string;
 }
 export interface ModelReceiptLedger {
     /** Every validated receipt observed, in order (failed-output attempts included). */
@@ -83,17 +98,18 @@ export interface ModelReceiptLedger {
      * (runId, itemId, nodeId, attempt)'s pending receipts into outbox events
      * that ride ATOMICALLY with the node's fresh persistStageSuccess append.
      */
-    outboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
+    outboxEventsFor(context: ModelReceiptOutboxContext): RetrySafeOutboxEvents;
     /**
      * Wire as ShardRunnerOptions.failureOutboxEventsFor: the same exact-tuple
      * drain, used when a provider call was billable but its attempt failed.
      */
-    failureOutboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
+    failureOutboxEventsFor(context: ModelReceiptOutboxContext): RetrySafeOutboxEvents;
 }
 /**
  * The receipt→outbox bridge: receipts recorded during an attempt ride the
  * SAME atomic append as that attempt's success or failure. `records` remains
- * the immutable observation history; each exact tuple drains at most once.
+ * the immutable observation history. Each hook is a non-destructive peek;
+ * acknowledgement removes only the exact peeked prefix after persistence.
  */
 export declare function createModelReceiptLedger(): ModelReceiptLedger;
 /** Optional inference-concurrency fencing over the store's auxiliary leases. */

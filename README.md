@@ -49,9 +49,11 @@ B3 ships durable execution:
 - `src/memory-store.ts` — a full in-memory PipelineStore for hermetic tests
   (enforces fencing, append-only, and outbox atomicity).
 - `src/execute/durable-stage.ts` — the durable executor (idempotency key =
-  digest of {runId,itemId,stageId,version,fingerprint,inputDigest}; cached
-  reuse; bounded retries; dead-letter exactly once; retryable-vs-terminal
-  taxonomy) promoted from inbox durable-executor.ts + worker/service.ts.
+  digest of `{runId,itemId,nodeId,stageId,version,fingerprint,inputDigest}` plus
+  `executionIdentityDigest` on externally bound execution; cached reuse;
+  bounded retries; dead-letter exactly once; retryable-vs-terminal taxonomy)
+  promoted from inbox durable-executor.ts + worker/service.ts. `nodeId` keeps
+  two uses of the same stage in one DAG distinct.
 - `src/execute/control.ts` — typed non-failure shard control outcomes:
   transient host-authority contention defers/requeues without an attempt, while
   obsolete work is conclusively cancelled without fabricated failure evidence.
@@ -66,7 +68,7 @@ B3 ships durable execution:
 
 ### Externally fenced execution
 
-Use `runBoundShard` when the host scheduler—not Mission Pipeline—owns the work
+Use `runBoundShard` when a host scheduler—not Mission Pipeline—owns the work
 lease. The API makes the authority split structural:
 
 ```text
@@ -96,6 +98,22 @@ return `status: "control"` with `payload` uninspected and unchanged; the host
 validates its own dependency/continuation/delivery contract and parks or
 settles work itself. Existing `runOneShard` remains the compatibility path for
 hosts that deliberately use Pipeline-owned shard leases.
+
+The Job Application Platform production entry path is deliberately
+`runOneShard`: compiled definitions, `StageCatalog`, and `PipelineStore` own
+its shard lifecycle. `runBoundShard` is a generic package API and is not that
+platform's production entry path. Selecting it there would require an
+explicit architecture/gate amendment; it must not happen as a silent pin
+update.
+
+### Delivery semantics in v0.2
+
+Version 0.2 executes only `at_least_once_idempotent` nodes. If any compiled
+node declares `at_most_once`, both runners reject the entire DAG before any
+stage invocation or stage-evidence reservation. A process can crash after a
+physical effect but before evidence commits, so honest at-most-once support
+requires a separate durable intent plus `unapplied | applied | indeterminate`
+reconciliation protocol. This release does not pretend otherwise.
 
 B4 ships the model node kind + prompt module:
 
@@ -153,6 +171,8 @@ Use the Node version pinned in `.node-version`.
 ```sh
 npm ci
 npm run verify
+npm run test:postgres:reference
+npm run test:fresh-clone
 ```
 
 `npm run verify` removes and rebuilds the committed `lib/` artifacts, runs the
@@ -160,6 +180,18 @@ independent contract, model, durable-execution, gate, agent, and import-boundary
 suites, proves that the tracked build is reproducible, checks the exact package
 payload, and installs the resulting tarball into a fresh consumer for a runtime
 export smoke test.
+
+The PostgreSQL reference gate is separate because it requires an exact local
+PostgreSQL 18.4 toolchain. It initializes a disposable, Unix-socket-only
+cluster, applies the reference DDL with `ON_ERROR_STOP`, verifies all 14
+tables, stops the cluster, and removes the temporary state. It never connects
+to or mutates a host database.
+
+`test:fresh-clone` is the final committed-candidate gate. It refuses a dirty
+source checkout, creates an independent `git clone --no-local` at the exact
+HEAD, installs solely from the local npm cache in offline mode, runs the full
+verification suite, and requires the verified clone to remain clean. It is
+kept outside `verify` to avoid recursive clone verification.
 
 ## History
 

@@ -22,6 +22,10 @@
 //
 // STANDALONE: relative imports only (no npm deps, no zod, no pg).
 
+import { types as nodeTypes } from "node:util";
+
+import { deepFrozenClone } from "../internal/evidence.js";
+
 export function validatePipelineShardReasonCode(
   value: unknown,
   label = "pipeline shard control"
@@ -79,8 +83,11 @@ export class PipelineShardCancelledError extends Error {
  * dependencies, a continuation reference, delivery instructions, or another
  * domain-specific parking contract after {@code runBoundShard} returns.
  *
- * The bound runner returns the payload verbatim and performs no suspension or
- * lease operation. The legacy `runOneShard` path does not settle this signal.
+ * The bound runner returns a canonical frozen snapshot and performs no suspension or
+ * lease operation. If this bound-only signal escapes after legacy
+ * `runOneShard` has claimed a Pipeline-owned shard, the runner conclusively
+ * fails that shard with `pipeline_control_outcome_unsupported`; it never
+ * abandons the lease until expiry.
  */
 export class PipelineControlOutcomeError extends Error {
   readonly outcome: unknown;
@@ -91,7 +98,7 @@ export class PipelineControlOutcomeError extends Error {
       cause === undefined ? undefined : { cause }
     );
     this.name = "PipelineControlOutcomeError";
-    this.outcome = outcome;
+    this.outcome = deepFrozenClone(outcome, "pipeline control outcome");
   }
 }
 
@@ -101,9 +108,20 @@ export function isPipelineShardControlError(
   | PipelineShardDeferredError
   | PipelineShardCancelledError
   | PipelineControlOutcomeError {
-  return (
-    error instanceof PipelineShardDeferredError
-    || error instanceof PipelineShardCancelledError
-    || error instanceof PipelineControlOutcomeError
-  );
+  try {
+    if (
+      error !== null
+      && (typeof error === "object" || typeof error === "function")
+      && nodeTypes.isProxy(error)
+    ) {
+      return false;
+    }
+    return (
+      error instanceof PipelineShardDeferredError
+      || error instanceof PipelineShardCancelledError
+      || error instanceof PipelineControlOutcomeError
+    );
+  } catch {
+    return false;
+  }
 }

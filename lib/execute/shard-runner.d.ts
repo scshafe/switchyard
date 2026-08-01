@@ -1,6 +1,6 @@
 import { type CompiledPipelineNode } from "../compile.js";
-import type { StageCatalog } from "../catalog.js";
-import { type BoundPipelineEvidenceStore, type BoundPipelineShard, type OutboxEventInput, type PipelineStore } from "../store.js";
+import { StageCatalog } from "../catalog.js";
+import { type BoundPipelineEvidenceStore, type BoundPipelineExecutionIdentity, type BoundPipelineShard, type OutboxEvents, type PipelineStore } from "../store.js";
 import { type StageFailureOutboxContext } from "./durable-stage.js";
 export interface NodeInvocation {
     runId: string;
@@ -9,6 +9,8 @@ export interface NodeInvocation {
     /** The composed, contract-validated stage input. */
     input: unknown;
     attempt: number;
+    /** Stable across retries and external-fence takeovers. */
+    idempotencyKey: string;
     signal?: AbortSignal;
 }
 /**
@@ -18,7 +20,8 @@ export interface NodeInvocation {
  * output (B4: model binding resolution + usage receipts; B5: gate decision
  * flows; B6: agent steps). A control outcome may bypass that outer attempt
  * only before any unrecorded side effect/usage; independently durable and
- * idempotent inner work is safe, but at_most_once effects are not replayable.
+ * idempotent inner work is safe. v0.2 rejects at_most_once before invocation;
+ * honest support requires durable intent plus indeterminate reconciliation.
  */
 export interface NodeInvoker {
     invoke(invocation: NodeInvocation): Promise<unknown>;
@@ -54,7 +57,7 @@ export interface ShardRunnerOptions {
     leaseDurationMs?: number;
     /** Default max(10_000, leaseDurationMs/3); must be < leaseDurationMs. */
     heartbeatEveryMs?: number;
-    /** Retry budget per node, 1..10, default 2. at_most_once nodes never retry. */
+    /** Retry budget per node, 1..10, default 2. */
     maxAttempts?: number;
     /** Per-nodeId overrides of the retry budget. */
     maxAttemptsByNode?: Record<string, number>;
@@ -71,13 +74,14 @@ export interface ShardRunnerOptions {
         itemId: string;
         output: unknown;
         attempt: number;
-    }) => readonly OutboxEventInput[];
+        idempotencyKey: string;
+    }) => OutboxEvents;
     /**
      * Host hook: outbox events to append ATOMICALLY with a node's failed
      * attempt. Provider/model/agent usage receipts belong here; success-only
      * business events (for example a human-escalation projection) do not.
      */
-    failureOutboxEventsFor?: (context: StageFailureOutboxContext) => readonly OutboxEventInput[];
+    failureOutboxEventsFor?: (context: StageFailureOutboxContext) => OutboxEvents;
     signal?: AbortSignal;
     /** Injectable clock (drives claim/heartbeat/finalize timestamps). */
     now?: () => Date;
@@ -128,6 +132,8 @@ export type BoundShardRunnerOptions<TFence> = Omit<ShardRunnerOptions, "store" |
     shard: BoundPipelineShard;
     evidenceStore: BoundPipelineEvidenceStore<TFence>;
     fence: TFence;
+    /** Digest-sealed immutable run/shard/definition/item/host-action identity. */
+    executionIdentity: BoundPipelineExecutionIdentity;
     /** Injectable clock for append evidence timestamps. */
     now?: () => Date;
 };
@@ -164,6 +170,17 @@ export type BoundShardRunOutcome = {
     retryable: boolean;
     errorCode: string;
 };
+/**
+ * Seal the immutable identity a host action must present with every bound
+ * evidence append. Fence generations may change during takeover; this value
+ * must not.
+ */
+export declare function createBoundPipelineExecutionIdentity(input: {
+    hostActionId: string;
+    shard: BoundPipelineShard;
+}): BoundPipelineExecutionIdentity;
+/** Validate the seal and its exact correspondence to the supplied shard. */
+export declare function validateBoundPipelineExecutionIdentity(value: unknown, shard: BoundPipelineShard): BoundPipelineExecutionIdentity;
 /**
  * Claim and process AT MOST ONE shard (idle when nothing is claimable).
  * Per-item failure isolation: a terminal item breaks out of ITS node loop

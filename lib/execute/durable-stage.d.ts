@@ -2,7 +2,7 @@ import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import type { StageContext } from "../node.js";
-import { type BoundPipelineEvidenceStore, type OutboxEventInput, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
+import { type BoundPipelineEvidenceStore, type BoundPipelineExecutionIdentity, type OutboxEvents, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
 export type { StageFailureScope } from "../store.js";
 /** Multi-slot composed inputs are prepared under this promoted marker contract. */
 export declare const COMPOSITE_INPUT_CONTRACT: ContractId;
@@ -38,6 +38,26 @@ export declare class ContractViolationError extends Error {
     constructor(where: string, contractId: ContractId, issues: ContractValidationIssue[]);
 }
 /**
+ * Invocation completed, but Mission could not safely assemble the evidence
+ * required for an atomic append. This is indeterminate, never a settleable
+ * stage result; replay must reuse the same provider-attempt key.
+ */
+export declare class StageEvidenceAssemblyError extends Error {
+    readonly code = "stage_evidence_assembly_failed";
+    readonly operation: "output_digest" | "success_outbox" | "failure_outbox" | "provider_receipt" | "gate_escalation" | "failure_metadata" | "timestamp";
+    constructor(operation: StageEvidenceAssemblyError["operation"], cause: unknown);
+}
+/** A concurrent winner did not prove this invocation's event batch durable. */
+export declare class OutboxEvidenceNotCommittedError extends Error {
+    readonly code = "outbox_evidence_not_committed";
+    constructor();
+}
+/** A success winner under the same stage key produced different bytes. */
+export declare class StageResultConflictError extends Error {
+    readonly code = "stage_result_conflict";
+    constructor(expectedOutputDigest: string, committedOutputDigest: string);
+}
+/**
  * Promoted stableFailure: maps ANY thrown value to a stable
  * {code, retryable, scope} triple. Order matters — typed errors first, then
  * the promoted message heuristics, then the retryable item-scoped default.
@@ -50,16 +70,20 @@ export declare function classifyStageFailure(error: unknown): StageFailure;
  */
 export declare function stageFingerprint(node: CompiledPipelineNode): string;
 /**
- * The B3 idempotency key: digest({runId,itemId,stageId,version,fingerprint,
- * inputDigest}) — every field derives from the run identity, the item, the
- * compiled node, and the exact input bytes; two identical replays land on the
- * same key, so successes are reused and the retry budget survives crashes.
+ * The B3 idempotency key: digest({runId,itemId,nodeId,stageId,version,
+ * fingerprint,inputDigest[,executionIdentityDigest]}). `nodeId` prevents two
+ * uses of the same stage in one DAG from colliding. Bound execution adds the
+ * sealed host-action/run/shard/definition/item identity digest; Pipeline-owned
+ * execution retains its durable run/shard store boundary. Identical replays
+ * land on the same key, so successes are reused and budgets survive crashes.
  */
 export declare function stageIdempotencyKey(input: {
     runId: string;
     itemId: string;
     node: CompiledPipelineNode;
     inputDigest: string;
+    /** Bound execution identity; omitted on the Pipeline-owned legacy path. */
+    executionIdentityDigest?: string;
 }): string;
 /** One resolved input slot: the compiled slot + the actual artifact value. */
 export interface ResolvedSlotValue {
@@ -73,6 +97,7 @@ export interface StageFailureOutboxContext {
     itemId: string;
     node: CompiledPipelineNode;
     attempt: number;
+    idempotencyKey: string;
     errorCode: string;
     retryable: boolean;
     scope: StageFailureScope;
@@ -106,7 +131,7 @@ export interface DurableStageInput {
      * Receives the composed, contract-validated input.
      */
     invoke: (input: unknown, ctx: StageContext) => Promise<unknown>;
-    /** Per-node retry budget; default {@link DEFAULT_MAX_ATTEMPTS}. at_most_once nodes never retry. */
+    /** Per-node retry budget; default {@link DEFAULT_MAX_ATTEMPTS}. */
     maxAttempts?: number;
     /**
      * Host hook: outbox events appended ATOMICALLY with this exact fresh attempt.
@@ -116,13 +141,19 @@ export interface DurableStageInput {
     outboxEvents?: (output: unknown, context: {
         runId: string;
         attempt: number;
-    }) => readonly OutboxEventInput[];
+        idempotencyKey: string;
+    }) => OutboxEvents;
     /**
      * Host hook: outbox events appended ATOMICALLY with this exact failed
      * attempt. This is deliberately distinct from the success hook: provider
      * usage can be billable even when a response or agent result is unusable.
      */
-    failureOutboxEvents?: (context: StageFailureOutboxContext) => readonly OutboxEventInput[];
+    failureOutboxEvents?: (context: StageFailureOutboxContext) => OutboxEvents;
+    /**
+     * Digest-sealed externally bound action identity. It namespaces the stable
+     * stage idempotency key without changing legacy Pipeline-owned keys.
+     */
+    executionIdentityDigest?: string;
     signal?: AbortSignal;
     now?: () => Date;
 }
@@ -176,6 +207,7 @@ export declare function executeDurableStage(input: DurableStageInput): Promise<D
 export interface BoundDurableStageInput<TFence> extends Omit<DurableStageInput, "store" | "shardId" | "leaseToken"> {
     evidenceStore: BoundPipelineEvidenceStore<TFence>;
     fence: TFence;
+    executionIdentity: BoundPipelineExecutionIdentity;
 }
 /**
  * Execute one durable stage under a host-owned fence.

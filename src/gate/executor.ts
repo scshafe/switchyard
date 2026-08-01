@@ -44,13 +44,30 @@
 // STANDALONE: relative imports only (no npm deps, no zod).
 
 import { isPlainObject } from "../internal/guards.js";
+import {
+  assertEvidenceAttemptIdentity,
+  assertEvidenceDigest,
+  assertEvidenceString,
+  deepFrozenClone
+} from "../internal/evidence.js";
+import {
+  captureCapabilityDataProperty,
+  captureCapabilityMethod,
+  captureDenseArrayItems
+} from "../internal/capability.js";
+import { digest } from "../contracts/digest.js";
 import { validateUsageReceipt, type UsageReceipt } from "../contracts/usage-receipt.js";
 import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import type { PipelineNodeBindingRef } from "../definition.js";
-import type { OutboxEventInput } from "../store.js";
-import { COMPOSITE_INPUT_CONTRACT, PipelineStageError } from "../execute/durable-stage.js";
+import type {
+  OutboxEventInput,
+  RetrySafeOutboxEvents
+} from "../store.js";
+import { EvidenceConflictError } from "../store.js";
+import { COMPOSITE_INPUT_CONTRACT, PipelineStageError, StageEvidenceAssemblyError } from "../execute/durable-stage.js";
+import { createRetrySafeOutboxEvents } from "../execute/outbox.js";
 import type { NodeInvocation, NodeInvoker } from "../execute/shard-runner.js";
 import {
   verifyResolvedModelBinding,
@@ -144,6 +161,8 @@ export interface GateHumanEscalationRecord {
   nodeId: string;
   stage: { id: string; version: number };
   attempt: number;
+  /** Stable durable-stage action namespace. */
+  idempotencyKey: string;
   flow: { id: string; version: number; compiledDigest: string };
   certificateDigest: string;
   reasonCode: string;
@@ -161,8 +180,9 @@ export interface GateEscalationLedger {
    * Wire as (part of) ShardRunnerOptions.outboxEventsFor: drains this
    * exact (runId, itemId, nodeId, attempt)'s pending escalations into
    * dedupe-keyed outbox events that ride ATOMICALLY with the gate node's
-   * persistStageSuccess append. There is intentionally no failure drain:
-   * generic escalation is a successful proven terminal, not failure telemetry.
+   * persistStageSuccess append. The failure hook exists only for an
+   * indeterminate conflicting replay: it preserves the first pending
+   * escalation proof with that failed attempt instead of losing it on restart.
    * Compose with the model receipt ledger's hook when a pipeline carries both
    * node kinds: `(ctx) => [...receipts.outboxEventsFor(ctx), ...gates.outboxEventsFor(ctx)]`.
    */
@@ -172,7 +192,15 @@ export interface GateEscalationLedger {
     itemId: string;
     output: unknown;
     attempt: number;
-  }): OutboxEventInput[];
+    idempotencyKey: string;
+  }): RetrySafeOutboxEvents;
+  failureOutboxEventsFor(context: {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    attempt: number;
+    idempotencyKey: string;
+  }): RetrySafeOutboxEvents;
 }
 
 /** The escalation→outbox bridge (the model receipt ledger's promoted shape). */
@@ -183,58 +211,116 @@ export function createGateEscalationLedger(): GateEscalationLedger {
     runId: string,
     itemId: string,
     nodeId: string,
-    attempt: number
-  ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
+    attempt: number,
+    idempotencyKey: string
+  ): string => JSON.stringify([
+    runId,
+    itemId,
+    nodeId,
+    attempt,
+    idempotencyKey
+  ]);
+  const evidenceDigest = (record: GateHumanEscalationRecord): string => digest({
+    schemaVersion: "gate-human-escalation-evidence.v1",
+    ...record
+  });
+  const peek = (context: {
+    runId: string;
+    node: CompiledPipelineNode;
+    itemId: string;
+    attempt: number;
+    idempotencyKey: string;
+  }): RetrySafeOutboxEvents => {
+    assertEvidenceAttemptIdentity(
+      { ...context, nodeId: context.node?.nodeId, stage: context.node?.stage },
+      "gate escalation outbox context"
+    );
+    const key = keyOf(
+      context.runId,
+      context.itemId,
+      context.node.nodeId,
+      context.attempt,
+      context.idempotencyKey
+    );
+    const queue = [...(pending.get(key) ?? [])];
+    const events: OutboxEventInput[] = queue.map((record) => ({
+      eventType: GATE_HUMAN_ESCALATION_EVENT_TYPE,
+      payload: {
+        schemaVersion: GATE_HUMAN_ESCALATION_EVENT_SCHEMA_VERSION,
+        runId: record.runId,
+        itemId: record.itemId,
+        nodeId: record.nodeId,
+        stage: record.stage,
+        attempt: record.attempt,
+        idempotencyKey: record.idempotencyKey,
+        flow: record.flow,
+        certificateDigest: record.certificateDigest,
+        reasonCode: record.reasonCode,
+        sourceStepId: record.sourceStepId,
+        outcomeCode: record.outcomeCode,
+        budgetSpent: record.budgetSpent
+      },
+      dedupeKey:
+        `gate-escalation:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}` +
+        `:action:${record.idempotencyKey}` +
+        `:evidence:${evidenceDigest(record)}`
+    }));
+    return createRetrySafeOutboxEvents(events, () => {
+      const current = pending.get(key);
+      if (current === undefined || queue.length === 0) return;
+      const exactPrefix = queue.every((record, index) => current[index] === record);
+      if (!exactPrefix) return;
+      current.splice(0, queue.length);
+      if (current.length === 0) pending.delete(key);
+    });
+  };
   return {
     get records(): readonly GateHumanEscalationRecord[] {
-      return records.slice();
+      return records.map((record) => deepFrozenClone(record, "gate escalation observation"));
     },
     onEscalation(record: GateHumanEscalationRecord): void {
-      records.push(record);
+      const snapshot = deepFrozenClone(record, "gate escalation");
+      assertEvidenceAttemptIdentity(snapshot, "gate escalation");
+      assertEvidenceString(snapshot.flow?.id, "gate escalation.flow.id");
+      if (!Number.isInteger(snapshot.flow?.version) || snapshot.flow.version < 1) {
+        throw new Error("gate escalation.flow.version must be a positive integer");
+      }
+      assertEvidenceDigest(snapshot.flow?.compiledDigest, "gate escalation.flow.compiledDigest");
+      assertEvidenceDigest(snapshot.certificateDigest, "gate escalation.certificateDigest");
+      assertEvidenceString(snapshot.reasonCode, "gate escalation.reasonCode");
+      assertEvidenceString(snapshot.sourceStepId, "gate escalation.sourceStepId");
+      assertEvidenceString(snapshot.outcomeCode, "gate escalation.outcomeCode");
       const key = keyOf(
-        record.runId,
-        record.itemId,
-        record.nodeId,
-        record.attempt
+        snapshot.runId,
+        snapshot.itemId,
+        snapshot.nodeId,
+        snapshot.attempt,
+        snapshot.idempotencyKey
       );
       const queue = pending.get(key);
-      if (queue) queue.push(record);
-      else pending.set(key, [record]);
+      if (queue) {
+        const candidateDigest = evidenceDigest(snapshot);
+        const sameAction = queue.find(
+          (candidate) => candidate.idempotencyKey === snapshot.idempotencyKey
+        );
+        if (sameAction !== undefined) {
+          if (evidenceDigest(sameAction) !== candidateDigest) {
+            throw new EvidenceConflictError(
+              "gate escalation",
+              snapshot.idempotencyKey
+            );
+          }
+          records.push(snapshot);
+          return;
+        }
+        queue.push(snapshot);
+      } else {
+        pending.set(key, [snapshot]);
+      }
+      records.push(snapshot);
     },
-    outboxEventsFor(context: {
-      runId: string;
-      node: CompiledPipelineNode;
-      itemId: string;
-      output: unknown;
-      attempt: number;
-    }): OutboxEventInput[] {
-      const key = keyOf(
-        context.runId,
-        context.itemId,
-        context.node.nodeId,
-        context.attempt
-      );
-      const queue = pending.get(key) ?? [];
-      pending.delete(key);
-      return queue.map((record) => ({
-        eventType: GATE_HUMAN_ESCALATION_EVENT_TYPE,
-        payload: {
-          schemaVersion: GATE_HUMAN_ESCALATION_EVENT_SCHEMA_VERSION,
-          runId: record.runId,
-          itemId: record.itemId,
-          nodeId: record.nodeId,
-          stage: record.stage,
-          attempt: record.attempt,
-          flow: record.flow,
-          certificateDigest: record.certificateDigest,
-          reasonCode: record.reasonCode,
-          sourceStepId: record.sourceStepId,
-          outcomeCode: record.outcomeCode,
-          budgetSpent: record.budgetSpent
-        },
-        dedupeKey: `gate-escalation:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}`
-      }));
-    }
+    outboxEventsFor: peek,
+    failureOutboxEventsFor: peek
   };
 }
 
@@ -293,17 +379,18 @@ function transitionKey(stepId: string, outcomeCode: string): string {
 }
 
 function assertContractValidator(value: unknown): ContractValidator {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    typeof (value as ContractValidator).knows !== "function" ||
-    typeof (value as ContractValidator).validate !== "function"
-  ) {
+  try {
+    const knows = captureCapabilityMethod(value, "knows", "gate contract validator");
+    const validate = captureCapabilityMethod(value, "validate", "gate contract validator");
+    return Object.freeze({
+      knows: (contractId: ContractId) => knows(contractId),
+      validate: (contractId: ContractId, payload: unknown) => validate(contractId, payload)
+    });
+  } catch {
     throw new Error(
       "createGateNodeInvoker: catalogContracts must implement the ContractValidator port { knows(contractId), validate(contractId, value) }"
     );
   }
-  return value as ContractValidator;
 }
 
 /**
@@ -316,28 +403,64 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
   if (options === null || typeof options !== "object") {
     throw new Error("createGateNodeInvoker: options must be an object");
   }
-  const resolver = options.resolver;
-  if (resolver === null || typeof resolver !== "object" || typeof resolver.resolve !== "function") {
+  let resolveBinding: (...args: any[]) => any;
+  try {
+    resolveBinding = captureCapabilityMethod(
+      options.resolver,
+      "resolve",
+      "gate model binding resolver"
+    );
+  } catch {
     throw new Error("createGateNodeInvoker: resolver must implement the ModelBindingResolver port { resolve(binding) }");
   }
   const contracts = assertContractValidator(options.catalogContracts);
   if (!Array.isArray(options.steps)) {
     throw new Error("createGateNodeInvoker: steps must be an array of GateStepImplementations (the closed registry)");
   }
+  const stepEntries = captureDenseArrayItems(
+    options.steps,
+    "createGateNodeInvoker steps"
+  );
   const registry = new Map<string, GateStepImplementation>();
-  for (const implementation of options.steps) {
+  for (const implementationRaw of stepEntries) {
+    let id: unknown;
+    let version: unknown;
+    let run: (...args: any[]) => any;
+    try {
+      id = captureCapabilityDataProperty(
+        implementationRaw,
+        "id",
+        "gate step implementation"
+      );
+      version = captureCapabilityDataProperty(
+        implementationRaw,
+        "version",
+        "gate step implementation"
+      );
+      run = captureCapabilityMethod(
+        implementationRaw,
+        "run",
+        "gate step implementation"
+      );
+    } catch {
+      throw new Error(
+        "createGateNodeInvoker: every registry entry must be { id: string, version: positive int, run: function }"
+      );
+    }
     if (
-      implementation === null ||
-      typeof implementation !== "object" ||
-      typeof implementation.id !== "string" ||
-      !Number.isInteger(implementation.version) ||
-      implementation.version < 1 ||
-      typeof implementation.run !== "function"
+      typeof id !== "string" ||
+      !Number.isInteger(version) ||
+      (version as number) < 1
     ) {
       throw new Error(
         "createGateNodeInvoker: every registry entry must be { id: string, version: positive int, run: function }"
       );
     }
+    const implementation = Object.freeze({
+      id,
+      version: version as number,
+      run: (input: unknown, context: GateStepRunContext) => run(input, context)
+    });
     const key = implementationKey(implementation.id, implementation.version);
     if (registry.has(key)) {
       throw new Error(`createGateNodeInvoker: duplicate step implementation ${implementation.id}@${implementation.version}`);
@@ -348,9 +471,16 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
   if (!Array.isArray(options.flows)) {
     throw new Error("createGateNodeInvoker: flows must be an array of sealed CompiledGateFlows");
   }
+  const flowEntries = captureDenseArrayItems(
+    options.flows,
+    "createGateNodeInvoker flows"
+  );
   const flowsByDigest = new Map<string, PreparedFlow>();
-  for (const raw of options.flows) {
-    const flow = validateCompiledGateFlow(raw);
+  for (const raw of flowEntries) {
+    const flow = deepFrozenClone(
+      validateCompiledGateFlow(raw),
+      "published compiled gate flow"
+    );
     if (flowsByDigest.has(flow.compiledDigest)) {
       throw new Error(
         `createGateNodeInvoker: duplicate compiled gate flow digest ${flow.compiledDigest} (${flow.flow.id}@${flow.flow.version})`
@@ -392,6 +522,26 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
 
   const resolvedCache = new Map<string, ResolvedModelBinding>();
   const now = options.now ?? (() => Date.now());
+  if (typeof now !== "function") {
+    throw new Error("createGateNodeInvoker: now must be a function");
+  }
+  const onReceipt = options.onReceipt;
+  if (onReceipt !== undefined && typeof onReceipt !== "function") {
+    throw new Error("createGateNodeInvoker: onReceipt must be a function");
+  }
+  const onEscalation = options.onEscalation;
+  if (onEscalation !== undefined && typeof onEscalation !== "function") {
+    throw new Error("createGateNodeInvoker: onEscalation must be a function");
+  }
+  const fallback = options.fallback === undefined
+    ? undefined
+    : Object.freeze({
+        invoke: captureCapabilityMethod(
+          options.fallback,
+          "invoke",
+          "gate fallback invoker"
+        )
+      });
 
   function validateStepResult(step: CompiledGateFlowStep, resultRaw: unknown, nodeId: string): GateStepResult {
     // Model-step misbehavior is the item's bad luck (retry within the node
@@ -400,7 +550,18 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
     const modelStep = step.kind === "model";
     const retryable = modelStep;
     const scope = modelStep ? "item" : "shard";
-    if (!isPlainObject(resultRaw) || typeof resultRaw.outcome !== "string" || !("output" in resultRaw)) {
+    let result: unknown;
+    try {
+      result = deepFrozenClone(resultRaw, `gate step ${step.stepId} result`);
+    } catch (error) {
+      throw new PipelineStageError(
+        "gate_step_result_malformed",
+        retryable,
+        error,
+        scope
+      );
+    }
+    if (!isPlainObject(result) || typeof result.outcome !== "string" || !("output" in result)) {
       throw new PipelineStageError(
         "gate_step_result_malformed",
         retryable,
@@ -410,7 +571,7 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
         scope
       );
     }
-    const outcome = resultRaw.outcome;
+    const outcome = result.outcome;
     if (!step.outcomes.some((candidate) => candidate.code === outcome)) {
       throw new PipelineStageError(
         "gate_step_unknown_outcome",
@@ -421,7 +582,7 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
         scope
       );
     }
-    const validated = contracts.validate(step.outputContract, resultRaw.output);
+    const validated = contracts.validate(step.outputContract, result.output);
     if (!validated.ok) {
       throw new PipelineStageError(
         "gate_step_output_rejected",
@@ -432,7 +593,13 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
         scope
       );
     }
-    return { outcome, output: validated.value };
+    return {
+      outcome,
+      output: deepFrozenClone(
+        validated.value,
+        `gate step ${step.stepId} validated output`
+      )
+    };
   }
 
   async function runModelStep(
@@ -440,26 +607,53 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
     input: unknown,
     invocation: NodeInvocation,
     spent: GateBudgetSpent,
-    bounds: { maximumModelCalls: number; maximumTokens: number; maximumCostMicroUsd: number }
+    bounds: { maximumModelCalls: number; maximumTokens: number; maximumCostMicroUsd: number },
+    flowCompiledDigest: string
   ): Promise<unknown> {
     const binding = step.binding;
     let resolved = resolvedCache.get(binding.bindingDigest);
     if (!resolved) {
-      resolved = verifyResolvedModelBinding(await resolver.resolve(binding), binding);
+      resolved = verifyResolvedModelBinding(await resolveBinding(binding), binding);
       resolvedCache.set(binding.bindingDigest, resolved);
     }
-    const result = await resolved.invoke(
+    const actionIdempotencyKey = assertEvidenceDigest(
+      invocation.idempotencyKey,
+      "gate invocation.idempotencyKey"
+    );
+    const providerIdempotencyKey = digest({
+      schemaVersion: "gate-model-step-idempotency.v1",
+      actionIdempotencyKey,
+      flowCompiledDigest,
+      stepId: step.stepId,
+      bindingDigest: binding.bindingDigest,
+      attempt: invocation.attempt,
+      pathPosition: spent.pathSteps,
+      modelCallPosition: spent.modelCalls + 1
+    });
+    const resultRaw = await resolved.invoke(
       {
         runId: invocation.runId,
         itemId: invocation.itemId,
         nodeId: invocation.node.nodeId,
         stage: { id: invocation.node.stage.id, version: invocation.node.stage.version },
         attempt: invocation.attempt,
+        idempotencyKey: providerIdempotencyKey,
         input,
         binding
       },
       invocation.signal
     );
+    let result: { output: unknown; usage: UsageReceipt };
+    try {
+      result = deepFrozenClone(resultRaw, "gate model step result");
+    } catch (error) {
+      throw new PipelineStageError(
+        "model_result_malformed",
+        false,
+        error,
+        "item"
+      );
+    }
 
     // ── THE RECEIPT FLOOR (identical to the kind:"model" arm) ─────────────
     if (!isPlainObject(result) || !("output" in result)) {
@@ -486,16 +680,23 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
     } catch (error) {
       throw new PipelineStageError("model_receipt_rejected", false, error, "item");
     }
-    options.onReceipt?.({
-      runId: invocation.runId,
-      itemId: invocation.itemId,
-      nodeId: invocation.node.nodeId,
-      stage: { id: invocation.node.stage.id, version: invocation.node.stage.version },
-      attempt: invocation.attempt,
-      bindingDigest: binding.bindingDigest,
-      receipt,
-      gateStepId: step.stepId
-    });
+    try {
+      onReceipt?.({
+        runId: invocation.runId,
+        itemId: invocation.itemId,
+        nodeId: invocation.node.nodeId,
+        stage: { id: invocation.node.stage.id, version: invocation.node.stage.version },
+        attempt: invocation.attempt,
+        idempotencyKey: actionIdempotencyKey,
+        providerIdempotencyKey,
+        bindingDigest: binding.bindingDigest,
+        receipt,
+        gateStepId: step.stepId
+      });
+    } catch (error) {
+      if (error instanceof EvidenceConflictError || error instanceof StageEvidenceAssemblyError) throw error;
+      throw new StageEvidenceAssemblyError("provider_receipt", error);
+    }
     // ── BUDGET: per-attempt tier ceilings, then accumulated bounds ────────
     if (receipt.chargedTokens > step.budget.maxTokensPerAttempt) {
       throw new PipelineStageError(
@@ -575,7 +776,7 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
     async invoke(invocation: NodeInvocation): Promise<unknown> {
       const { node } = invocation;
       if (node.kind !== "gate") {
-        if (options.fallback) return options.fallback.invoke(invocation);
+        if (fallback) return fallback.invoke(invocation);
         throw new PipelineStageError(
           "gate_invoker_wrong_kind",
           false,
@@ -645,7 +846,14 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
 
         let stepOutputRaw: unknown;
         if (step.kind === "model") {
-          stepOutputRaw = await runModelStep(step, currentInput, invocation, spent, bounds);
+          stepOutputRaw = await runModelStep(
+            step,
+            currentInput,
+            invocation,
+            spent,
+            bounds,
+            flow.compiledDigest
+          );
         } else {
           const implementation = registry.get(implementationKey(step.implementation.id, step.implementation.version));
           if (!implementation) {
@@ -716,17 +924,27 @@ export function createGateNodeInvoker(options: GateNodeInvokerOptions): NodeInvo
           sourceStepId: transition.sourceStepId,
           outcomeCode: transition.outcomeCode
         };
-        options.onEscalation?.({
+        const escalationRecord = {
           runId: invocation.runId,
           itemId: invocation.itemId,
           nodeId: node.nodeId,
           stage: { id: node.stage.id, version: node.stage.version },
           attempt: invocation.attempt,
+          idempotencyKey: assertEvidenceDigest(
+            invocation.idempotencyKey,
+            "gate invocation.idempotencyKey"
+          ),
           flow: { id: flow.flow.id, version: flow.flow.version, compiledDigest: flow.compiledDigest },
           certificateDigest: flow.terminationCertificate.certificateDigest,
           ...escalation,
           budgetSpent: spent
-        });
+        };
+        try {
+          onEscalation?.(escalationRecord);
+        } catch (error) {
+          if (error instanceof EvidenceConflictError || error instanceof StageEvidenceAssemblyError) throw error;
+          throw new StageEvidenceAssemblyError("gate_escalation", error);
+        }
         const result: GateNodeResult = {
           ...resultCommon,
           disposition: "human_escalation",

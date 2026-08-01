@@ -1,7 +1,7 @@
 import type { CompiledPipelineNode } from "../compile.js";
 import type { ContractValidator } from "../catalog.js";
 import type { NodeInvoker } from "../execute/shard-runner.js";
-import type { OutboxEventInput } from "../store.js";
+import type { RetrySafeOutboxEvents } from "../store.js";
 import type { UsageReceipt } from "../contracts/usage-receipt.js";
 import { type AgentStepRequest, type AgentStepResult, type AgentStepBudget } from "./step.js";
 /**
@@ -47,6 +47,8 @@ export interface AgentUsageReceiptRecord {
     };
     attempt: number;
     idempotencyKey: string;
+    /** Exact provider-attempt key carried by AgentStepRequest. */
+    providerIdempotencyKey: string;
     /** The 0-based index of this receipt within the step's usage array. */
     receiptIndex: number;
     receipt: UsageReceipt;
@@ -58,12 +60,14 @@ export interface AgentReceiptOutboxContext {
     /** Retained for source compatibility with the original success-only hook. */
     output?: unknown;
     attempt: number;
+    /** Stable durable-stage action namespace. */
+    idempotencyKey: string;
 }
 export interface AgentReceiptLedger {
     readonly records: readonly AgentUsageReceiptRecord[];
     onReceipt(record: AgentUsageReceiptRecord): void;
-    outboxEventsFor(context: AgentReceiptOutboxContext): OutboxEventInput[];
-    failureOutboxEventsFor(context: AgentReceiptOutboxContext): OutboxEventInput[];
+    outboxEventsFor(context: AgentReceiptOutboxContext): RetrySafeOutboxEvents;
+    failureOutboxEventsFor(context: AgentReceiptOutboxContext): RetrySafeOutboxEvents;
 }
 /**
  * The receipt→outbox bridge (identical shape to the B4 model ledger):

@@ -37,16 +37,30 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { isPlainObject } from "../internal/guards.js";
+import {
+  assertEvidenceAttemptIdentity,
+  assertEvidenceDigest,
+  assertEvidenceString,
+  deepFrozenClone
+} from "../internal/evidence.js";
+import {
+  captureCapabilityDataProperty,
+  captureCapabilityMethod
+} from "../internal/capability.js";
+import { digest } from "../contracts/digest.js";
+import type { ContractId } from "../contracts/artifact.js";
 import { validateUsageReceipt, type UsageReceipt } from "../contracts/usage-receipt.js";
 import type { ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import {
-  WorkLeaseLostError,
+  EvidenceConflictError,
   type OutboxEventInput,
   type PipelineStore,
+  type RetrySafeOutboxEvents,
   type WorkLease
 } from "../store.js";
-import { PipelineStageError } from "../execute/durable-stage.js";
+import { PipelineStageError, StageEvidenceAssemblyError } from "../execute/durable-stage.js";
+import { createRetrySafeOutboxEvents } from "../execute/outbox.js";
 import type { NodeInvocation, NodeInvoker } from "../execute/shard-runner.js";
 import { validateCompiledPrompt, type CompiledPrompt } from "../prompt/compiler.js";
 import { validateModelStageBinding, type ModelStageBinding } from "./binding.js";
@@ -60,6 +74,12 @@ export interface ModelInvocationRequest {
   nodeId: string;
   stage: { id: string; version: number };
   attempt: number;
+  /**
+   * Stable provider-attempt key. A kind:"model" node derives it from the
+   * durable stage action key plus attempt number; gate model steps also bind
+   * flow/step/model positions (see gate/executor.ts).
+   */
+  idempotencyKey: string;
   /** The composed, contract-validated stage input. */
   input: unknown;
   /** The sealed binding this invoker was resolved from (identity convenience). */
@@ -102,6 +122,13 @@ export interface ModelUsageReceiptRecord {
   nodeId: string;
   stage: { id: string; version: number };
   attempt: number;
+  /** Stable durable-stage action namespace. */
+  idempotencyKey: string;
+  /**
+   * Exact provider-attempt key, deterministically derived from idempotencyKey
+   * and the attempt (plus gate step positions for an embedded model step).
+   */
+  providerIdempotencyKey: string;
   bindingDigest: string;
   receipt: UsageReceipt;
   /**
@@ -122,6 +149,8 @@ export interface ModelReceiptOutboxContext {
   /** Retained for source compatibility with the original success-only hook. */
   output?: unknown;
   attempt: number;
+  /** Stable durable-stage action namespace. */
+  idempotencyKey: string;
 }
 
 export interface ModelReceiptLedger {
@@ -134,18 +163,19 @@ export interface ModelReceiptLedger {
    * (runId, itemId, nodeId, attempt)'s pending receipts into outbox events
    * that ride ATOMICALLY with the node's fresh persistStageSuccess append.
    */
-  outboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
+  outboxEventsFor(context: ModelReceiptOutboxContext): RetrySafeOutboxEvents;
   /**
    * Wire as ShardRunnerOptions.failureOutboxEventsFor: the same exact-tuple
    * drain, used when a provider call was billable but its attempt failed.
    */
-  failureOutboxEventsFor(context: ModelReceiptOutboxContext): OutboxEventInput[];
+  failureOutboxEventsFor(context: ModelReceiptOutboxContext): RetrySafeOutboxEvents;
 }
 
 /**
  * The receipt→outbox bridge: receipts recorded during an attempt ride the
  * SAME atomic append as that attempt's success or failure. `records` remains
- * the immutable observation history; each exact tuple drains at most once.
+ * the immutable observation history. Each hook is a non-destructive peek;
+ * acknowledgement removes only the exact peeked prefix after persistence.
  */
 export function createModelReceiptLedger(): ModelReceiptLedger {
   const records: ModelUsageReceiptRecord[] = [];
@@ -154,18 +184,33 @@ export function createModelReceiptLedger(): ModelReceiptLedger {
     runId: string,
     itemId: string,
     nodeId: string,
-    attempt: number
-  ): string => JSON.stringify([runId, itemId, nodeId, attempt]);
-  const drain = (context: ModelReceiptOutboxContext): OutboxEventInput[] => {
+    attempt: number,
+    idempotencyKey: string
+  ): string => JSON.stringify([
+    runId,
+    itemId,
+    nodeId,
+    attempt,
+    idempotencyKey
+  ]);
+  const evidenceDigest = (record: ModelUsageReceiptRecord): string => digest({
+    schemaVersion: "model-usage-receipt-evidence.v1",
+    ...record
+  });
+  const peek = (context: ModelReceiptOutboxContext): RetrySafeOutboxEvents => {
+    assertEvidenceAttemptIdentity(
+      { ...context, nodeId: context.node?.nodeId, stage: context.node?.stage },
+      "model receipt outbox context"
+    );
     const key = keyOf(
       context.runId,
       context.itemId,
       context.node.nodeId,
-      context.attempt
+      context.attempt,
+      context.idempotencyKey
     );
-    const queue = pending.get(key) ?? [];
-    pending.delete(key);
-    return queue.map((record) => ({
+    const queue = [...(pending.get(key) ?? [])];
+    const events: OutboxEventInput[] = queue.map((record) => ({
       eventType: MODEL_USAGE_RECEIPT_EVENT_TYPE,
       payload: {
         schemaVersion: MODEL_USAGE_RECEIPT_EVENT_SCHEMA_VERSION,
@@ -174,33 +219,77 @@ export function createModelReceiptLedger(): ModelReceiptLedger {
         nodeId: record.nodeId,
         stage: record.stage,
         attempt: record.attempt,
+        idempotencyKey: record.idempotencyKey,
+        providerIdempotencyKey: record.providerIdempotencyKey,
         bindingDigest: record.bindingDigest,
         receipt: record.receipt,
         ...(record.gateStepId === undefined ? {} : { gateStepId: record.gateStepId })
       },
       dedupeKey:
         `model-receipt:${record.runId}:${record.itemId}:${record.nodeId}:${record.attempt}` +
-        (record.gateStepId === undefined ? "" : `:step:${record.gateStepId}`)
+        (record.gateStepId === undefined ? "" : `:step:${record.gateStepId}`) +
+        `:action:${record.idempotencyKey}` +
+        (record.providerIdempotencyKey === record.idempotencyKey
+          ? ""
+          : `:call:${record.providerIdempotencyKey}`) +
+        `:evidence:${evidenceDigest(record)}`
     }));
+    return createRetrySafeOutboxEvents(events, () => {
+      const current = pending.get(key);
+      if (current === undefined || queue.length === 0) return;
+      const exactPrefix = queue.every((record, index) => current[index] === record);
+      if (!exactPrefix) return;
+      current.splice(0, queue.length);
+      if (current.length === 0) pending.delete(key);
+    });
   };
   return {
     get records(): readonly ModelUsageReceiptRecord[] {
-      return records.slice();
+      return records.map((record) => deepFrozenClone(record, "model usage receipt observation"));
     },
     onReceipt(record: ModelUsageReceiptRecord): void {
-      records.push(record);
+      const rawSnapshot = deepFrozenClone(record, "model usage receipt");
+      assertEvidenceAttemptIdentity(rawSnapshot, "model usage receipt");
+      assertEvidenceDigest(rawSnapshot.providerIdempotencyKey, "model usage receipt.providerIdempotencyKey");
+      assertEvidenceDigest(rawSnapshot.bindingDigest, "model usage receipt.bindingDigest");
+      if (rawSnapshot.gateStepId !== undefined) {
+        assertEvidenceString(rawSnapshot.gateStepId, "model usage receipt.gateStepId");
+      }
+      const snapshot = deepFrozenClone(
+        { ...rawSnapshot, receipt: validateUsageReceipt(rawSnapshot.receipt) },
+        "model usage receipt"
+      );
       const key = keyOf(
-        record.runId,
-        record.itemId,
-        record.nodeId,
-        record.attempt
+        snapshot.runId,
+        snapshot.itemId,
+        snapshot.nodeId,
+        snapshot.attempt,
+        snapshot.idempotencyKey
       );
       const queue = pending.get(key);
-      if (queue) queue.push(record);
-      else pending.set(key, [record]);
+      if (queue) {
+        const candidateDigest = evidenceDigest(snapshot);
+        const logicalIdentity = `${snapshot.providerIdempotencyKey}:${snapshot.gateStepId ?? "direct"}`;
+        const sameCall = queue.find(
+          (candidate) =>
+            candidate.providerIdempotencyKey === snapshot.providerIdempotencyKey
+            && candidate.gateStepId === snapshot.gateStepId
+        );
+        if (sameCall !== undefined) {
+          if (evidenceDigest(sameCall) !== candidateDigest) {
+            throw new EvidenceConflictError("model usage receipt", logicalIdentity);
+          }
+          records.push(snapshot);
+          return;
+        }
+        queue.push(snapshot);
+      } else {
+        pending.set(key, [snapshot]);
+      }
+      records.push(snapshot);
     },
-    outboxEventsFor: drain,
-    failureOutboxEventsFor: drain
+    outboxEventsFor: peek,
+    failureOutboxEventsFor: peek
   };
 }
 
@@ -239,17 +328,20 @@ export interface ModelNodeInvokerOptions {
 }
 
 function assertContractValidator(value: unknown): ContractValidator {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    typeof (value as ContractValidator).knows !== "function" ||
-    typeof (value as ContractValidator).validate !== "function"
-  ) {
+  let knows: (...args: any[]) => any;
+  let validate: (...args: any[]) => any;
+  try {
+    knows = captureCapabilityMethod(value, "knows", "model contract validator");
+    validate = captureCapabilityMethod(value, "validate", "model contract validator");
+  } catch {
     throw new Error(
       "createModelNodeInvoker: catalogContracts must implement the ContractValidator port { knows(contractId), validate(contractId, value) }"
     );
   }
-  return value as ContractValidator;
+  return Object.freeze({
+    knows: (contractId: ContractId) => knows(contractId),
+    validate: (contractId: ContractId, payload: unknown) => validate(contractId, payload)
+  });
 }
 
 /**
@@ -262,7 +354,16 @@ function assertContractValidator(value: unknown): ContractValidator {
  * PipelineStageErrors.
  */
 export function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelStageBinding): ResolvedModelBinding {
-  if (resolvedRaw === null || typeof resolvedRaw !== "object" || typeof (resolvedRaw as ResolvedModelBinding).invoke !== "function") {
+  let invoke: (...args: any[]) => any;
+  let compiledPromptRaw: unknown;
+  try {
+    invoke = captureCapabilityMethod(resolvedRaw, "invoke", "resolved model binding");
+    compiledPromptRaw = captureCapabilityDataProperty(
+      resolvedRaw,
+      "compiledPrompt",
+      "resolved model binding"
+    );
+  } catch {
     throw new PipelineStageError(
       "model_resolver_invalid",
       false,
@@ -270,11 +371,11 @@ export function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelS
       "shard"
     );
   }
-  const resolved = resolvedRaw as ResolvedModelBinding;
+  let compiledPrompt: CompiledPrompt | undefined;
   // The promoted prompt-identity check: resolved prompt digest-valid AND
   // identical to the binding's promptStack/persona refs.
   if (binding.promptStackRef !== undefined) {
-    if (resolved.compiledPrompt === undefined) {
+    if (compiledPromptRaw === undefined) {
       throw new PipelineStageError(
         "model_prompt_identity_mismatch",
         false,
@@ -286,7 +387,7 @@ export function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelS
     }
     let prompt: CompiledPrompt;
     try {
-      prompt = validateCompiledPrompt(resolved.compiledPrompt);
+      prompt = validateCompiledPrompt(compiledPromptRaw);
     } catch (error) {
       throw new PipelineStageError("model_prompt_identity_mismatch", false, error, "shard");
     }
@@ -321,8 +422,13 @@ export function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelS
         "shard"
       );
     }
+    compiledPrompt = prompt;
   }
-  return resolved;
+  return Object.freeze({
+    invoke: (request: ModelInvocationRequest, signal?: AbortSignal) =>
+      invoke(request, signal),
+    ...(compiledPrompt === undefined ? {} : { compiledPrompt })
+  });
 }
 
 /**
@@ -344,18 +450,77 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
   if (options === null || typeof options !== "object") {
     throw new Error("createModelNodeInvoker: options must be an object");
   }
-  const resolver = options.resolver;
-  if (resolver === null || typeof resolver !== "object" || typeof resolver.resolve !== "function") {
+  let resolveBinding: (...args: any[]) => any;
+  try {
+    resolveBinding = captureCapabilityMethod(
+      options.resolver,
+      "resolve",
+      "model binding resolver"
+    );
+  } catch {
     throw new Error("createModelNodeInvoker: resolver must implement the ModelBindingResolver port { resolve(binding) }");
   }
   const contracts = assertContractValidator(options.catalogContracts);
+  const onReceipt = options.onReceipt;
+  if (onReceipt !== undefined && typeof onReceipt !== "function") {
+    throw new Error("createModelNodeInvoker: onReceipt must be a function");
+  }
+  const fallback = options.fallback === undefined
+    ? undefined
+    : Object.freeze({
+        invoke: captureCapabilityMethod(
+          options.fallback,
+          "invoke",
+          "model fallback invoker"
+        )
+      });
+  const concurrency = (() => {
+    if (options.concurrency === undefined) return undefined;
+    const raw = options.concurrency;
+    const store = captureCapabilityDataProperty(
+      raw,
+      "store",
+      "model concurrency options"
+    );
+    const acquireLease = captureCapabilityMethod(
+      store,
+      "acquireLease",
+      "model concurrency store"
+    );
+    const releaseLease = captureCapabilityMethod(
+      store,
+      "releaseLease",
+      "model concurrency store"
+    );
+    const now = captureCapabilityDataProperty(
+      raw,
+      "now",
+      "model concurrency options"
+    ) ?? (() => new Date());
+    if (typeof now !== "function") {
+      throw new Error("createModelNodeInvoker: concurrency.now must be a function");
+    }
+    return Object.freeze({
+      acquireLease,
+      releaseLease,
+      leaseOwner: captureCapabilityDataProperty(raw, "leaseOwner", "model concurrency options") as string,
+      slots: captureCapabilityDataProperty(raw, "slots", "model concurrency options") as number | undefined,
+      leaseDurationMs: captureCapabilityDataProperty(raw, "leaseDurationMs", "model concurrency options") as number | undefined,
+      acquireTimeoutMs: captureCapabilityDataProperty(raw, "acquireTimeoutMs", "model concurrency options") as number | undefined,
+      pollMs: captureCapabilityDataProperty(raw, "pollMs", "model concurrency options") as number | undefined,
+      now: now as () => Date
+    });
+  })();
   if (!Array.isArray(options.bindings)) {
     throw new Error("createModelNodeInvoker: bindings must be an array of sealed ModelStageBindings");
   }
   // Validate every published binding LOUDLY up front; index by sealed digest.
   const bindingsByDigest = new Map<string, ModelStageBinding>();
   for (const raw of options.bindings) {
-    const binding = validateModelStageBinding(raw);
+    const binding = deepFrozenClone(
+      validateModelStageBinding(raw),
+      "published model binding"
+    );
     if (bindingsByDigest.has(binding.bindingDigest)) {
       throw new Error(
         `createModelNodeInvoker: duplicate model binding digest ${binding.bindingDigest} (${binding.bindingId}@${binding.version})`
@@ -376,13 +541,15 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
   async function resolveVerified(binding: ModelStageBinding): Promise<ResolvedModelBinding> {
     const cached = resolvedCache.get(binding.bindingDigest);
     if (cached) return cached;
-    const resolved = verifyResolvedModelBinding(await resolver.resolve(binding), binding);
+    const resolved = verifyResolvedModelBinding(await resolveBinding(binding), binding);
     resolvedCache.set(binding.bindingDigest, resolved);
     return resolved;
   }
 
-  async function acquireSlot(binding: ModelStageBinding): Promise<{ lease: WorkLease; store: ModelConcurrencyOptions["store"] } | undefined> {
-    const concurrency = options.concurrency;
+  async function acquireSlot(binding: ModelStageBinding): Promise<{
+    lease: WorkLease;
+    releaseLease: (...args: any[]) => any;
+  } | undefined> {
     if (concurrency === undefined) return undefined;
     const profile = binding.inferenceProfileRef;
     const slots = concurrency.slots ?? profile.parameters.maxConcurrency;
@@ -408,17 +575,17 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
       );
     }
     const pollMs = concurrency.pollMs ?? 25;
-    const now = concurrency.now ?? (() => new Date());
+    const now = concurrency.now;
     const deadline = now().getTime() + (concurrency.acquireTimeoutMs ?? 0);
     while (true) {
       for (let slot = 0; slot < slots; slot += 1) {
-        const lease = await concurrency.store.acquireLease({
+        const lease = await concurrency.acquireLease({
           leaseKey: `inference:${profile.id}@${profile.version}:${slot}`,
           leaseOwner: concurrency.leaseOwner,
           leaseDurationMs,
           at: now().toISOString()
         });
-        if (lease) return { lease, store: concurrency.store };
+        if (lease) return { lease, releaseLease: concurrency.releaseLease };
       }
       if (now().getTime() >= deadline) {
         throw new PipelineStageError(
@@ -436,7 +603,7 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
     async invoke(invocation: NodeInvocation): Promise<unknown> {
       const { node } = invocation;
       if (node.kind !== "model") {
-        if (options.fallback) return options.fallback.invoke(invocation);
+        if (fallback) return fallback.invoke(invocation);
         throw new PipelineStageError(
           "model_invoker_wrong_kind",
           false,
@@ -458,18 +625,39 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
       const resolved = await resolveVerified(binding);
       const slot = await acquireSlot(binding);
       try {
-        const result = await resolved.invoke(
+        const stageIdempotencyKey = assertEvidenceDigest(
+          invocation.idempotencyKey,
+          "model invocation.idempotencyKey"
+        );
+        const providerIdempotencyKey = digest({
+          schemaVersion: "model-provider-attempt-idempotency.v1",
+          stageIdempotencyKey,
+          attempt: invocation.attempt
+        });
+        const resultRaw = await resolved.invoke(
           {
             runId: invocation.runId,
             itemId: invocation.itemId,
             nodeId: node.nodeId,
             stage: { id: node.stage.id, version: node.stage.version },
             attempt: invocation.attempt,
+            idempotencyKey: providerIdempotencyKey,
             input: invocation.input,
             binding
           },
           invocation.signal
         );
+        let result: ModelInvocationResult;
+        try {
+          result = deepFrozenClone(resultRaw, "resolved model result");
+        } catch (error) {
+          throw new PipelineStageError(
+            "model_result_malformed",
+            false,
+            error,
+            "item"
+          );
+        }
 
         // ── THE RECEIPT FLOOR ──────────────────────────────────────────────
         if (!isPlainObject(result) || !("output" in result)) {
@@ -498,15 +686,22 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
           // unavailable receipts charging 0 are rejected here — TERMINAL.
           throw new PipelineStageError("model_receipt_rejected", false, error, "item");
         }
-        options.onReceipt?.({
-          runId: invocation.runId,
-          itemId: invocation.itemId,
-          nodeId: node.nodeId,
-          stage: { id: node.stage.id, version: node.stage.version },
-          attempt: invocation.attempt,
-          bindingDigest: binding.bindingDigest,
-          receipt
-        });
+        try {
+          onReceipt?.({
+            runId: invocation.runId,
+            itemId: invocation.itemId,
+            nodeId: node.nodeId,
+            stage: { id: node.stage.id, version: node.stage.version },
+            attempt: invocation.attempt,
+            idempotencyKey: stageIdempotencyKey,
+            providerIdempotencyKey,
+            bindingDigest: binding.bindingDigest,
+            receipt
+          });
+        } catch (error) {
+          if (error instanceof EvidenceConflictError || error instanceof StageEvidenceAssemblyError) throw error;
+          throw new StageEvidenceAssemblyError("provider_receipt", error);
+        }
         const responseContract =
           binding.inferenceProfileRef.parameters.responseContract;
         const validatedOutput = contracts.validate(
@@ -533,12 +728,12 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
       } finally {
         if (slot) {
           try {
-            await slot.store.releaseLease({ leaseKey: slot.lease.leaseKey, leaseToken: slot.lease.leaseToken });
-          } catch (error) {
-            // A lost capacity fence after completed work is swallowed: the
-            // lease protects capacity, not evidence — never discard a
-            // completed result (and its receipt) over it.
-            if (!(error instanceof WorkLeaseLostError)) throw error;
+            await slot.releaseLease({ leaseKey: slot.lease.leaseKey, leaseToken: slot.lease.leaseToken });
+          } catch {
+            // Capacity-lease cleanup is never allowed to turn an already
+            // completed provider call into a retryable stage failure. Doing so
+            // could replay the physical call under the next attempt. Hosts
+            // observe/repair capacity-store cleanup independently.
           }
         }
       }

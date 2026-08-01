@@ -10,6 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { digest } from "mission-pipeline/contracts/digest";
@@ -28,10 +29,15 @@ import {
   stageIdempotencyKey
 } from "mission-pipeline/execute/durable-stage";
 import {
+  PipelineControlOutcomeError,
   PipelineShardCancelledError,
   PipelineShardDeferredError
 } from "mission-pipeline/execute/control";
-import { createFakeNodeInvoker, runOneShard } from "mission-pipeline/execute/shard-runner";
+import {
+  createFakeNodeInvoker,
+  runOneShard,
+  runWithShardHeartbeat
+} from "mission-pipeline/execute/shard-runner";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -61,6 +67,22 @@ const descriptor = (stageId, kind, inputContract, outputContract, extra = {}) =>
   deliverySemantics: "at_least_once_idempotent",
   ...extra
 });
+
+function forwardingStore(target, overrides = {}) {
+  const forward = (method) => (...args) => target[method](...args);
+  return Object.freeze({
+    claimNextShard: overrides.claimNextShard ?? forward("claimNextShard"),
+    heartbeatShard: overrides.heartbeatShard ?? forward("heartbeatShard"),
+    completeShard: overrides.completeShard ?? forward("completeShard"),
+    failShard: overrides.failShard ?? forward("failShard"),
+    deferShard: overrides.deferShard ?? forward("deferShard"),
+    cancelShard: overrides.cancelShard ?? forward("cancelShard"),
+    prepareStageExecution: overrides.prepareStageExecution ?? forward("prepareStageExecution"),
+    persistStageSuccess: overrides.persistStageSuccess ?? forward("persistStageSuccess"),
+    persistStageFailure: overrides.persistStageFailure ?? forward("persistStageFailure"),
+    recordDeadLetter: overrides.recordDeadLetter ?? forward("recordDeadLetter")
+  });
+}
 
 // Builds catalog + sealed definition + compiled pipeline + store + run.
 // `stageA`/`stageB` are the run() implementations of the two code stages
@@ -173,6 +195,20 @@ test("stage idempotency key derives from the compiled node alone and shifts with
   assert.notEqual(stageIdempotencyKey({ ...base, node: rebound }), key);
   const reconfigured = { ...node, configurationFingerprint: "b".repeat(64) };
   assert.notEqual(stageIdempotencyKey({ ...base, node: reconfigured }), key);
+  const repeatedStageAtAnotherNode = { ...node, nodeId: "same-stage-second-use" };
+  assert.notEqual(
+    stageIdempotencyKey({ ...base, node: repeatedStageAtAnotherNode }),
+    key,
+    "nodeId prevents two uses of one stage from colliding"
+  );
+  assert.notEqual(
+    stageIdempotencyKey({
+      ...base,
+      executionIdentityDigest: "c".repeat(64)
+    }),
+    key,
+    "externally bound shard/definition/action identity namespaces the key"
+  );
 });
 
 test("composeStageInput: one slot passes the bare value; several compose by slot under the promoted marker contract", () => {
@@ -494,16 +530,17 @@ test("failed-attempt outbox events roll back atomically on duplicate dedupe and 
   const item = ctx.runItems[0];
 
   // Seed one unrelated outbox dedupe key.
+  const seedNode = nodeById(ctx.compiled, "b");
   const seedKey = "e".repeat(64);
   const seed = await ctx.store.prepareStageExecution({
     shardId: claim.shardId,
     leaseToken: claim.leaseToken,
     runId: claim.runId,
     itemId: item.itemId,
-    nodeId: "seed",
-    stage: { id: "step.a", version: 1 },
+    nodeId: seedNode.nodeId,
+    stage: seedNode.stage,
     idempotencyKey: seedKey,
-    inputContract: "item.v1",
+    inputContract: "step-a.v1",
     input: item.input,
     inputDigest: digest(item.input)
   });
@@ -518,11 +555,11 @@ test("failed-attempt outbox events roll back atomically on duplicate dedupe and 
       idempotencyKey: seedKey,
       runId: claim.runId,
       itemId: item.itemId,
-      nodeId: "seed",
+      nodeId: seedNode.nodeId,
       attempt: seed.attempt,
       startedAt: now().toISOString(),
       finishedAt: now().toISOString(),
-      outputContract: "step-a.v1",
+      outputContract: "step-b.v1",
       output: seedOutput,
       outputDigest: digest(seedOutput)
     },
@@ -565,6 +602,7 @@ test("failed-attempt outbox events roll back atomically on duplicate dedupe and 
     startedAt: now().toISOString(),
     finishedAt: now().toISOString(),
     errorCode: "provider_output_invalid",
+    errorMessage: "provider returned an invalid payload",
     retryable: false,
     scope: "item",
     terminal: true,
@@ -655,16 +693,10 @@ test("durable failure remains compatible with a one-argument PipelineStore imple
   });
   assert.ok(claim);
   const calls = [];
-  const legacyStore = new Proxy(ctx.store, {
-    get(target, property) {
-      if (property === "persistStageFailure") {
-        return function legacyPersistStageFailure(input) {
-          calls.push(arguments.length);
-          return target.persistStageFailure(input);
-        };
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
+  const legacyStore = forwardingStore(ctx.store, {
+    persistStageFailure: function legacyPersistStageFailure(input) {
+      calls.push(arguments.length);
+      return ctx.store.persistStageFailure(input);
     }
   });
   const result = await executeDurableStage({
@@ -679,6 +711,214 @@ test("durable failure remains compatible with a one-argument PipelineStore imple
   });
   assert.equal(result.status, "terminal");
   assert.deepEqual(calls, [1], "the absent additive hook preserves the legacy call shape");
+});
+
+test("MemoryPipelineStore rejects malformed stage/outbox evidence atomically", async () => {
+  const ctx = setup();
+  await ctx.createRun();
+  const claim = await ctx.store.claimNextShard({
+    leaseOwner: "worker",
+    leaseDurationMs: 60_000
+  });
+  assert.ok(claim);
+  const node = nodeById(ctx.compiled, "a");
+  const item = ctx.runItems[0];
+  const key = stageIdempotencyKey({
+    runId: claim.runId,
+    itemId: item.itemId,
+    node,
+    inputDigest: item.inputDigest
+  });
+  const prepare = {
+    shardId: claim.shardId,
+    leaseToken: claim.leaseToken,
+    runId: claim.runId,
+    itemId: item.itemId,
+    nodeId: node.nodeId,
+    stage: node.stage,
+    idempotencyKey: key,
+    inputContract: "item.v1",
+    input: item.input,
+    inputDigest: item.inputDigest
+  };
+  await assert.rejects(
+    ctx.store.prepareStageExecution({ ...prepare, idempotencyKey: "BAD" }),
+    /lowercase SHA-256/
+  );
+  await assert.rejects(
+    ctx.store.prepareStageExecution({ ...prepare, inputContract: "step-a.v1" }),
+    /inputContract .* does not match compiled node/
+  );
+  await assert.rejects(
+    ctx.store.prepareStageExecution({ ...prepare, inputDigest: "0".repeat(64) }),
+    /does not match digest\(input\)/
+  );
+  const prepared = await ctx.store.prepareStageExecution(prepare);
+  assert.equal(prepared.disposition, "reserved");
+  if (prepared.disposition !== "reserved") return;
+  const output = { value: 2 };
+  const success = {
+    shardId: claim.shardId,
+    leaseToken: claim.leaseToken,
+    executionId: prepared.executionId,
+    idempotencyKey: key,
+    runId: claim.runId,
+    itemId: item.itemId,
+    nodeId: node.nodeId,
+    attempt: prepared.attempt,
+    startedAt: "2026-08-01T00:00:02.000Z",
+    finishedAt: "2026-08-01T00:00:03.000Z",
+    outputContract: node.outputContract,
+    output,
+    outputDigest: digest(output)
+  };
+  const before = () => JSON.stringify(ctx.store.inspectionSnapshot());
+  const assertAtomicRejection = async (invoke, expected) => {
+    const state = before();
+    await assert.rejects(invoke(), expected);
+    assert.equal(before(), state);
+  };
+  await assertAtomicRejection(
+    () => ctx.store.persistStageSuccess({ ...success, outputContract: "step-b.v1" }),
+    /does not match compiled node/
+  );
+  await assertAtomicRejection(
+    () => ctx.store.persistStageSuccess({
+      ...success,
+      finishedAt: "2026-08-01T00:00:01.000Z"
+    }),
+    /finishedAt must be at or after startedAt/
+  );
+  await assertAtomicRejection(
+    () => ctx.store.persistStageSuccess(success, new Proxy([], {})),
+    /acyclic plain JSON data/
+  );
+  let getterReads = 0;
+  const accessorBatch = [];
+  Object.defineProperty(accessorBatch, "0", {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      return { eventType: "must-not-read", payload: {} };
+    }
+  });
+  await assertAtomicRejection(
+    () => ctx.store.persistStageSuccess(success, accessorBatch),
+    /must be an enumerable data property/
+  );
+  assert.equal(getterReads, 0);
+  await assertAtomicRejection(
+    () => ctx.store.persistStageSuccess(success, [{
+      eventType: "proposal.recorded",
+      payload: {},
+      dedupeKey: ""
+    }]),
+    /non-empty bounded string/
+  );
+  await assertAtomicRejection(
+    () => ctx.store.persistStageSuccess(success, [
+      { eventType: "proposal.recorded", payload: { index: 1 }, dedupeKey: "same" },
+      { eventType: "proposal.recorded", payload: { index: 2 }, dedupeKey: "same" }
+    ]),
+    /duplicate outbox dedupeKey/
+  );
+  assert.equal(ctx.store.attemptsForKey(key).length, 0);
+  assert.equal(ctx.store.outboxEventRecords.length, 0);
+  const persisted = await ctx.store.persistStageSuccess(success, [{
+    eventType: "proposal.recorded",
+    payload: { ok: true },
+    dedupeKey: "proposal:valid"
+  }]);
+  assert.equal(persisted.created, true);
+  assert.equal(ctx.store.attemptsForKey(key).length, 1);
+  assert.equal(ctx.store.outboxEventRecords.length, 1);
+});
+
+test("standalone dead-letter input and duplicate evidence remain exact and append-once", async () => {
+  const ctx = setup();
+  await ctx.createRun();
+  const claim = await ctx.store.claimNextShard({
+    leaseOwner: "worker",
+    leaseDurationMs: 60_000
+  });
+  assert.ok(claim);
+  const node = nodeById(ctx.compiled, "a");
+  const item = ctx.runItems[0];
+  const key = stageIdempotencyKey({
+    runId: claim.runId,
+    itemId: item.itemId,
+    node,
+    inputDigest: item.inputDigest
+  });
+  const prepared = await ctx.store.prepareStageExecution({
+    shardId: claim.shardId,
+    leaseToken: claim.leaseToken,
+    runId: claim.runId,
+    itemId: item.itemId,
+    nodeId: node.nodeId,
+    stage: node.stage,
+    idempotencyKey: key,
+    inputContract: "item.v1",
+    input: item.input,
+    inputDigest: item.inputDigest
+  });
+  assert.equal(prepared.disposition, "reserved");
+  if (prepared.disposition !== "reserved") return;
+  await ctx.store.persistStageFailure({
+    shardId: claim.shardId,
+    leaseToken: claim.leaseToken,
+    executionId: prepared.executionId,
+    idempotencyKey: key,
+    runId: claim.runId,
+    itemId: item.itemId,
+    nodeId: node.nodeId,
+    attempt: prepared.attempt,
+    startedAt: "2026-08-01T00:00:01.000Z",
+    finishedAt: "2026-08-01T00:00:02.000Z",
+    errorCode: "dependency_unavailable",
+    retryable: true,
+    scope: "item",
+    terminal: false
+  });
+  const deadLetter = {
+    shardId: claim.shardId,
+    leaseToken: claim.leaseToken,
+    runId: claim.runId,
+    itemId: item.itemId,
+    nodeId: node.nodeId,
+    stage: node.stage,
+    idempotencyKey: key,
+    input: item.input,
+    error: { code: "retry_budget_exhausted", message: "fixture" },
+    attempts: prepared.attempt,
+    createdAt: "2026-08-01T00:00:03.000Z"
+  };
+  const { input: _input, ...missingInput } = deadLetter;
+  const beforeMissing = JSON.stringify(ctx.store.inspectionSnapshot());
+  await assert.rejects(
+    ctx.store.recordDeadLetter(missingInput),
+    /input is required/
+  );
+  assert.equal(JSON.stringify(ctx.store.inspectionSnapshot()), beforeMissing);
+  assert.deepEqual(await ctx.store.recordDeadLetter(deadLetter), { created: true });
+  const beforeConflict = JSON.stringify(ctx.store.inspectionSnapshot());
+  await assert.rejects(
+    ctx.store.recordDeadLetter({
+      ...deadLetter,
+      error: { ...deadLetter.error, message: "conflicting replay" },
+      createdAt: "2026-08-01T00:00:04.000Z"
+    }),
+    /duplicate call conflicts/
+  );
+  assert.equal(JSON.stringify(ctx.store.inspectionSnapshot()), beforeConflict);
+  assert.deepEqual(
+    await ctx.store.recordDeadLetter({
+      ...deadLetter,
+      createdAt: "2026-08-01T00:00:05.000Z"
+    }),
+    { created: false },
+    "an advancing crash-replay clock reuses the first append"
+  );
 });
 
 // ── Fencing: stale lease tokens ───────────────────────────────────────────
@@ -722,6 +962,172 @@ test("a stale leaseToken is rejected LOUDLY on heartbeat/complete/fail/prepare, 
     ctx.store.completeShard({ shardId: claim.shardId, leaseToken: claim.leaseToken }),
     ShardLeaseLostError
   );
+});
+
+test("MemoryPipelineStore snapshots every coordination input before cross-shard or cross-lease settlement", async () => {
+  const ctx = setup({
+    items: [{ value: 1 }, { value: 2 }],
+    shards: [
+      { shardId: "shard-1", itemIds: ["i1"] },
+      { shardId: "shard-2", itemIds: ["i2"] }
+    ]
+  });
+  await ctx.createRun();
+  const claim1 = await ctx.store.claimNextShard({
+    leaseOwner: "worker-1",
+    leaseDurationMs: 60_000,
+    runId: "run-1",
+    shardId: "shard-1"
+  });
+  const claim2 = await ctx.store.claimNextShard({
+    leaseOwner: "worker-2",
+    leaseDurationMs: 60_000,
+    runId: "run-1",
+    shardId: "shard-2"
+  });
+  assert.ok(claim1);
+  assert.ok(claim2);
+
+  let getterReads = 0;
+  const hostileShardInput = (fields) => {
+    const input = { ...fields };
+    Object.defineProperty(input, "shardId", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return getterReads % 2 === 1 ? "shard-1" : "shard-2";
+      }
+    });
+    return input;
+  };
+  for (const [method, fields] of [
+    ["heartbeatShard", { leaseToken: claim1.leaseToken, extendByMs: 60_000 }],
+    ["completeShard", { leaseToken: claim1.leaseToken }],
+    ["failShard", { leaseToken: claim1.leaseToken, retryable: false, errorCode: "hostile" }],
+    ["deferShard", { leaseToken: claim1.leaseToken, reasonCode: "hostile_defer" }],
+    ["cancelShard", { leaseToken: claim1.leaseToken, reasonCode: "hostile_cancel" }]
+  ]) {
+    await assert.rejects(
+      ctx.store[method](hostileShardInput(fields)),
+      /must be an enumerable data property/,
+      method
+    );
+  }
+  assert.equal(getterReads, 0, "no shardId getter is invoked");
+  assert.equal(ctx.store.shardLeaseSnapshot("shard-1").leaseToken, claim1.leaseToken);
+  assert.equal(ctx.store.shardLeaseSnapshot("shard-2").leaseToken, claim2.leaseToken);
+
+  const lease1 = await ctx.store.acquireLease({
+    leaseKey: "aux:one",
+    leaseOwner: "worker-1",
+    leaseDurationMs: 60_000
+  });
+  const lease2 = await ctx.store.acquireLease({
+    leaseKey: "aux:two",
+    leaseOwner: "worker-2",
+    leaseDurationMs: 60_000
+  });
+  assert.ok(lease1);
+  assert.ok(lease2);
+  let leaseKeyReads = 0;
+  const hostileLeaseInput = (fields) => {
+    const input = { ...fields };
+    Object.defineProperty(input, "leaseKey", {
+      enumerable: true,
+      get() {
+        leaseKeyReads += 1;
+        return leaseKeyReads % 2 === 1 ? "aux:one" : "aux:two";
+      }
+    });
+    return input;
+  };
+  await assert.rejects(
+    ctx.store.heartbeatLease(
+      hostileLeaseInput({ leaseToken: lease1.leaseToken, extendByMs: 60_000 })
+    ),
+    /must be an enumerable data property/
+  );
+  await assert.rejects(
+    ctx.store.releaseLease(
+      hostileLeaseInput({ leaseToken: lease1.leaseToken })
+    ),
+    /must be an enumerable data property/
+  );
+  assert.equal(leaseKeyReads, 0, "no leaseKey getter is invoked");
+  assert.equal(ctx.store.leaseSnapshot("aux:one").leaseToken, lease1.leaseToken);
+  assert.equal(ctx.store.leaseSnapshot("aux:two").leaseToken, lease2.leaseToken);
+});
+
+test("invalid heartbeat clocks/extensions leave the complete store byte-unchanged", async () => {
+  const maxInstant = 8_640_000_000_000_000;
+  const acquiredAt = new Date(maxInstant - 100).toISOString();
+  const heartbeatAt = new Date(maxInstant - 50).toISOString();
+
+  const ctx = setup();
+  await ctx.createRun();
+  const claim = await ctx.store.claimNextShard({
+    leaseOwner: "worker",
+    leaseDurationMs: 100,
+    at: acquiredAt
+  });
+  assert.ok(claim);
+  const auxiliary = await ctx.store.acquireLease({
+    leaseKey: "aux:overflow",
+    leaseOwner: "worker",
+    leaseDurationMs: 100,
+    at: acquiredAt
+  });
+  assert.ok(auxiliary);
+  const firstHeartbeatAt = new Date(maxInstant - 75).toISOString();
+  await ctx.store.heartbeatShard({
+    shardId: claim.shardId,
+    leaseToken: claim.leaseToken,
+    extendByMs: 50,
+    at: firstHeartbeatAt
+  });
+  await ctx.store.heartbeatLease({
+    leaseKey: auxiliary.leaseKey,
+    leaseToken: auxiliary.leaseToken,
+    extendByMs: 50,
+    at: firstHeartbeatAt
+  });
+  const scenarios = [
+    { name: "negative extension", extendByMs: -1, at: heartbeatAt },
+    { name: "NaN extension", extendByMs: Number.NaN, at: heartbeatAt },
+    { name: "infinite extension", extendByMs: Number.POSITIVE_INFINITY, at: heartbeatAt },
+    { name: "negative clock", extendByMs: 1, at: -1 },
+    { name: "NaN clock", extendByMs: 1, at: Number.NaN },
+    { name: "infinite clock", extendByMs: 1, at: Number.POSITIVE_INFINITY },
+    { name: "beyond-TimeClip clock", extendByMs: 1, at: "+275761-01-01T00:00:00.000Z" },
+    { name: "pre-acquisition clock", extendByMs: 1, at: new Date(maxInstant - 200).toISOString() },
+    { name: "decreasing heartbeat clock", extendByMs: 1, at: new Date(maxInstant - 80).toISOString() },
+    { name: "overflowing expiry", extendByMs: 100, at: heartbeatAt }
+  ];
+  const stateBytes = () => JSON.stringify(ctx.store.inspectionSnapshot());
+  for (const scenario of scenarios) {
+    for (const [kind, invoke] of [
+      ["shard", () => ctx.store.heartbeatShard({
+        shardId: claim.shardId,
+        leaseToken: claim.leaseToken,
+        extendByMs: scenario.extendByMs,
+        at: scenario.at
+      })],
+      ["auxiliary", () => ctx.store.heartbeatLease({
+        leaseKey: auxiliary.leaseKey,
+        leaseToken: auxiliary.leaseToken,
+        extendByMs: scenario.extendByMs,
+        at: scenario.at
+      })]
+    ]) {
+      const before = stateBytes();
+      await assert.rejects(invoke(), undefined, `${kind}: ${scenario.name}`);
+      assert.equal(
+        stateBytes(),
+        before,
+        `${kind}: ${scenario.name} changed serialized store state`
+      );
+    }
+  }
 });
 
 // ── Transactional outbox atomicity ────────────────────────────────────────
@@ -810,6 +1216,13 @@ test("classifyStageFailure promotes the inbox taxonomy", () => {
   assert.deepEqual(classifyStageFailure(new PipelineStageError("custom", false, undefined, "item")), {
     code: "custom", retryable: false, scope: "item"
   });
+  assert.deepEqual(
+    classifyStageFailure(
+      new PipelineStageError("model_receipt_missing", true, undefined, "item")
+    ),
+    { code: "model_receipt_missing", retryable: true, scope: "item" },
+    "underscore-delimited built-in codes retain their declared routing"
+  );
   assert.deepEqual(classifyStageFailure(new ShardLeaseLostError("s")), {
     code: "shard_lease_lost", retryable: true, scope: "shard"
   });
@@ -828,6 +1241,97 @@ test("classifyStageFailure promotes the inbox taxonomy", () => {
   assert.deepEqual(classifyStageFailure(new Error("boom")), {
     code: "stage_execution_failed", retryable: true, scope: "item"
   });
+
+  const proxy = new Proxy(
+    new PipelineStageError("must-not-be-trusted", true, undefined, "item"),
+    {
+      get() {
+        throw new Error("proxy getter must not run");
+      }
+    }
+  );
+  assert.deepEqual(classifyStageFailure(proxy), {
+    code: "untrusted_proxy_error", retryable: false, scope: "shard"
+  });
+
+  const gettered = new PipelineStageError("original", true, undefined, "item");
+  Object.defineProperty(gettered, "code", {
+    configurable: true,
+    get() {
+      throw new Error("typed getter must not run");
+    }
+  });
+  assert.deepEqual(classifyStageFailure(gettered), {
+    code: "invalid_pipeline_stage_error", retryable: false, scope: "shard"
+  });
+});
+
+test("classifyStageFailure preserves the complete built-in code corpus and rejects malformed code authority", () => {
+  const builtIns = [
+    ["agent_executor_threw", true, "item"],
+    ["agent_invoker_wrong_kind", false, "shard"],
+    ["agent_result_malformed", false, "item"],
+    ["agent_spec_unresolved", false, "shard"],
+    ["agent_step_failed", false, "item"],
+    ["agent_step_infra_error", true, "item"],
+    ["agent_step_timed_out", true, "item"],
+    ["at_most_once_execution_unsupported", false, "shard"],
+    ["immutable_configuration_rejected", false, "shard"],
+    ["gate_budget_exceeded", false, "item"],
+    ["gate_flow_diverged", false, "shard"],
+    ["gate_flow_transition_missing", false, "shard"],
+    ["gate_flow_unresolved", false, "shard"],
+    ["gate_input_contract_mismatch", false, "shard"],
+    ["gate_invoker_wrong_kind", false, "shard"],
+    ["gate_step_implementation_unknown", false, "shard"],
+    ["gate_step_output_rejected", true, "item"],
+    ["gate_step_result_malformed", true, "item"],
+    ["gate_step_unknown_outcome", true, "item"],
+    ["model_output_contract_invalid", true, "item"],
+    ["model_receipt_missing", false, "item"],
+    ["model_receipt_rejected", false, "item"],
+    ["model_result_malformed", false, "item"],
+    ["inference_capacity_exhausted", true, "item"],
+    ["model_binding_unresolved", false, "shard"],
+    ["model_concurrency_misconfigured", false, "shard"],
+    ["model_invoker_wrong_kind", false, "shard"],
+    ["model_prompt_identity_mismatch", false, "shard"],
+    ["model_resolver_invalid", false, "shard"]
+  ];
+  for (const [code, retryable, scope] of builtIns) {
+    assert.deepEqual(
+      classifyStageFailure(
+        new PipelineStageError(code, retryable, undefined, scope)
+      ),
+      { code, retryable, scope },
+      code
+    );
+  }
+  assert.deepEqual(
+    classifyStageFailure(
+      new PipelineStageError("a1_valid_code", true, undefined, "item")
+    ),
+    { code: "a1_valid_code", retryable: true, scope: "item" }
+  );
+  for (const code of [
+    "",
+    "Uppercase_code",
+    "_starts_with_underscore",
+    "bad\u0000code",
+    "a".repeat(201)
+  ]) {
+    assert.deepEqual(
+      classifyStageFailure(
+        new PipelineStageError(code, true, undefined, "item")
+      ),
+      {
+        code: "invalid_pipeline_stage_error",
+        retryable: false,
+        scope: "shard"
+      },
+      JSON.stringify(code)
+    );
+  }
 });
 
 test("retryable failures burn budget then succeed; terminal failures dead-letter immediately", async () => {
@@ -891,15 +1395,26 @@ test("an immutable contract violation is immediately terminal, shard-scoped, and
   ]);
 });
 
-test("an at_most_once node is never retried even with budget left", async () => {
+test("an at_most_once node is rejected before invocation or evidence", async () => {
   const ctx = setup({ stageA: () => { throw new Error("boom once"); } });
   await ctx.createRun();
   const claim = await ctx.store.claimNextShard({ leaseOwner: "w1", leaseDurationMs: 60_000 });
   const node = { ...nodeById(ctx.compiled, "a"), deliverySemantics: "at_most_once" };
-  const result = await executeDurableStage(durableInput(ctx, claim, node, ctx.runItems[0], { maxAttempts: 5 }));
-  assert.equal(result.status, "terminal");
-  assert.equal(ctx.runsA.length, 1, "at_most_once ⇒ exactly one attempt");
-  assert.equal(ctx.store.deadLetterRecords.length, 1);
+  await assert.rejects(
+    executeDurableStage(durableInput(ctx, claim, node, ctx.runItems[0], { maxAttempts: 5 })),
+    (error) => error instanceof PipelineStageError
+      && error.code === "at_most_once_execution_unsupported"
+      && error.scope === "shard"
+      && error.retryable === false
+  );
+  assert.equal(ctx.runsA.length, 0);
+  assert.equal(ctx.store.deadLetterRecords.length, 0);
+  assert.deepEqual(ctx.store.attemptsForKey(stageIdempotencyKey({
+    runId: claim.runId,
+    itemId: ctx.runItems[0].itemId,
+    node,
+    inputDigest: digest(ctx.runItems[0].input)
+  })), []);
 });
 
 // ── Per-item isolation + finalization states (the runner) ─────────────────
@@ -944,6 +1459,64 @@ test("a clean run completes: all nodes execute per item, the shard finalizes com
   assert.equal(outcome.reusedStageCount, 0);
   assert.equal(ctx.store.shardLeaseSnapshot("shard-1"), undefined, "finalization releases the lease");
   assert.equal(await ctx.store.claimNextShard({ leaseOwner: "worker-2", leaseDurationMs: 60_000 }), undefined);
+});
+
+test("a committed completion with a lost response propagates fence loss instead of fabricating failure", async () => {
+  const ctx = setup();
+  await ctx.createRun();
+  const store = forwardingStore(ctx.store, {
+    completeShard: async (input) => {
+      await ctx.store.completeShard(input);
+      throw new Error("completion-response-lost");
+    }
+  });
+
+  await assert.rejects(
+    runOneShard({
+      store,
+      catalog: ctx.catalog,
+      leaseOwner: "worker-1"
+    }),
+    ShardLeaseLostError
+  );
+  assert.equal(ctx.store.shardLeaseSnapshot("shard-1"), undefined);
+  assert.equal(
+    await ctx.store.claimNextShard({
+      leaseOwner: "worker-2",
+      leaseDurationMs: 60_000
+    }),
+    undefined,
+    "the committed completion remains conclusive"
+  );
+});
+
+test("a committed failShard with a lost response propagates indeterminate settlement", async () => {
+  const ctx = setup({ stageA: () => ({ __invalid: true }) });
+  await ctx.createRun();
+  const store = forwardingStore(ctx.store, {
+    failShard: async (input) => {
+      await ctx.store.failShard(input);
+      throw new Error("failure-response-lost");
+    }
+  });
+
+  await assert.rejects(
+    runOneShard({
+      store,
+      catalog: ctx.catalog,
+      leaseOwner: "worker-1"
+    }),
+    /failure-response-lost/
+  );
+  assert.equal(ctx.store.shardLeaseSnapshot("shard-1"), undefined);
+  assert.equal(
+    await ctx.store.claimNextShard({
+      leaseOwner: "worker-2",
+      leaseDurationMs: 60_000
+    }),
+    undefined,
+    "the committed non-retryable failure remains conclusive"
+  );
 });
 
 test("a shard-scoped failure fails the whole shard; non-retryable shards are never reclaimed, retryable ones are", async () => {
@@ -1342,6 +1915,190 @@ test("a cancelled shard is conclusive without false failed-attempt or dead-lette
   );
 });
 
+test("a bound-only control outcome after Pipeline claim settles fail-closed instead of orphaning the lease", async () => {
+  const ctx = setup({
+    stageA: () => {
+      throw new PipelineControlOutcomeError({ continuation: "bound-only" });
+    }
+  });
+  await ctx.createRun();
+
+  const outcome = await runOneShard({
+    store: ctx.store,
+    catalog: ctx.catalog,
+    leaseOwner: "pipeline-owner"
+  });
+  assert.deepEqual(outcome, {
+    status: "failed",
+    runId: "run-1",
+    shardId: "shard-1",
+    retryable: false,
+    errorCode: "pipeline_control_outcome_unsupported"
+  });
+  assert.equal(
+    ctx.store.shardLeaseSnapshot("shard-1"),
+    undefined,
+    "the claimed lease is conclusively settled"
+  );
+  assert.equal(
+    await ctx.store.claimNextShard({
+      leaseOwner: "another-worker",
+      leaseDurationMs: 60_000
+    }),
+    undefined,
+    "fail-closed settlement is conclusive, not an expiry-based requeue"
+  );
+});
+
+test("a Proxy-wrapped typed stage error settles the Pipeline-owned shard fail-closed", async () => {
+  const hostile = new Proxy(
+    new PipelineStageError("forged_retry", true, undefined, "item"),
+    {
+      get(_target, property, receiver) {
+        if (property === "code" || property === "retryable" || property === "scope") {
+          throw new Error("hostile typed field read");
+        }
+        return Reflect.get(_target, property, receiver);
+      }
+    }
+  );
+  const ctx = setup({
+    stageA: () => {
+      throw hostile;
+    }
+  });
+  await ctx.createRun();
+
+  const outcome = await runOneShard({
+    store: ctx.store,
+    catalog: ctx.catalog,
+    leaseOwner: "pipeline-owner",
+    maxAttempts: 1
+  });
+  assert.deepEqual(outcome, {
+    status: "failed",
+    runId: "run-1",
+    shardId: "shard-1",
+    retryable: false,
+    errorCode: "untrusted_proxy_error"
+  });
+  assert.equal(ctx.store.shardLeaseSnapshot("shard-1"), undefined);
+  assert.equal(
+    await ctx.store.claimNextShard({
+      leaseOwner: "another-worker",
+      leaseDurationMs: 60_000
+    }),
+    undefined,
+    "the hostile error cannot orphan a live lease"
+  );
+});
+
+test("a corrupt claimed payload with a valid fence is failed conclusively instead of orphaned", async () => {
+  const ctx = setup();
+  await ctx.createRun();
+  const store = forwardingStore(ctx.store, {
+    claimNextShard: async (input) => {
+      const claim = await ctx.store.claimNextShard(input);
+      assert.ok(claim);
+      return {
+        ...claim,
+        compiled: {
+          ...claim.compiled,
+          compiledDigest: "0".repeat(64)
+        }
+      };
+    }
+  });
+
+  const outcome = await runOneShard({
+    store,
+    catalog: ctx.catalog,
+    leaseOwner: "pipeline-owner"
+  });
+  assert.deepEqual(outcome, {
+    status: "failed",
+    runId: "run-1",
+    shardId: "shard-1",
+    retryable: false,
+    errorCode: "immutable_configuration_rejected"
+  });
+  assert.equal(ctx.store.shardLeaseSnapshot("shard-1"), undefined);
+  assert.equal(
+    await ctx.store.claimNextShard({
+      leaseOwner: "another-worker",
+      leaseDurationMs: 60_000
+    }),
+    undefined,
+    "the malformed claim is conclusively failed, not left leased"
+  );
+});
+
+test("createRun snapshots immutable input once and rejects accessor-backed evidence without mutation", async () => {
+  const rejected = setup();
+  let getterCalls = 0;
+  const accessorItem = {
+    itemId: "accessor-item",
+    ordinal: 1,
+    inputDigest: digest({ value: 1 })
+  };
+  Object.defineProperty(accessorItem, "input", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return getterCalls === 1 ? { value: 1 } : { value: 999 };
+    }
+  });
+  await assert.rejects(
+    rejected.store.createRun({
+      run: {
+        runId: "run-accessor",
+        compiled: rejected.compiled,
+        createdAt: "2026-08-01T00:00:00.000Z"
+      },
+      items: [accessorItem],
+      shards: [{ shardId: "shard-accessor", itemIds: ["accessor-item"] }]
+    }),
+    /must be an enumerable data property/
+  );
+  assert.equal(getterCalls, 0, "descriptor capture never invokes the getter");
+  assert.equal(
+    await rejected.store.claimNextShard({
+      leaseOwner: "worker",
+      leaseDurationMs: 60_000
+    }),
+    undefined,
+    "rejected createRun appends no run or shard"
+  );
+
+  const admitted = setup();
+  const callerInput = { nested: { value: 1 } };
+  const callerConfiguration = { generation: { id: "g1" } };
+  await admitted.store.createRun({
+    run: {
+      runId: "run-snapshot",
+      compiled: admitted.compiled,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      configuration: callerConfiguration
+    },
+    items: [{
+      itemId: "snapshot-item",
+      ordinal: 1,
+      input: callerInput,
+      inputDigest: digest(callerInput)
+    }],
+    shards: [{ shardId: "shard-snapshot", itemIds: ["snapshot-item"] }]
+  });
+  callerInput.nested.value = 999;
+  callerConfiguration.generation.id = "mutated";
+  const claim = await admitted.store.claimNextShard({
+    leaseOwner: "worker",
+    leaseDurationMs: 60_000
+  });
+  assert.ok(claim);
+  assert.deepEqual(claim.items[0].input, { nested: { value: 1 } });
+  assert.equal(claim.items[0].inputDigest, digest({ nested: { value: 1 } }));
+});
+
 test("a supersession discovered during success persistence cancels without landing a result or outbox", async () => {
   const nodes = [
     { nodeId: "a", stage: { id: "step.a", version: 1 }, inputs: [{ slot: "item", source: { kind: "pipeline_input" } }] },
@@ -1354,18 +2111,12 @@ test("a supersession discovered during success persistence cancels without landi
   ];
   const ctx = setup({ nodes });
   await ctx.createRun();
-  const store = new Proxy(ctx.store, {
-    get(target, property) {
-      if (property === "persistStageSuccess") {
-        return (input, outboxEvents) => {
-          if (input.nodeId === "classify") {
-            throw new PipelineShardCancelledError("processing_input_superseded");
-          }
-          return target.persistStageSuccess(input, outboxEvents);
-        };
+  const store = forwardingStore(ctx.store, {
+    persistStageSuccess: (input, outboxEvents) => {
+      if (input.nodeId === "classify") {
+        throw new PipelineShardCancelledError("processing_input_superseded");
       }
-      const value = Reflect.get(target, property);
-      return typeof value === "function" ? value.bind(target) : value;
+      return ctx.store.persistStageSuccess(input, outboxEvents);
     }
   });
   const invoker = createFakeNodeInvoker({
@@ -1497,15 +2248,9 @@ test("the runner never reports a control outcome whose settlement lost the shard
     ];
     const ctx = setup({ nodes });
     await ctx.createRun();
-    const store = new Proxy(ctx.store, {
-      get(target, property) {
-        if (property === scenario.method) {
-          return (input) => {
-            throw new ShardLeaseLostError(input.shardId);
-          };
-        }
-        const value = Reflect.get(target, property);
-        return typeof value === "function" ? value.bind(target) : value;
+    const store = forwardingStore(ctx.store, {
+      [scenario.method]: (input) => {
+        throw new ShardLeaseLostError(input.shardId);
       }
     });
     const invoker = createFakeNodeInvoker({
@@ -1532,16 +2277,10 @@ test("the runner heartbeats the shard lease while a stage runs", async () => {
   const ctx = setup({ stageA: async (input) => { await sleep(80); return { value: input.value * 2 }; } });
   await ctx.createRun();
   let heartbeats = 0;
-  const spy = new Proxy(ctx.store, {
-    get(target, property) {
-      if (property === "heartbeatShard") {
-        return (...args) => {
-          heartbeats += 1;
-          return target.heartbeatShard(...args);
-        };
-      }
-      const value = Reflect.get(target, property);
-      return typeof value === "function" ? value.bind(target) : value;
+  const spy = forwardingStore(ctx.store, {
+    heartbeatShard: (...args) => {
+      heartbeats += 1;
+      return ctx.store.heartbeatShard(...args);
     }
   });
   const outcome = await runOneShard({
@@ -1553,6 +2292,81 @@ test("the runner heartbeats the shard lease while a stage runs", async () => {
   });
   assert.equal(outcome.status, "completed");
   assert.ok(heartbeats >= 1, `expected at least one heartbeat, saw ${heartbeats}`);
+});
+
+test("a synchronous heartbeat throw is captured as authority failure without an uncaught child exit", async () => {
+  const script = `
+    import { runWithShardHeartbeat } from "mission-pipeline/execute/shard-runner";
+    const outcome = await runWithShardHeartbeat({
+      store: {
+        heartbeatShard() {
+          throw new Error("sync-heartbeat-failure");
+        }
+      },
+      shardId: "shard-child",
+      leaseToken: "lease-child",
+      everyMs: 1,
+      extendByMs: 100,
+      now: () => new Date("2026-08-01T00:00:00.000Z"),
+      operation: () => new Promise((resolve) => setTimeout(() => resolve("work-finished"), 25))
+    }).then(
+      (value) => ({ status: "resolved", value }),
+      (error) => ({ status: "rejected", message: error?.message })
+    );
+    process.stdout.write(JSON.stringify(outcome));
+  `;
+  const child = await new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ["--input-type=module", "--eval", script],
+      { cwd: process.cwd() },
+      (error, stdout, stderr) => resolve({ error, stdout, stderr })
+    );
+  });
+  assert.equal(
+    child.error,
+    null,
+    `heartbeat child must exit cleanly; stderr=${child.stderr}`
+  );
+  assert.deepEqual(JSON.parse(child.stdout), {
+    status: "rejected",
+    message: "sync-heartbeat-failure"
+  });
+});
+
+test("runWithShardHeartbeat captures its authority methods before work begins", async () => {
+  let resolveOperation;
+  const operationGate = new Promise((resolve) => {
+    resolveOperation = resolve;
+  });
+  let originalHeartbeats = 0;
+  let replacementHeartbeats = 0;
+  const store = {
+    heartbeatShard: async () => {
+      originalHeartbeats += 1;
+    }
+  };
+  const operation = async () => {
+    store.heartbeatShard = async () => {
+      replacementHeartbeats += 1;
+    };
+    await operationGate;
+    return "done";
+  };
+  const pending = runWithShardHeartbeat({
+    store,
+    shardId: "shard-capture",
+    leaseToken: "lease-capture",
+    everyMs: 1,
+    extendByMs: 100,
+    now: () => new Date("2026-08-01T00:00:00.000Z"),
+    operation
+  });
+  await sleep(10);
+  resolveOperation();
+  assert.equal(await pending, "done");
+  assert.ok(originalHeartbeats >= 1);
+  assert.equal(replacementHeartbeats, 0);
 });
 
 test("authoritative heartbeat cancellation wins over a concurrent stage deferral", async () => {
@@ -1568,34 +2382,22 @@ test("authoritative heartbeat cancellation wins over a concurrent stage deferral
   const ctx = setup({ nodes });
   await ctx.createRun();
   const settlements = { heartbeat: 0, defer: 0, cancel: 0, fail: 0 };
-  const store = new Proxy(ctx.store, {
-    get(target, property) {
-      if (property === "heartbeatShard") {
-        return async () => {
-          settlements.heartbeat += 1;
-          throw new PipelineShardCancelledError("processing_input_superseded");
-        };
-      }
-      if (property === "deferShard") {
-        return (...args) => {
-          settlements.defer += 1;
-          return target.deferShard(...args);
-        };
-      }
-      if (property === "cancelShard") {
-        return (...args) => {
-          settlements.cancel += 1;
-          return target.cancelShard(...args);
-        };
-      }
-      if (property === "failShard") {
-        return (...args) => {
-          settlements.fail += 1;
-          return target.failShard(...args);
-        };
-      }
-      const value = Reflect.get(target, property);
-      return typeof value === "function" ? value.bind(target) : value;
+  const store = forwardingStore(ctx.store, {
+    heartbeatShard: async () => {
+      settlements.heartbeat += 1;
+      throw new PipelineShardCancelledError("processing_input_superseded");
+    },
+    deferShard: (...args) => {
+      settlements.defer += 1;
+      return ctx.store.deferShard(...args);
+    },
+    cancelShard: (...args) => {
+      settlements.cancel += 1;
+      return ctx.store.cancelShard(...args);
+    },
+    failShard: (...args) => {
+      settlements.fail += 1;
+      return ctx.store.failShard(...args);
     }
   });
   const invoker = createFakeNodeInvoker({
@@ -1644,24 +2446,16 @@ test("authoritative cancellation discovered by failShard replaces the false fail
   const ctx = setup({ nodes });
   await ctx.createRun();
   const settlements = { fail: 0, cancel: 0 };
-  const store = new Proxy(ctx.store, {
-    get(target, property) {
-      if (property === "failShard") {
-        return async () => {
-          settlements.fail += 1;
-          throw new PipelineShardCancelledError(
-            "processing_input_superseded"
-          );
-        };
-      }
-      if (property === "cancelShard") {
-        return (...args) => {
-          settlements.cancel += 1;
-          return target.cancelShard(...args);
-        };
-      }
-      const value = Reflect.get(target, property);
-      return typeof value === "function" ? value.bind(target) : value;
+  const store = forwardingStore(ctx.store, {
+    failShard: async () => {
+      settlements.fail += 1;
+      throw new PipelineShardCancelledError(
+        "processing_input_superseded"
+      );
+    },
+    cancelShard: (...args) => {
+      settlements.cancel += 1;
+      return ctx.store.cancelShard(...args);
     }
   });
 

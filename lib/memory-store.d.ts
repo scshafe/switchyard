@@ -24,6 +24,8 @@ export interface DeadLetterRecord extends DeadLetterInput {
 }
 export interface OutboxEventRecord {
     outboxEventId: string;
+    executionId: string;
+    attempt: number;
     runId: string;
     itemId: string;
     nodeId: string;
@@ -69,5 +71,7 @@ export declare class MemoryPipelineStore implements PipelineStore {
     shardLeaseSnapshot(shardId: string): (LeaseRow & {
         leaseKey: string;
     }) | undefined;
+    /** Complete JSON-safe state for hermetic atomicity assertions (not a port API). */
+    inspectionSnapshot(): unknown;
 }
 export {};

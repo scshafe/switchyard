@@ -70,6 +70,12 @@ export interface StageContext {
     readonly runId?: string;
     readonly itemId?: string;
     readonly attempt?: number;
+    /**
+     * Stable durable execution key. It is invariant across retries and fence
+     * takeovers and is therefore the key an idempotent external operation must
+     * use. It is present for every runner-owned invocation.
+     */
+    readonly idempotencyKey?: string;
 }
 /** The identity every registered executable carries, matching its descriptor. */
 export interface StageExecutableIdentity {

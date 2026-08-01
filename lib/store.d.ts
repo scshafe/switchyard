@@ -32,6 +32,24 @@ export declare class ExternalFenceRejectedError extends Error {
     readonly code = "external_fence_rejected";
     constructor(message?: string, cause?: unknown);
 }
+export type BoundEvidenceOperation = "assemble_success_outbox" | "assemble_failure_outbox" | "prepare" | "persist_success" | "persist_failure" | "record_dead_letter";
+/**
+ * A non-authority failure raised by an externally bound evidence adapter.
+ * runBoundShard propagates this typed error: it must never manufacture a
+ * host-settleable `status:"failed"` when Mission cannot prove persistence.
+ */
+export declare class BoundEvidencePersistenceError extends Error {
+    readonly code = "bound_evidence_persistence_failed";
+    readonly operation: BoundEvidenceOperation;
+    constructor(operation: BoundEvidenceOperation, cause: unknown);
+}
+/** Same durable provider/action identity produced contradictory evidence. */
+export declare class EvidenceConflictError extends Error {
+    readonly code = "evidence_conflict";
+    readonly evidenceKind: string;
+    readonly identity: string;
+    constructor(evidenceKind: string, identity: string);
+}
 /** One pipeline input item of a run. `inputDigest` MUST equal digest(input). */
 export interface PipelineRunItem {
     itemId: string;
@@ -107,6 +125,32 @@ export interface BoundPipelineShard {
     shardId: string;
     compiled: CompiledPipeline;
     items: readonly ShardClaimItem[];
+}
+/**
+ * Immutable identity of one host action admitted to externally fenced
+ * execution. The opaque fence token is deliberately NOT part of this value:
+ * a takeover presents a new token against the same action identity and lands
+ * on the same durable idempotency keys.
+ *
+ * The identity is digest sealed and binds the run, shard, compiled definition,
+ * and ordered item membership. Every bound evidence operation receives the
+ * exact same object so a host can reject both stale authority and identity
+ * substitution in its append transaction.
+ */
+export interface BoundPipelineExecutionIdentity {
+    schemaVersion: "bound-pipeline-execution.v1";
+    hostActionId: string;
+    runId: string;
+    shardId: string;
+    pipeline: {
+        id: string;
+        version: number;
+        definitionDigest: string;
+    };
+    compiledDigest: string;
+    itemCount: number;
+    itemSetDigest: string;
+    identityDigest: string;
 }
 export interface HeartbeatShardInput {
     shardId: string;
@@ -241,6 +285,12 @@ export interface PersistedStageResult {
     output: unknown;
     outputDigest: string;
     created: boolean;
+    /**
+     * On created:false, an adapter may prove that the winning success transaction
+     * already committed the exact submitted event batch. Digests are ordered and
+     * computed with {@link outboxEventDigest}. Absence is not proof.
+     */
+    committedOutboxEventDigests?: readonly string[];
 }
 /**
  * One transactional-outbox event, appended ATOMICALLY with the stage attempt
@@ -252,6 +302,18 @@ export interface OutboxEventInput {
     /** Optional uniqueness key; a duplicate dedupeKey is a LOUD rejection. */
     dedupeKey?: string;
 }
+/** Canonical exact-event seal used for created:false commit proofs. */
+export declare function outboxEventDigest(event: OutboxEventInput): string;
+/**
+ * A non-destructive outbox peek whose acknowledgement is called only AFTER
+ * its enclosing stage append succeeds. Arrays remain accepted for ordinary
+ * stateless hooks; the built-in receipt/escalation ledgers return this form so
+ * a stale fence or storage rejection cannot erase pending recovery evidence.
+ */
+export interface RetrySafeOutboxEvents extends ReadonlyArray<OutboxEventInput> {
+    acknowledge(): void;
+}
+export type OutboxEvents = readonly OutboxEventInput[] | RetrySafeOutboxEvents;
 export interface DeadLetterInput {
     runId: string;
     itemId: string;
@@ -261,7 +323,8 @@ export interface DeadLetterInput {
         version: number;
     };
     idempotencyKey: string;
-    input?: unknown;
+    /** Exact prepared stage input; standalone replays may not omit this evidence. */
+    input: unknown;
     error: {
         code: string;
         message: string;
@@ -288,6 +351,7 @@ export interface RecordDeadLetterInput extends DeadLetterInput {
  */
 type ExternalizeStageFence<TInput, TFence> = TInput extends unknown ? Omit<TInput, "shardId" | "leaseToken"> & {
     fence: TFence;
+    executionIdentity: BoundPipelineExecutionIdentity;
 } : never;
 export type PrepareBoundStageExecutionInput<TFence> = ExternalizeStageFence<PrepareStageExecutionInput, TFence>;
 export type PersistBoundStageSuccessInput<TFence> = ExternalizeStageFence<PersistStageSuccessInput, TFence>;
@@ -305,8 +369,8 @@ export type RecordBoundDeadLetterInput<TFence> = ExternalizeStageFence<RecordDea
  */
 export interface BoundPipelineEvidenceStore<TFence> {
     prepareStageExecution(input: PrepareBoundStageExecutionInput<TFence>): Promise<StagePreparation>;
-    persistStageSuccess(input: PersistBoundStageSuccessInput<TFence>, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
-    persistStageFailure(input: PersistBoundStageFailureInput<TFence>, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;
+    persistStageSuccess(input: PersistBoundStageSuccessInput<TFence>, outboxEvents?: OutboxEvents): Promise<PersistedStageResult>;
+    persistStageFailure(input: PersistBoundStageFailureInput<TFence>, outboxEvents?: OutboxEvents): Promise<void>;
     recordDeadLetter(input: RecordBoundDeadLetterInput<TFence>): Promise<{
         created: boolean;
     }>;
@@ -393,6 +457,9 @@ export interface ReleaseLeaseInput {
  *   replaced (crash reclaim) — the fence, not the claim, protects evidence.
  * - heartbeatShard/completeShard/failShard/deferShard/cancelShard: fenced
  *   (ShardLeaseLostError).
+ *   Heartbeats additionally require a monotonic `at`: never earlier than the
+ *   lease's acquiredAt or current heartbeatAt. Adapters must include that
+ *   predicate in the fenced UPDATE, not rely only on the final row CHECK.
  *   completeShard derives the finalization from persisted evidence
  *   (terminal items vs completed items), appends it once, and releases the
  *   lease; it REQUIRES every member item resolved (all nodes succeeded, or
@@ -418,7 +485,8 @@ export interface ReleaseLeaseInput {
  *   (same digest twice is a no-op returning the same ref).
  * - acquireLease: undefined when contended (live lease under another token);
  *   expired leases are replaced. heartbeatLease is fenced
- *   (WorkLeaseLostError). releaseLease: a no-op when the lease is already
+ *   (WorkLeaseLostError) and enforces the same acquiredAt/current-heartbeatAt
+ *   monotonic clock predicate as heartbeatShard. releaseLease: a no-op when the lease is already
  *   gone, but a LOUD WorkLeaseLostError when the lease exists under a
  *   DIFFERENT token (never release someone else's fence).
  */
@@ -433,8 +501,8 @@ export interface PipelineStore {
     deferShard(input: DeferShardInput): Promise<void>;
     cancelShard(input: CancelShardInput): Promise<void>;
     prepareStageExecution(input: PrepareStageExecutionInput): Promise<StagePreparation>;
-    persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: readonly OutboxEventInput[]): Promise<PersistedStageResult>;
-    persistStageFailure(input: PersistStageFailureInput, outboxEvents?: readonly OutboxEventInput[]): Promise<void>;
+    persistStageSuccess(input: PersistStageSuccessInput, outboxEvents?: OutboxEvents): Promise<PersistedStageResult>;
+    persistStageFailure(input: PersistStageFailureInput, outboxEvents?: OutboxEvents): Promise<void>;
     recordDeadLetter(input: RecordDeadLetterInput): Promise<{
         created: boolean;
     }>;

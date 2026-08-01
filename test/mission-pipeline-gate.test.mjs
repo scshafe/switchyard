@@ -703,6 +703,7 @@ const invocation = (node, overrides = {}) => ({
   node,
   input: { item: "hello" },
   attempt: 1,
+  idempotencyKey: digest({ test: "gate-stage-action" }),
   ...overrides
 });
 
@@ -1086,11 +1087,13 @@ test("gate node end-to-end (valid_decision): receipts ride the transactional out
   // The two gate model-step receipts persisted atomically with the node success,
   // dedupe-keyed PER STEP (one gate attempt, several model calls).
   const receiptEvents = ctx.store.outboxEventRecords.filter((event) => event.eventType === MODEL_USAGE_RECEIPT_EVENT_TYPE);
-  assert.deepEqual(
-    receiptEvents.map((event) => event.dedupeKey),
-    ["model-receipt:run-1:i1:gate:1:step:recall", "model-receipt:run-1:i1:gate:1:step:precision"]
-  );
   assert.deepEqual(receiptEvents.map((event) => event.payload.gateStepId), ["recall", "precision"]);
+  for (const event of receiptEvents) {
+    assert.match(
+      event.dedupeKey,
+      new RegExp(`^model-receipt:run-1:i1:gate:1:step:${event.payload.gateStepId}:action:[a-f0-9]{64}:call:[a-f0-9]{64}:evidence:[a-f0-9]{64}$`)
+    );
+  }
   // No escalation event on the valid path.
   assert.equal(ctx.store.outboxEventRecords.filter((event) => event.eventType === GATE_HUMAN_ESCALATION_EVENT_TYPE).length, 0);
   assert.equal(ctx.escalationLedger.records.length, 0);
@@ -1105,7 +1108,10 @@ test("gate node end-to-end (human_escalation): the node SUCCEEDS with the escala
 
   const events = ctx.store.outboxEventRecords.filter((event) => event.eventType === GATE_HUMAN_ESCALATION_EVENT_TYPE);
   assert.equal(events.length, 1);
-  assert.equal(events[0].dedupeKey, "gate-escalation:run-1:i1:gate:1");
+  assert.match(
+    events[0].dedupeKey,
+    /^gate-escalation:run-1:i1:gate:1:action:[a-f0-9]{64}:evidence:[a-f0-9]{64}$/
+  );
   assert.equal(events[0].payload.schemaVersion, "gate-human-escalation-event.v1");
   assert.equal(events[0].payload.runId, "run-1");
   assert.equal(events[0].payload.nodeId, "gate");
@@ -1135,13 +1141,13 @@ test("gate node failure persists its model-step receipt while generic escalation
   const receipts = ctx.store.outboxEventRecords.filter(
     (event) => event.eventType === MODEL_USAGE_RECEIPT_EVENT_TYPE
   );
-  assert.deepEqual(
-    receipts.map((event) => [
-      event.payload.attempt,
-      event.payload.gateStepId,
-      event.dedupeKey
-    ]),
-    [[1, "recall", "model-receipt:run-1:i1:gate:1:step:recall"]]
+  assert.deepEqual(receipts.map((event) => [
+    event.payload.attempt,
+    event.payload.gateStepId
+  ]), [[1, "recall"]]);
+  assert.match(
+    receipts[0].dedupeKey,
+    /^model-receipt:run-1:i1:gate:1:step:recall:action:[a-f0-9]{64}:call:[a-f0-9]{64}:evidence:[a-f0-9]{64}$/
   );
   assert.equal(
     ctx.store.outboxEventRecords.filter(

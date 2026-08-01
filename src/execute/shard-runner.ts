@@ -32,16 +32,21 @@
 //
 // STANDALONE: relative imports only (no npm deps, no zod, no pg).
 
+import { types as nodeTypes } from "node:util";
+
 import { validateCompiledPipeline, type CompiledPipelineNode } from "../compile.js";
-import type { StageCatalog } from "../catalog.js";
+import { StageCatalog } from "../catalog.js";
 import { digest } from "../contracts/digest.js";
 import type { StageContext } from "../node.js";
 import {
   ExternalFenceRejectedError,
+  EvidenceConflictError,
+  BoundEvidencePersistenceError,
   ShardLeaseLostError,
   type BoundPipelineEvidenceStore,
+  type BoundPipelineExecutionIdentity,
   type BoundPipelineShard,
-  type OutboxEventInput,
+  type OutboxEvents,
   type PipelineStore,
   type ShardClaim,
   type ShardClaimItem
@@ -50,6 +55,10 @@ import {
   classifyStageFailure,
   executeBoundDurableStage,
   executeDurableStage,
+  OutboxEvidenceNotCommittedError,
+  PipelineStageError,
+  StageEvidenceAssemblyError,
+  StageResultConflictError,
   type DurableStageResult,
   type ResolvedSlotValue,
   type StageFailureOutboxContext
@@ -69,6 +78,8 @@ export interface NodeInvocation {
   /** The composed, contract-validated stage input. */
   input: unknown;
   attempt: number;
+  /** Stable across retries and external-fence takeovers. */
+  idempotencyKey: string;
   signal?: AbortSignal;
 }
 
@@ -79,10 +90,29 @@ export interface NodeInvocation {
  * output (B4: model binding resolution + usage receipts; B5: gate decision
  * flows; B6: agent steps). A control outcome may bypass that outer attempt
  * only before any unrecorded side effect/usage; independently durable and
- * idempotent inner work is safe, but at_most_once effects are not replayable.
+ * idempotent inner work is safe. v0.2 rejects at_most_once before invocation;
+ * honest support requires durable intent plus indeterminate reconciliation.
  */
 export interface NodeInvoker {
   invoke(invocation: NodeInvocation): Promise<unknown>;
+}
+
+function isInstanceOf<T>(
+  value: unknown,
+  constructor: abstract new (...args: any[]) => T
+): value is T {
+  try {
+    if (
+      value !== null
+      && (typeof value === "object" || typeof value === "function")
+      && nodeTypes.isProxy(value)
+    ) {
+      return false;
+    }
+    return value instanceof constructor;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -118,24 +148,65 @@ export async function runWithShardHeartbeat<T>(input: {
   now: () => Date;
   operation: () => Promise<T>;
 }): Promise<T> {
+  const fields = snapshotOptionRecord(
+    input,
+    HEARTBEAT_OPTION_KEYS,
+    HEARTBEAT_OPTION_KEYS,
+    "runWithShardHeartbeat input"
+  );
+  const heartbeatShard = captureObjectMethod(
+    fields.store,
+    "heartbeatShard",
+    "heartbeat store"
+  );
+  const shardId = assertIdentityString(
+    fields.shardId,
+    "runWithShardHeartbeat shardId"
+  );
+  const leaseToken = assertIdentityString(
+    fields.leaseToken,
+    "runWithShardHeartbeat leaseToken"
+  );
+  const everyMs = fields.everyMs;
+  const extendByMs = fields.extendByMs;
+  if (!Number.isInteger(everyMs) || (everyMs as number) < 1) {
+    throw new Error("runWithShardHeartbeat everyMs must be a positive integer");
+  }
+  if (!Number.isInteger(extendByMs) || (extendByMs as number) < 1) {
+    throw new Error("runWithShardHeartbeat extendByMs must be a positive integer");
+  }
+  const now = fields.now;
+  if (typeof now !== "function") {
+    throw new Error("runWithShardHeartbeat now must be a function");
+  }
+  const operation = fields.operation;
+  if (typeof operation !== "function") {
+    throw new Error("runWithShardHeartbeat operation must be a function");
+  }
   let heartbeatError: unknown;
+  let heartbeatFailed = false;
   let heartbeatInFlight: Promise<void> | undefined;
   const timer = setInterval(() => {
-    if (heartbeatInFlight || heartbeatError !== undefined) return;
-    heartbeatInFlight = input.store
-      .heartbeatShard({
-        shardId: input.shardId,
-        leaseToken: input.leaseToken,
-        extendByMs: input.extendByMs,
-        at: input.now().toISOString()
+    if (heartbeatInFlight || heartbeatFailed) return;
+    // Begin with a promise boundary so a synchronous host method, clock, or
+    // request-construction failure is captured instead of escaping the timer
+    // callback as an uncaught exception.
+    heartbeatInFlight = Promise.resolve()
+      .then(() => heartbeatShard({
+        shardId,
+        leaseToken,
+        extendByMs: extendByMs as number,
+        at: Date.prototype.toISOString.call(now())
       })
+      )
       .catch((error: unknown) => {
+        heartbeatFailed = true;
         heartbeatError = error;
       })
       .finally(() => {
         heartbeatInFlight = undefined;
       });
-  }, input.everyMs);
+  }, everyMs as number);
   timer.unref();
   let operationOutcome!:
     | { ok: true; value: T }
@@ -143,7 +214,7 @@ export async function runWithShardHeartbeat<T>(input: {
   try {
     operationOutcome = {
       ok: true,
-      value: await input.operation()
+      value: await Promise.resolve().then(() => operation())
     };
   } catch (error) {
     operationOutcome = { ok: false, error };
@@ -156,7 +227,7 @@ export async function runWithShardHeartbeat<T>(input: {
   }
   // Heartbeat authority wins even when the operation also rejected. Otherwise
   // a concurrent supersession/cancel could be misreported as defer/failure.
-  if (heartbeatError !== undefined) throw heartbeatError;
+  if (heartbeatFailed) throw heartbeatError;
   if (!operationOutcome.ok) throw operationOutcome.error;
   return operationOutcome.value;
 }
@@ -173,7 +244,7 @@ export interface ShardRunnerOptions {
   leaseDurationMs?: number;
   /** Default max(10_000, leaseDurationMs/3); must be < leaseDurationMs. */
   heartbeatEveryMs?: number;
-  /** Retry budget per node, 1..10, default 2. at_most_once nodes never retry. */
+  /** Retry budget per node, 1..10, default 2. */
   maxAttempts?: number;
   /** Per-nodeId overrides of the retry budget. */
   maxAttemptsByNode?: Record<string, number>;
@@ -190,13 +261,14 @@ export interface ShardRunnerOptions {
     itemId: string;
     output: unknown;
     attempt: number;
-  }) => readonly OutboxEventInput[];
+    idempotencyKey: string;
+  }) => OutboxEvents;
   /**
    * Host hook: outbox events to append ATOMICALLY with a node's failed
    * attempt. Provider/model/agent usage receipts belong here; success-only
    * business events (for example a human-escalation projection) do not.
    */
-  failureOutboxEventsFor?: (context: StageFailureOutboxContext) => readonly OutboxEventInput[];
+  failureOutboxEventsFor?: (context: StageFailureOutboxContext) => OutboxEvents;
   signal?: AbortSignal;
   /** Injectable clock (drives claim/heartbeat/finalize timestamps). */
   now?: () => Date;
@@ -246,6 +318,8 @@ export type BoundShardRunnerOptions<TFence> = Omit<
   shard: BoundPipelineShard;
   evidenceStore: BoundPipelineEvidenceStore<TFence>;
   fence: TFence;
+  /** Digest-sealed immutable run/shard/definition/item/host-action identity. */
+  executionIdentity: BoundPipelineExecutionIdentity;
   /** Injectable clock for append evidence timestamps. */
   now?: () => Date;
 };
@@ -308,6 +382,617 @@ interface ExecuteShardNodesInput {
   }): Promise<DurableStageResult>;
 }
 
+const BOUND_IDENTITY_KEYS = [
+  "schemaVersion",
+  "hostActionId",
+  "runId",
+  "shardId",
+  "pipeline",
+  "compiledDigest",
+  "itemCount",
+  "itemSetDigest",
+  "identityDigest"
+] as const;
+
+function snapshotExactDataRecord(
+  value: unknown,
+  expected: readonly string[],
+  label: string
+): Record<string, unknown> {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || nodeTypes.isProxy(value)
+  ) {
+    throw new Error(`${label} must be a plain data object`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`${label} must be a plain data object`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const actual = Reflect.ownKeys(descriptors);
+  if (actual.some((key) => typeof key !== "string")) {
+    throw new Error(`${label} has unexpected symbol keys`);
+  }
+  const actualStrings = (actual as string[]).sort();
+  const wanted = [...expected].sort();
+  if (
+    actualStrings.length !== wanted.length
+    || actualStrings.some((key, index) => key !== wanted[index])
+  ) {
+    throw new Error(`${label} has unexpected keys`);
+  }
+  const snapshot: Record<string, unknown> = {};
+  for (const key of expected) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined
+      || !("value" in descriptor)
+      || descriptor.enumerable !== true
+    ) {
+      throw new Error(`${label}.${key} must be an enumerable data property`);
+    }
+    // Capture each caller-owned field exactly once without invoking accessors.
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot;
+}
+
+function snapshotOptionRecord(
+  value: unknown,
+  allowedKeys: readonly string[],
+  requiredKeys: readonly string[],
+  label: string
+): Readonly<Record<string, unknown>> {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || nodeTypes.isProxy(value)
+    || (Object.getPrototypeOf(value) !== Object.prototype
+      && Object.getPrototypeOf(value) !== null)
+  ) {
+    throw new Error(`${label} must be a plain data object`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const allowed = new Set(allowedKeys);
+  const actual = Reflect.ownKeys(descriptors);
+  if (
+    actual.some((key) => typeof key !== "string" || !allowed.has(key))
+  ) {
+    throw new Error(`${label} has unexpected keys`);
+  }
+  for (const key of requiredKeys) {
+    if (!Object.prototype.hasOwnProperty.call(descriptors, key)) {
+      throw new Error(`${label}.${key} is required`);
+    }
+  }
+  const snapshot: Record<string, unknown> = {};
+  for (const key of actual as string[]) {
+    const descriptor = descriptors[key]!;
+    if (!("value" in descriptor) || descriptor.enumerable !== true) {
+      throw new Error(`${label}.${key} must be an enumerable data property`);
+    }
+    Object.defineProperty(snapshot, key, {
+      configurable: false,
+      enumerable: true,
+      writable: false,
+      value: descriptor.value
+    });
+  }
+  return Object.freeze(snapshot);
+}
+
+function captureObjectMethod(
+  target: unknown,
+  key: string,
+  label: string
+): (...args: any[]) => any {
+  if (
+    target === null
+    || (typeof target !== "object" && typeof target !== "function")
+    || nodeTypes.isProxy(target)
+  ) {
+    throw new Error(`${label} must be a non-Proxy capability object`);
+  }
+  let cursor: object | null = target as object;
+  while (cursor !== null) {
+    if (nodeTypes.isProxy(cursor)) {
+      throw new Error(`${label} prototype chain must not contain a Proxy`);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
+    if (descriptor !== undefined) {
+      if (!("value" in descriptor) || typeof descriptor.value !== "function") {
+        throw new Error(`${label}.${key} must be a data-property function`);
+      }
+      const method = descriptor.value;
+      return (...args: any[]) => method.apply(target, args);
+    }
+    cursor = Object.getPrototypeOf(cursor);
+  }
+  throw new Error(`${label}.${key} must be a function`);
+}
+
+function captureNodeInvoker(value: unknown): NodeInvoker {
+  const invoke = captureObjectMethod(value, "invoke", "node invoker");
+  return Object.freeze({
+    invoke: (invocation: NodeInvocation) => invoke(invocation)
+  });
+}
+
+function capturePipelineStore(value: unknown): PipelineStore {
+  const methodNames = [
+    "claimNextShard",
+    "heartbeatShard",
+    "completeShard",
+    "failShard",
+    "deferShard",
+    "cancelShard",
+    "prepareStageExecution",
+    "persistStageSuccess",
+    "persistStageFailure",
+    "recordDeadLetter"
+  ] as const;
+  const captured = Object.fromEntries(
+    methodNames.map((methodName) => [
+      methodName,
+      captureObjectMethod(value, methodName, "pipeline store")
+    ])
+  );
+  return Object.freeze(captured) as unknown as PipelineStore;
+}
+
+function captureBoundEvidenceStore<TFence>(
+  value: unknown
+): BoundPipelineEvidenceStore<TFence> {
+  const prepareStageExecution = captureObjectMethod(
+    value,
+    "prepareStageExecution",
+    "bound evidence store"
+  );
+  const persistStageSuccess = captureObjectMethod(
+    value,
+    "persistStageSuccess",
+    "bound evidence store"
+  );
+  const persistStageFailure = captureObjectMethod(
+    value,
+    "persistStageFailure",
+    "bound evidence store"
+  );
+  const recordDeadLetter = captureObjectMethod(
+    value,
+    "recordDeadLetter",
+    "bound evidence store"
+  );
+  return Object.freeze({
+    prepareStageExecution: prepareStageExecution as BoundPipelineEvidenceStore<TFence>["prepareStageExecution"],
+    persistStageSuccess: persistStageSuccess as BoundPipelineEvidenceStore<TFence>["persistStageSuccess"],
+    persistStageFailure: persistStageFailure as BoundPipelineEvidenceStore<TFence>["persistStageFailure"],
+    recordDeadLetter: recordDeadLetter as BoundPipelineEvidenceStore<TFence>["recordDeadLetter"]
+  });
+}
+
+function captureStageCatalog(value: unknown): StageCatalog {
+  if (
+    value === null
+    || typeof value !== "object"
+    || nodeTypes.isProxy(value)
+    || !isInstanceOf(value, StageCatalog)
+  ) {
+    throw new Error("runner catalog must be a StageCatalog instance");
+  }
+  const resolveExecutable = captureObjectMethod(
+    value,
+    "resolveExecutable",
+    "stage catalog"
+  );
+  const contracts = value.contracts;
+  return Object.freeze({
+    contracts,
+    resolveExecutable: (stageId: string, version: number) =>
+      resolveExecutable(stageId, version)
+  }) as unknown as StageCatalog;
+}
+
+const SHARD_RUNNER_OPTION_KEYS = [
+  "store",
+  "catalog",
+  "invoker",
+  "leaseOwner",
+  "leaseDurationMs",
+  "heartbeatEveryMs",
+  "maxAttempts",
+  "maxAttemptsByNode",
+  "runId",
+  "shardId",
+  "outboxEventsFor",
+  "failureOutboxEventsFor",
+  "signal",
+  "now"
+] as const;
+
+const HEARTBEAT_OPTION_KEYS = [
+  "store",
+  "shardId",
+  "leaseToken",
+  "everyMs",
+  "extendByMs",
+  "now",
+  "operation"
+] as const;
+
+const BOUND_RUNNER_OPTION_KEYS = [
+  "shard",
+  "evidenceStore",
+  "fence",
+  "executionIdentity",
+  "catalog",
+  "invoker",
+  "maxAttempts",
+  "maxAttemptsByNode",
+  "outboxEventsFor",
+  "failureOutboxEventsFor",
+  "signal",
+  "now"
+] as const;
+
+function assertIdentityString(value: unknown, label: string): string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > 512
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${label} must be a non-empty bounded string without control characters`);
+  }
+  return value;
+}
+
+function assertDigest(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+    throw new Error(`${label} must be a lowercase SHA-256 digest`);
+  }
+  return value;
+}
+
+function snapshotJsonData(
+  value: unknown,
+  label: string,
+  ancestors = new WeakSet<object>()
+): unknown {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+  ) return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error(`${label} number must be finite`);
+    return value;
+  }
+  if (typeof value !== "object" || nodeTypes.isProxy(value)) {
+    throw new Error(`${label} must contain only plain JSON data`);
+  }
+  if (ancestors.has(value)) throw new Error(`${label} must not be cyclic`);
+  ancestors.add(value);
+  try {
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        throw new Error(`${label} must be a plain array`);
+      }
+      const lengthDescriptor = descriptors.length;
+      if (
+        lengthDescriptor === undefined
+        || !("value" in lengthDescriptor)
+        || typeof lengthDescriptor.value !== "number"
+        || !Number.isInteger(lengthDescriptor.value)
+        || lengthDescriptor.value < 0
+      ) {
+        throw new Error(`${label}.length must be a data property`);
+      }
+      const length = lengthDescriptor.value;
+      const keys = Reflect.ownKeys(descriptors);
+      if (
+        keys.some((key) =>
+          typeof key !== "string"
+          || (key !== "length" && !/^(0|[1-9][0-9]*)$/.test(key))
+        )
+        || keys.length !== length + 1
+      ) {
+        throw new Error(`${label} must be a dense array without extra keys`);
+      }
+      const array = Array.from({ length }, (_, index) => {
+        const descriptor = descriptors[String(index)];
+        if (
+          descriptor === undefined
+          || !("value" in descriptor)
+          || descriptor.enumerable !== true
+        ) {
+          throw new Error(`${label}[${index}] must be an enumerable data property`);
+        }
+        return snapshotJsonData(descriptor.value, `${label}[${index}]`, ancestors);
+      });
+      return Object.freeze(array);
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(`${label} must be a plain data object`);
+    }
+    const object: Record<string, unknown> = {};
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key !== "string") throw new Error(`${label} has symbol keys`);
+      const descriptor = descriptors[key]!;
+      if (!("value" in descriptor) || descriptor.enumerable !== true) {
+        throw new Error(`${label}.${key} must be an enumerable data property`);
+      }
+      Object.defineProperty(object, key, {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: snapshotJsonData(descriptor.value, `${label}.${key}`, ancestors)
+      });
+    }
+    return Object.freeze(object);
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function snapshotBoundPipelineShard(value: unknown): BoundPipelineShard {
+  const snapshot = snapshotJsonData(value, "bound shard");
+  const root = snapshotExactDataRecord(
+    snapshot,
+    ["runId", "shardId", "compiled", "items"],
+    "bound shard"
+  );
+  const runId = assertIdentityString(root.runId, "bound shard runId");
+  const shardId = assertIdentityString(root.shardId, "bound shard shardId");
+  const compiled = snapshotJsonData(
+    validateCompiledPipeline(root.compiled),
+    "bound shard compiled pipeline"
+  ) as BoundPipelineShard["compiled"];
+  if (!Array.isArray(root.items) || root.items.length < 1) {
+    throw new Error("bound shard items must be a non-empty array");
+  }
+  const items = root.items.map((item, index) => {
+    const record = snapshotExactDataRecord(
+      item,
+      ["itemId", "ordinal", "input", "inputDigest"],
+      `bound shard items[${index}]`
+    );
+    const itemId = assertIdentityString(record.itemId, `bound shard items[${index}].itemId`);
+    if (!Number.isInteger(record.ordinal) || (record.ordinal as number) < 1) {
+      throw new Error(`bound shard items[${index}].ordinal must be a positive integer`);
+    }
+    const inputDigest = assertDigest(record.inputDigest, `bound shard items[${index}].inputDigest`);
+    if (digest(record.input) !== inputDigest) {
+      throw new Error(`bound shard items[${index}].inputDigest does not match input`);
+    }
+    return Object.freeze({
+      itemId,
+      ordinal: record.ordinal as number,
+      input: record.input,
+      inputDigest
+    });
+  });
+  return Object.freeze({
+    runId,
+    shardId,
+    compiled,
+    items: Object.freeze(items)
+  });
+}
+
+function snapshotShardClaim(value: unknown): ShardClaim {
+  const snapshot = snapshotJsonData(value, "pipeline shard claim");
+  const root = snapshotExactDataRecord(
+    snapshot,
+    [
+      "runId",
+      "shardId",
+      "leaseOwner",
+      "leaseToken",
+      "acquiredAt",
+      "expiresAt",
+      "compiled",
+      "items"
+    ],
+    "pipeline shard claim"
+  );
+  const shard = snapshotBoundPipelineShard({
+    runId: root.runId,
+    shardId: root.shardId,
+    compiled: root.compiled,
+    items: root.items
+  });
+  return Object.freeze({
+    ...shard,
+    leaseOwner: assertIdentityString(root.leaseOwner, "pipeline shard claim leaseOwner"),
+    leaseToken: assertIdentityString(root.leaseToken, "pipeline shard claim leaseToken"),
+    acquiredAt: assertIdentityString(root.acquiredAt, "pipeline shard claim acquiredAt"),
+    expiresAt: assertIdentityString(root.expiresAt, "pipeline shard claim expiresAt")
+  }) as unknown as ShardClaim;
+}
+
+interface ShardSettlementEnvelope {
+  readonly runId: string;
+  readonly shardId: string;
+  readonly leaseToken: string;
+}
+
+/**
+ * Capture only the immutable identity needed to settle a claim before
+ * validating the larger caller-owned payload. If compiled/items are corrupt,
+ * this envelope still lets the runner release the exact fenced lease instead
+ * of abandoning it until expiry.
+ */
+function snapshotShardSettlementEnvelope(value: unknown): ShardSettlementEnvelope {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || nodeTypes.isProxy(value)
+    || (
+      Object.getPrototypeOf(value) !== Object.prototype
+      && Object.getPrototypeOf(value) !== null
+    )
+  ) {
+    throw new Error("pipeline shard claim settlement envelope must be a plain data object");
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const read = (key: "runId" | "shardId" | "leaseToken"): string => {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined
+      || !("value" in descriptor)
+      || descriptor.enumerable !== true
+    ) {
+      throw new Error(
+        `pipeline shard claim settlement envelope.${key} must be an enumerable data property`
+      );
+    }
+    return assertIdentityString(
+      descriptor.value,
+      `pipeline shard claim settlement envelope ${key}`
+    );
+  };
+  return Object.freeze({
+    runId: read("runId"),
+    shardId: read("shardId"),
+    leaseToken: read("leaseToken")
+  });
+}
+
+function boundItemSetDigest(shard: BoundPipelineShard): string {
+  return digest(shard.items.map((item) => ({
+    itemId: item.itemId,
+    ordinal: item.ordinal,
+    inputDigest: item.inputDigest
+  })));
+}
+
+/**
+ * Seal the immutable identity a host action must present with every bound
+ * evidence append. Fence generations may change during takeover; this value
+ * must not.
+ */
+export function createBoundPipelineExecutionIdentity(input: {
+  hostActionId: string;
+  shard: BoundPipelineShard;
+}): BoundPipelineExecutionIdentity {
+  const wrapper = snapshotExactDataRecord(
+    input,
+    ["hostActionId", "shard"],
+    "bound execution identity input"
+  );
+  const shard = snapshotBoundPipelineShard(wrapper.shard);
+  const compiled = snapshotJsonData(
+    validateCompiledPipeline(shard.compiled),
+    "pipeline shard compiled pipeline"
+  ) as BoundPipelineShard["compiled"];
+  const payload = {
+    schemaVersion: "bound-pipeline-execution.v1" as const,
+    hostActionId: assertIdentityString(wrapper.hostActionId, "hostActionId"),
+    runId: shard.runId,
+    shardId: shard.shardId,
+    pipeline: {
+      id: compiled.pipeline.id,
+      version: compiled.pipeline.version,
+      definitionDigest: compiled.pipeline.digest
+    },
+    compiledDigest: compiled.compiledDigest,
+    itemCount: shard.items.length,
+    itemSetDigest: boundItemSetDigest(shard)
+  };
+  return Object.freeze({
+    ...payload,
+    pipeline: Object.freeze(payload.pipeline),
+    identityDigest: digest(payload)
+  });
+}
+
+/** Validate the seal and its exact correspondence to the supplied shard. */
+export function validateBoundPipelineExecutionIdentity(
+  value: unknown,
+  shard: BoundPipelineShard
+): BoundPipelineExecutionIdentity {
+  const canonicalShard = snapshotBoundPipelineShard(shard);
+  const compiled = validateCompiledPipeline(canonicalShard.compiled);
+  const identity = snapshotExactDataRecord(
+    value,
+    BOUND_IDENTITY_KEYS,
+    "bound execution identity"
+  );
+  if (identity.schemaVersion !== "bound-pipeline-execution.v1") {
+    throw new Error("bound execution identity schemaVersion is unsupported");
+  }
+  const hostActionId = assertIdentityString(identity.hostActionId, "bound execution identity hostActionId");
+  const runId = assertIdentityString(identity.runId, "bound execution identity runId");
+  const shardId = assertIdentityString(identity.shardId, "bound execution identity shardId");
+  const pipeline = snapshotExactDataRecord(
+    identity.pipeline,
+    ["id", "version", "definitionDigest"],
+    "bound execution identity pipeline"
+  );
+  const pipelineId = assertIdentityString(pipeline.id, "bound execution identity pipeline.id");
+  const pipelineVersion = pipeline.version;
+  if (!Number.isInteger(pipelineVersion) || (pipelineVersion as number) < 1) {
+    throw new Error("bound execution identity pipeline.version must be a positive integer");
+  }
+  const definitionDigest = assertDigest(
+    pipeline.definitionDigest,
+    "bound execution identity pipeline.definitionDigest"
+  );
+  const compiledDigest = assertDigest(identity.compiledDigest, "bound execution identity compiledDigest");
+  const itemSetDigest = assertDigest(identity.itemSetDigest, "bound execution identity itemSetDigest");
+  const identityDigest = assertDigest(identity.identityDigest, "bound execution identity identityDigest");
+  const itemCount = identity.itemCount;
+  if (!Number.isInteger(itemCount) || (itemCount as number) < 1) {
+    throw new Error("bound execution identity itemCount must be a positive integer");
+  }
+  const expectedItemSetDigest = boundItemSetDigest(canonicalShard);
+  if (
+    runId !== canonicalShard.runId
+    || shardId !== canonicalShard.shardId
+    || pipelineId !== compiled.pipeline.id
+    || pipelineVersion !== compiled.pipeline.version
+    || definitionDigest !== compiled.pipeline.digest
+    || compiledDigest !== compiled.compiledDigest
+    || itemCount !== canonicalShard.items.length
+    || itemSetDigest !== expectedItemSetDigest
+  ) {
+    throw new Error("bound execution identity does not match the immutable shard");
+  }
+  const payload = {
+    schemaVersion: "bound-pipeline-execution.v1" as const,
+    hostActionId,
+    runId,
+    shardId,
+    pipeline: {
+      id: pipelineId,
+      version: pipelineVersion as number,
+      definitionDigest
+    },
+    compiledDigest,
+    itemCount: itemCount as number,
+    itemSetDigest
+  };
+  if (digest(payload) !== identityDigest) {
+    throw new Error("bound execution identity digest does not match its payload");
+  }
+  // Never retain or pass through caller-owned/deserialized objects. The one
+  // canonical frozen snapshot returned here is reused for every async append,
+  // closing mutation races between validation and persistence.
+  return Object.freeze({
+    ...payload,
+    pipeline: Object.freeze(payload.pipeline),
+    identityDigest
+  });
+}
+
 /**
  * The single node-walk implementation shared by Pipeline-owned and
  * externally fenced runners. It contains no lease lifecycle operations.
@@ -316,7 +1001,23 @@ async function executeShardNodes(
   input: ExecuteShardNodesInput
 ): Promise<ShardExecutionMetrics> {
   const { shard } = input;
-  const compiled = validateCompiledPipeline(shard.compiled);
+  const compiled = snapshotJsonData(
+    validateCompiledPipeline(shard.compiled),
+    "pipeline shard compiled pipeline"
+  ) as BoundPipelineShard["compiled"];
+  const unsupportedNode = compiled.nodes.find(
+    (node) => node.deliverySemantics === "at_most_once"
+  );
+  if (unsupportedNode !== undefined) {
+    throw new PipelineStageError(
+      "at_most_once_execution_unsupported",
+      false,
+      new Error(
+        `pipeline contains at_most_once node ${unsupportedNode.nodeId}; v0.2 rejects the whole DAG before stage invocation`
+      ),
+      "shard"
+    );
+  }
   if (
     typeof shard.runId !== "string"
     || shard.runId.length === 0
@@ -422,6 +1123,7 @@ async function executeShardNodes(
             node,
             input: value,
             attempt: ctx.attempt ?? 1,
+            idempotencyKey: ctx.idempotencyKey!,
             ...(ctx.signal === undefined ? {} : { signal: ctx.signal })
           });
       }
@@ -448,11 +1150,11 @@ async function executeShardNodes(
 
 async function settleShardControl(
   error: unknown,
-  claim: ShardClaim,
+  claim: ShardSettlementEnvelope,
   store: PipelineStore,
   now: () => Date
 ): Promise<ShardRunOutcome | undefined> {
-  if (error instanceof PipelineShardDeferredError) {
+  if (isInstanceOf(error, PipelineShardDeferredError)) {
     // A control outcome is true only after its fenced durable settlement.
     // Lost fences therefore propagate instead of manufacturing audit truth.
     await store.deferShard({
@@ -468,7 +1170,7 @@ async function settleShardControl(
       reasonCode: error.reasonCode
     };
   }
-  if (error instanceof PipelineShardCancelledError) {
+  if (isInstanceOf(error, PipelineShardCancelledError)) {
     await store.cancelShard({
       shardId: claim.shardId,
       leaseToken: claim.leaseToken,
@@ -494,72 +1196,142 @@ async function settleShardControl(
  * by completeShard once every member is resolved.
  */
 export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRunOutcome> {
-  const leaseDurationMs = options.leaseDurationMs ?? 1_200_000;
+  const fields = snapshotOptionRecord(
+    options,
+    SHARD_RUNNER_OPTION_KEYS,
+    ["store", "catalog", "leaseOwner"],
+    "runOneShard options"
+  );
+  const store = capturePipelineStore(fields.store);
+  const catalog = captureStageCatalog(fields.catalog);
+  const leaseOwner = assertIdentityString(fields.leaseOwner, "runOneShard leaseOwner");
+  const invoker = fields.invoker === undefined
+    ? undefined
+    : captureNodeInvoker(fields.invoker);
+  const outboxEventsFor = fields.outboxEventsFor;
+  if (outboxEventsFor !== undefined && typeof outboxEventsFor !== "function") {
+    throw new Error("runOneShard: outboxEventsFor must be a function");
+  }
+  const failureOutboxEventsFor = fields.failureOutboxEventsFor;
+  if (
+    failureOutboxEventsFor !== undefined
+    && typeof failureOutboxEventsFor !== "function"
+  ) {
+    throw new Error("runOneShard: failureOutboxEventsFor must be a function");
+  }
+  const maxAttemptsByNode = fields.maxAttemptsByNode === undefined
+    ? undefined
+    : snapshotJsonData(
+        fields.maxAttemptsByNode,
+        "runOneShard maxAttemptsByNode"
+      ) as Record<string, number>;
+  const leaseDurationMs = (fields.leaseDurationMs as number | undefined) ?? 1_200_000;
   if (!Number.isInteger(leaseDurationMs) || leaseDurationMs < 1) {
     throw new Error("runOneShard: leaseDurationMs must be a positive integer");
   }
-  const heartbeatEveryMs = options.heartbeatEveryMs ?? Math.max(10_000, Math.floor(leaseDurationMs / 3));
+  const heartbeatEveryMs = (fields.heartbeatEveryMs as number | undefined)
+    ?? Math.max(10_000, Math.floor(leaseDurationMs / 3));
   if (!Number.isInteger(heartbeatEveryMs) || heartbeatEveryMs < 1 || heartbeatEveryMs >= leaseDurationMs) {
     throw new Error("runOneShard: heartbeatEveryMs must be a positive integer less than leaseDurationMs");
   }
-  const maxAttempts = options.maxAttempts ?? 2;
+  const maxAttempts = (fields.maxAttempts as number | undefined) ?? 2;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
     throw new Error("runOneShard: maxAttempts must be an integer from 1 through 10");
   }
-  if ((options.runId === undefined) !== (options.shardId === undefined)) {
+  if ((fields.runId === undefined) !== (fields.shardId === undefined)) {
     throw new Error("runOneShard: an exact shard run requires both runId and shardId");
   }
-  const now = options.now ?? (() => new Date());
-
-  const claim = await options.store.claimNextShard({
-    leaseOwner: options.leaseOwner,
+  const nowCandidate = fields.now ?? (() => new Date());
+  if (typeof nowCandidate !== "function") {
+    throw new Error("runOneShard: now must be a function");
+  }
+  const now = nowCandidate as () => Date;
+  const capturedOptions = Object.freeze({
+    store,
+    catalog,
+    leaseOwner,
     leaseDurationMs,
-    ...(options.runId === undefined ? {} : { runId: options.runId, shardId: options.shardId! }),
+    heartbeatEveryMs,
+    maxAttempts,
+    ...(invoker === undefined ? {} : { invoker }),
+    ...(maxAttemptsByNode === undefined ? {} : { maxAttemptsByNode }),
+    ...(fields.runId === undefined
+      ? {}
+      : { runId: fields.runId as string, shardId: fields.shardId as string }),
+    ...(outboxEventsFor === undefined ? {} : { outboxEventsFor }),
+    ...(failureOutboxEventsFor === undefined ? {} : { failureOutboxEventsFor }),
+    ...(fields.signal === undefined ? {} : { signal: fields.signal as AbortSignal }),
+    now
+  }) as ShardRunnerOptions & {
+    leaseDurationMs: number;
+    heartbeatEveryMs: number;
+    maxAttempts: number;
+    now: () => Date;
+  };
+
+  const claimRaw = await store.claimNextShard({
+    leaseOwner,
+    leaseDurationMs,
+    ...(fields.runId === undefined
+      ? {}
+      : { runId: fields.runId as string, shardId: fields.shardId as string }),
     at: now().toISOString()
   });
-  if (!claim) return { status: "idle" };
+  if (!claimRaw) return { status: "idle" };
+  // Capture the fence envelope first. Full claim validation is intentionally
+  // inside the settlement guard so corrupt compiled/item evidence does not
+  // strand a valid lease for its entire duration.
+  const settlementClaim = snapshotShardSettlementEnvelope(claimRaw);
 
   try {
-    return await processClaim(claim, { ...options, leaseDurationMs, heartbeatEveryMs, maxAttempts, now });
+    const claim = snapshotShardClaim(claimRaw);
+    return await processClaim(claim, capturedOptions);
   } catch (error) {
-    // This signal exists exclusively for the external-fence runner. Legacy
-    // ownership must not reinterpret it as a failed shard and release a lease.
-    if (error instanceof PipelineControlOutcomeError) throw error;
     const controlOutcome = await settleShardControl(
       error,
-      claim,
-      options.store,
+      settlementClaim,
+      store,
       now
     );
     if (controlOutcome) return controlOutcome;
     const failure = classifyStageFailure(error);
     try {
-      await options.store.failShard({
-        shardId: claim.shardId,
-        leaseToken: claim.leaseToken,
+      await store.failShard({
+        shardId: settlementClaim.shardId,
+        leaseToken: settlementClaim.leaseToken,
         retryable: failure.retryable,
         errorCode: failure.code,
         at: now().toISOString()
       });
     } catch (finishError) {
-      // Promoted: a lost lease during failure finalization is swallowed —
-      // the new claimant owns the shard now.
-      if (!(finishError instanceof ShardLeaseLostError)) {
+      // A lost fence cannot prove that this failure was recorded. It may mean
+      // a concurrent claimant owns the shard, or that completeShard committed
+      // and only its response was lost. Propagate the typed authority loss;
+      // returning status:"failed" here would manufacture settlement evidence.
+      if (isInstanceOf(finishError, ShardLeaseLostError)) {
+        throw finishError;
+      } else {
         // A host may discover authoritative defer/cancel state only while
         // revalidating inside failShard's settlement transaction. Route that
         // late control through the same fenced settlement instead of appending
         // or reporting a false shard failure.
         const lateControlOutcome = await settleShardControl(
           finishError,
-          claim,
-          options.store,
+          settlementClaim,
+          store,
           now
         );
         if (lateControlOutcome) return lateControlOutcome;
         throw finishError;
       }
     }
-    return { status: "failed", runId: claim.runId, shardId: claim.shardId, retryable: failure.retryable, errorCode: failure.code };
+    return {
+      status: "failed",
+      runId: settlementClaim.runId,
+      shardId: settlementClaim.shardId,
+      retryable: failure.retryable,
+      errorCode: failure.code
+    };
   }
 }
 
@@ -576,51 +1348,117 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
 export async function runBoundShard<TFence>(
   options: BoundShardRunnerOptions<TFence>
 ): Promise<BoundShardRunOutcome> {
-  const maxAttempts = options.maxAttempts ?? 2;
+  const fields = snapshotOptionRecord(
+    options,
+    BOUND_RUNNER_OPTION_KEYS,
+    ["shard", "evidenceStore", "fence", "executionIdentity", "catalog"],
+    "runBoundShard options"
+  );
+  const maxAttempts = (fields.maxAttempts as number | undefined) ?? 2;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
     throw new Error(
       "runBoundShard: maxAttempts must be an integer from 1 through 10"
     );
   }
-  const now = options.now ?? (() => new Date());
+  const nowCandidate = fields.now ?? (() => new Date());
+  if (typeof nowCandidate !== "function") {
+    throw new Error("runBoundShard: now must be a function");
+  }
+  const now = nowCandidate as () => Date;
+  const catalog = captureStageCatalog(fields.catalog);
+  const evidenceStore = captureBoundEvidenceStore<TFence>(fields.evidenceStore);
+  const fence = fields.fence as TFence;
+  const invoker = fields.invoker === undefined
+    ? undefined
+    : captureNodeInvoker(fields.invoker);
+  const outboxEventsFor = fields.outboxEventsFor;
+  if (outboxEventsFor !== undefined && typeof outboxEventsFor !== "function") {
+    throw new Error("runBoundShard: outboxEventsFor must be a function");
+  }
+  const failureOutboxEventsFor = fields.failureOutboxEventsFor;
+  if (
+    failureOutboxEventsFor !== undefined
+    && typeof failureOutboxEventsFor !== "function"
+  ) {
+    throw new Error("runBoundShard: failureOutboxEventsFor must be a function");
+  }
+  const maxAttemptsByNode = fields.maxAttemptsByNode === undefined
+    ? undefined
+    : snapshotJsonData(
+        fields.maxAttemptsByNode,
+        "runBoundShard maxAttemptsByNode"
+      ) as Record<string, number>;
+  // Capture every caller-owned byte once before any async boundary. All
+  // evidence and outcomes below use only this canonical frozen snapshot.
+  const shard = snapshotBoundPipelineShard(fields.shard);
 
   try {
+    const executionIdentity = validateBoundPipelineExecutionIdentity(
+      fields.executionIdentity,
+      shard
+    );
+    const compiled = snapshotJsonData(
+      validateCompiledPipeline(shard.compiled),
+      "bound shard compiled pipeline"
+    ) as BoundPipelineShard["compiled"];
+    const unsafeNode = compiled.nodes.find(
+      (node) => node.deliverySemantics === "at_most_once"
+    );
+    if (unsafeNode !== undefined) {
+      throw new PipelineStageError(
+        "at_most_once_execution_unsupported",
+        false,
+        new Error(
+          `node ${unsafeNode.nodeId} declares at_most_once, which v0.2 rejects before invocation: crash-safe execution requires durable intent plus indeterminate-effect reconciliation`
+        ),
+        "shard"
+      );
+    }
     const metrics = await executeShardNodes({
-      shard: options.shard,
-      catalog: options.catalog,
-      ...(options.invoker === undefined ? {} : { invoker: options.invoker }),
+      shard,
+      catalog,
+      ...(invoker === undefined ? {} : { invoker }),
       executeStage: ({ item, node, slots, invoke }) =>
         executeBoundDurableStage({
-          evidenceStore: options.evidenceStore,
-          fence: options.fence,
-          contracts: options.catalog.contracts,
-          runId: options.shard.runId,
+          evidenceStore,
+          fence,
+          executionIdentity,
+          contracts: catalog.contracts,
+          runId: shard.runId,
           itemId: item.itemId,
           node,
           slots,
           invoke,
           maxAttempts:
-            options.maxAttemptsByNode?.[node.nodeId] ?? maxAttempts,
-          ...(options.outboxEventsFor === undefined
+            maxAttemptsByNode?.[node.nodeId] ?? maxAttempts,
+          ...(outboxEventsFor === undefined
             ? {}
             : {
-                outboxEvents: (output, { runId, attempt }) =>
-                  options.outboxEventsFor!({
-                    runId,
-                    node,
-                    itemId: item.itemId,
-                    output,
-                    attempt
-                  })
+                outboxEvents: (output, { runId, attempt, idempotencyKey }) =>
+                  assembleBoundOutbox(
+                    "assemble_success_outbox",
+                    () => outboxEventsFor({
+                      runId,
+                      node,
+                      itemId: item.itemId,
+                      output,
+                      attempt,
+                      idempotencyKey
+                    })
+                  )
               }),
-          ...(options.failureOutboxEventsFor === undefined
+          ...(failureOutboxEventsFor === undefined
             ? {}
             : {
-                failureOutboxEvents: options.failureOutboxEventsFor
+                failureOutboxEvents: (context) =>
+                  assembleBoundOutbox(
+                    "assemble_failure_outbox",
+                    () => failureOutboxEventsFor(context)
+                  )
               }),
-          ...(options.signal === undefined
+          ...(fields.signal === undefined
             ? {}
-            : { signal: options.signal }),
+            : { signal: fields.signal as AbortSignal }),
           now
         })
     });
@@ -628,8 +1466,8 @@ export async function runBoundShard<TFence>(
     if (metrics.terminalItemCount > 0) {
       return {
         status: "partial",
-        runId: options.shard.runId,
-        shardId: options.shard.shardId,
+        runId: shard.runId,
+        shardId: shard.shardId,
         itemCount: metrics.itemCount,
         completedItemCount: metrics.completedItemCount,
         terminalItemCount: metrics.terminalItemCount,
@@ -639,8 +1477,8 @@ export async function runBoundShard<TFence>(
     }
     return {
       status: "completed",
-      runId: options.shard.runId,
-      shardId: options.shard.shardId,
+      runId: shard.runId,
+      shardId: shard.shardId,
       itemCount: metrics.itemCount,
       stageExecutionCount: metrics.stageExecutionCount,
       reusedStageCount: metrics.reusedStageCount
@@ -648,31 +1486,38 @@ export async function runBoundShard<TFence>(
   } catch (error) {
     // External authority failures are not stage outcomes. The host needs the
     // original typed rejection to decide whether its task was fenced/reclaimed.
-    if (error instanceof ExternalFenceRejectedError) throw error;
-    if (error instanceof PipelineControlOutcomeError) {
+    if (
+      isInstanceOf(error, ExternalFenceRejectedError)
+      || isInstanceOf(error, BoundEvidencePersistenceError)
+      || isInstanceOf(error, OutboxEvidenceNotCommittedError)
+      || isInstanceOf(error, StageEvidenceAssemblyError)
+      || isInstanceOf(error, StageResultConflictError)
+      || isInstanceOf(error, EvidenceConflictError)
+    ) throw error;
+    if (isInstanceOf(error, PipelineControlOutcomeError)) {
       return {
         status: "control",
-        runId: options.shard.runId,
-        shardId: options.shard.shardId,
+        runId: shard.runId,
+        shardId: shard.shardId,
         control: error.outcome
       };
     }
-    if (error instanceof PipelineShardDeferredError) {
+    if (isInstanceOf(error, PipelineShardDeferredError)) {
       return {
         status: "control",
-        runId: options.shard.runId,
-        shardId: options.shard.shardId,
+        runId: shard.runId,
+        shardId: shard.shardId,
         control: {
           kind: "deferred",
           reasonCode: error.reasonCode
         }
       };
     }
-    if (error instanceof PipelineShardCancelledError) {
+    if (isInstanceOf(error, PipelineShardCancelledError)) {
       return {
         status: "control",
-        runId: options.shard.runId,
-        shardId: options.shard.shardId,
+        runId: shard.runId,
+        shardId: shard.shardId,
         control: {
           kind: "cancelled",
           reasonCode: error.reasonCode
@@ -682,11 +1527,23 @@ export async function runBoundShard<TFence>(
     const failure = classifyStageFailure(error);
     return {
       status: "failed",
-      runId: options.shard.runId,
-      shardId: options.shard.shardId,
+      runId: shard.runId,
+      shardId: shard.shardId,
       retryable: failure.retryable,
       errorCode: failure.code
     };
+  }
+}
+
+function assembleBoundOutbox<T extends OutboxEvents>(
+  operation: "assemble_success_outbox" | "assemble_failure_outbox",
+  assemble: () => T
+): T {
+  try {
+    return assemble();
+  } catch (error) {
+    if (isInstanceOf(error, BoundEvidencePersistenceError)) throw error;
+    throw new BoundEvidencePersistenceError(operation, error);
   }
 }
 
@@ -728,13 +1585,14 @@ async function processClaim(
             ...(options.outboxEventsFor === undefined
               ? {}
               : {
-                  outboxEvents: (output, { runId, attempt }) =>
+                  outboxEvents: (output, { runId, attempt, idempotencyKey }) =>
                     options.outboxEventsFor!({
                       runId,
                       node,
                       itemId: item.itemId,
                       output,
-                      attempt
+                      attempt,
+                      idempotencyKey
                     })
                 }),
             ...(options.failureOutboxEventsFor === undefined

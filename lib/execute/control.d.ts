@@ -15,8 +15,11 @@ export declare class PipelineShardCancelledError extends Error {
  * dependencies, a continuation reference, delivery instructions, or another
  * domain-specific parking contract after {@code runBoundShard} returns.
  *
- * The bound runner returns the payload verbatim and performs no suspension or
- * lease operation. The legacy `runOneShard` path does not settle this signal.
+ * The bound runner returns a canonical frozen snapshot and performs no suspension or
+ * lease operation. If this bound-only signal escapes after legacy
+ * `runOneShard` has claimed a Pipeline-owned shard, the runner conclusively
+ * fails that shard with `pipeline_control_outcome_unsupported`; it never
+ * abandons the lease until expiry.
  */
 export declare class PipelineControlOutcomeError extends Error {
     readonly outcome: unknown;

@@ -6,8 +6,8 @@
 -- host adapters have an unambiguous relational shape to bind. HOSTS OWN THEIR
 -- MIGRATIONS: inbox-pipeline binds its existing pipeline/decision schemas
 -- (append-only triggers, least-authority grants, RLS) through its own numbered
--- sql/postgres series; an MC host would register tables in mc-store's
--- src/postgres-migrations. Copy, adapt, review, and migrate under the host's
+-- sql/postgres series; other hosts bind equivalent reviewed schemas through
+-- their own migration ledgers. Copy, adapt, review, and migrate under the host's
 -- own ledger — never execute this file directly.
 --
 -- Lease/fencing semantics are promoted from inbox sql/postgres/009
@@ -56,7 +56,15 @@ CREATE TABLE runs (
   compiled         jsonb       NOT NULL,
   compiled_digest  text        NOT NULL CHECK (compiled_digest ~ '^[a-f0-9]{64}$'),
   configuration    jsonb,                              -- host-owned, opaque
-  created_at       timestamptz NOT NULL
+  created_at       timestamptz NOT NULL,
+  UNIQUE (run_id, pipeline_digest, compiled_digest),
+  UNIQUE (
+    run_id,
+    pipeline_id,
+    pipeline_version,
+    pipeline_digest,
+    compiled_digest
+  )
 );
 
 -- Append-only. input_digest = canonical-JSON digest of input (verified on write).
@@ -76,7 +84,8 @@ CREATE TABLE run_items (
 CREATE TABLE shards (
   shard_id   text        NOT NULL PRIMARY KEY,
   run_id     text        NOT NULL REFERENCES runs(run_id),
-  created_at timestamptz NOT NULL
+  created_at timestamptz NOT NULL,
+  UNIQUE (shard_id, run_id)
 );
 
 -- Append-only. Shards PARTITION the run's items exactly (each item in exactly
@@ -87,8 +96,10 @@ CREATE TABLE shard_members (
   item_id  text    NOT NULL,
   position integer NOT NULL CHECK (position >= 1),
   PRIMARY KEY (shard_id, item_id),
+  UNIQUE (shard_id, run_id, item_id),
   UNIQUE (shard_id, position),
   UNIQUE (run_id, item_id),                            -- the partition rule
+  FOREIGN KEY (shard_id, run_id) REFERENCES shards(shard_id, run_id),
   FOREIGN KEY (run_id, item_id) REFERENCES run_items(run_id, item_id)
 );
 
@@ -115,30 +126,126 @@ CREATE TABLE shard_outcomes (
   CHECK ((status = 'failed') = (retryable IS NOT NULL AND error_code IS NOT NULL)),
   CHECK ((status IN ('deferred', 'cancelled')) = (reason_code IS NOT NULL)),
   CHECK (reason_code IS NULL OR reason_code ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$'),
-  CHECK ((status IN ('completed', 'partial')) = (item_count IS NOT NULL)),
+  CHECK (
+    (
+      status IN ('completed', 'partial')
+      AND item_count IS NOT NULL AND item_count >= 0
+      AND completed_item_count IS NOT NULL AND completed_item_count >= 0
+      AND terminal_item_count IS NOT NULL AND terminal_item_count >= 0
+    )
+    OR
+    (
+      status NOT IN ('completed', 'partial')
+      AND item_count IS NULL
+      AND completed_item_count IS NULL
+      AND terminal_item_count IS NULL
+    )
+  ),
   CHECK (item_count IS NULL OR completed_item_count + terminal_item_count = item_count),
   CHECK (status <> 'completed' OR terminal_item_count = 0),
   CHECK (status <> 'partial' OR terminal_item_count >= 1)
 );
 
 -- ── Stage executions (prepareStageExecution) ────────────────────────────────
+-- Externally fenced hosts persist the sealed generic identity before any
+-- evidence append. This is an illustrative host-owned table: its lease/fence
+-- token belongs in the host's mutable claim table, never in immutable
+-- evidence. Every bound evidence row references identity_digest and the host
+-- validates the live fence plus all identity columns in the same transaction.
+CREATE TABLE bound_execution_identities (
+  identity_digest   text    NOT NULL PRIMARY KEY CHECK (identity_digest ~ '^[a-f0-9]{64}$'),
+  host_action_id    text    NOT NULL UNIQUE,
+  run_id            text    NOT NULL,
+  shard_id          text    NOT NULL,
+  pipeline_id       text    NOT NULL,
+  pipeline_version  integer NOT NULL CHECK (pipeline_version >= 1),
+  definition_digest text    NOT NULL CHECK (definition_digest ~ '^[a-f0-9]{64}$'),
+  compiled_digest   text    NOT NULL CHECK (compiled_digest ~ '^[a-f0-9]{64}$'),
+  item_count        integer NOT NULL CHECK (item_count >= 1),
+  item_set_digest   text    NOT NULL CHECK (item_set_digest ~ '^[a-f0-9]{64}$'),
+  UNIQUE (
+    identity_digest,
+    run_id,
+    shard_id,
+    definition_digest,
+    compiled_digest
+  ),
+  FOREIGN KEY (
+    run_id,
+    pipeline_id,
+    pipeline_version,
+    definition_digest,
+    compiled_digest
+  ) REFERENCES runs(
+    run_id,
+    pipeline_id,
+    pipeline_version,
+    pipeline_digest,
+    compiled_digest
+  ),
+  FOREIGN KEY (shard_id, run_id) REFERENCES shards(shard_id, run_id)
+);
+
 -- Append-only reservation: ONE row per idempotency key
--- (digest({runId,itemId,stageId,version,fingerprint,inputDigest}) — computed
--- by execute/durable-stage.ts). Attempt numbering derives from the attempts
+-- (digest({runId,itemId,nodeId,stageId,version,fingerprint,inputDigest,
+-- [executionIdentityDigest]}) — computed by execute/durable-stage.ts).
+-- Attempt numbering derives from the attempts
 -- table, so the retry budget survives crashes and reclaims.
 CREATE TABLE executions (
   execution_id    uuid    NOT NULL PRIMARY KEY,
   idempotency_key text    NOT NULL UNIQUE CHECK (idempotency_key ~ '^[a-f0-9]{64}$'),
   run_id          text    NOT NULL,
+  shard_id        text    NOT NULL,
   item_id         text    NOT NULL,
   node_id         text    NOT NULL,
   stage_id        text    NOT NULL,
   stage_version   integer NOT NULL CHECK (stage_version >= 1),
+  definition_digest text  NOT NULL CHECK (definition_digest ~ '^[a-f0-9]{64}$'),
+  compiled_digest text    NOT NULL CHECK (compiled_digest ~ '^[a-f0-9]{64}$'),
+  bound_identity_digest text REFERENCES bound_execution_identities(identity_digest),
   input_contract  text    NOT NULL,                    -- slot contract or 'pipeline-node-input.v1'
   input           jsonb   NOT NULL,
   input_digest    text    NOT NULL CHECK (input_digest ~ '^[a-f0-9]{64}$'),
-  FOREIGN KEY (run_id, item_id) REFERENCES run_items(run_id, item_id)
+  UNIQUE (
+    execution_id,
+    idempotency_key,
+    run_id,
+    shard_id,
+    item_id,
+    node_id,
+    stage_id,
+    stage_version
+  ),
+  FOREIGN KEY (run_id, item_id) REFERENCES run_items(run_id, item_id),
+  FOREIGN KEY (shard_id, run_id, item_id)
+    REFERENCES shard_members(shard_id, run_id, item_id),
+  FOREIGN KEY (run_id, definition_digest, compiled_digest)
+    REFERENCES runs(run_id, pipeline_digest, compiled_digest),
+  FOREIGN KEY (
+    bound_identity_digest,
+    run_id,
+    shard_id,
+    definition_digest,
+    compiled_digest
+  ) REFERENCES bound_execution_identities(
+    identity_digest,
+    run_id,
+    shard_id,
+    definition_digest,
+    compiled_digest
+  )
 );
+
+-- In the same fenced prepare transaction, the adapter MUST additionally
+-- resolve `compiled.nodes[node_id]` from runs.compiled and require its exact
+-- (stage_id, stage_version) AND derive the exact expected input_contract
+-- (the single slot contract, or 'pipeline-node-input.v1' for multiple slots).
+-- Every persist operation MUST compare its supplied
+-- run/shard/item/node identity to this execution row before cached/duplicate
+-- no-op handling; persistStageSuccess additionally requires output_contract
+-- to equal the compiled node's outputContract. This closes cross-node and
+-- cross-contract idempotency collisions and prevents a stale caller from
+-- borrowing evidence belonging to another compiled DAG.
 
 -- Append-only. One row per persisted attempt (persistStageSuccess appends a
 -- 'succeeded' row atomically with the result; persistStageFailure appends a
@@ -160,6 +267,8 @@ CREATE TABLE attempts (
   failure_scope  text        CHECK (failure_scope IN ('item', 'shard')),
   terminal       boolean,
   PRIMARY KEY (execution_id, attempt_number),
+  UNIQUE (execution_id, attempt_number, status),
+  UNIQUE (execution_id, attempt_number, status, failure_scope, terminal),
   CHECK (
     (
       status = 'succeeded'
@@ -187,12 +296,29 @@ CREATE TABLE attempts (
 -- outbox events ride exactly-once with the FIRST-created result).
 CREATE TABLE results (
   result_id       uuid        NOT NULL PRIMARY KEY,
-  execution_id    uuid        NOT NULL UNIQUE REFERENCES executions(execution_id),
+  execution_id    uuid        NOT NULL UNIQUE,
+  attempt_number  integer     NOT NULL CHECK (attempt_number >= 1),
+  attempt_status  text        NOT NULL DEFAULT 'succeeded' CHECK (attempt_status = 'succeeded'),
   idempotency_key text        NOT NULL UNIQUE,
+  run_id          text        NOT NULL,
+  shard_id        text        NOT NULL,
+  item_id         text        NOT NULL,
+  node_id         text        NOT NULL,
+  stage_id        text        NOT NULL,
+  stage_version   integer     NOT NULL CHECK (stage_version >= 1),
   output_contract text        NOT NULL,
   output          jsonb       NOT NULL,
   output_digest   text        NOT NULL CHECK (output_digest ~ '^[a-f0-9]{64}$'),
-  recorded_at     timestamptz NOT NULL
+  recorded_at     timestamptz NOT NULL,
+  FOREIGN KEY (
+    execution_id, idempotency_key, run_id, shard_id, item_id, node_id,
+    stage_id, stage_version
+  ) REFERENCES executions(
+    execution_id, idempotency_key, run_id, shard_id, item_id, node_id,
+    stage_id, stage_version
+  ),
+  FOREIGN KEY (execution_id, attempt_number, attempt_status)
+    REFERENCES attempts(execution_id, attempt_number, status)
 );
 
 -- Append-ONCE per idempotency key (recordDeadLetter / the deadLetter riding
@@ -204,18 +330,34 @@ CREATE TABLE results (
 -- the fenced transaction.
 CREATE TABLE dead_letters (
   dead_letter_id  uuid        NOT NULL PRIMARY KEY,
+  execution_id    uuid        NOT NULL UNIQUE,
   idempotency_key text        NOT NULL UNIQUE,
   run_id          text        NOT NULL,
+  shard_id        text        NOT NULL,
   item_id         text        NOT NULL,
   node_id         text        NOT NULL,
   stage_id        text        NOT NULL,
   stage_version   integer     NOT NULL CHECK (stage_version >= 1),
-  input           jsonb,
+  input           jsonb       NOT NULL,
   error_code      text        NOT NULL,
   error_message   text        NOT NULL,
-  attempts        integer     NOT NULL CHECK (attempts >= 0),
+  attempts        integer     NOT NULL CHECK (attempts >= 1),
+  attempt_status  text        NOT NULL DEFAULT 'failed' CHECK (attempt_status = 'failed'),
+  failure_scope   text        NOT NULL DEFAULT 'item' CHECK (failure_scope = 'item'),
+  attempt_terminal boolean    NOT NULL,
   created_at      timestamptz NOT NULL,
-  FOREIGN KEY (run_id, item_id) REFERENCES run_items(run_id, item_id)
+  FOREIGN KEY (
+    execution_id, idempotency_key, run_id, shard_id, item_id, node_id,
+    stage_id, stage_version
+  ) REFERENCES executions(
+    execution_id, idempotency_key, run_id, shard_id, item_id, node_id,
+    stage_id, stage_version
+  ),
+  FOREIGN KEY (
+    execution_id, attempts, attempt_status, failure_scope, attempt_terminal
+  ) REFERENCES attempts(
+    execution_id, attempt_number, status, failure_scope, terminal
+  )
 );
 
 -- ── Transactional outbox (both stage-persist methods' outboxEvents) ──────────
@@ -225,15 +367,35 @@ CREATE TABLE dead_letters (
 -- (consumption state is the host's, never a mutation of this table).
 CREATE TABLE outbox_events (
   outbox_event_id uuid        NOT NULL PRIMARY KEY,
+  execution_id    uuid        NOT NULL,
+  attempt_number  integer     NOT NULL CHECK (attempt_number >= 1),
+  event_index     integer     NOT NULL CHECK (event_index >= 0),
   run_id          text        NOT NULL,
+  shard_id        text        NOT NULL,
   item_id         text        NOT NULL,
   node_id         text        NOT NULL,
+  stage_id        text        NOT NULL,
+  stage_version   integer     NOT NULL CHECK (stage_version >= 1),
   idempotency_key text        NOT NULL,
   event_type      text        NOT NULL,                -- identifier grammar
   payload         jsonb       NOT NULL,
   dedupe_key      text        UNIQUE,                  -- optional host dedupe
-  recorded_at     timestamptz NOT NULL
+  recorded_at     timestamptz NOT NULL,
+  UNIQUE (execution_id, attempt_number, event_index),
+  FOREIGN KEY (
+    execution_id, idempotency_key, run_id, shard_id, item_id, node_id,
+    stage_id, stage_version
+  ) REFERENCES executions(
+    execution_id, idempotency_key, run_id, shard_id, item_id, node_id,
+    stage_id, stage_version
+  ),
+  FOREIGN KEY (execution_id, attempt_number)
+    REFERENCES attempts(execution_id, attempt_number)
 );
+
+-- created:false proof reads the winning attempt's exact batch ordered by
+-- event_index ASC, canonicalizes each (event_type,payload,dedupe_key), and
+-- returns those ordered digests as committedOutboxEventDigests.
 
 -- ── Artifacts (putArtifact / getArtifact) ───────────────────────────────────
 -- Append-only, content-addressed: digest = canonical-JSON sha256 of payload
@@ -254,8 +416,11 @@ CREATE TABLE artifacts (
 -- — e.g. B4 inference-concurrency fences) use host-chosen keys, which MUST NOT
 -- use the reserved 'shard:' prefix. Semantics promoted from inbox 009/012:
 --   - claim: INSERT, or UPDATE-replace when expires_at <= now (crash reclaim);
---   - heartbeat: UPDATE heartbeat_at/expires_at WHERE lease_token matches AND
---     expires_at > now — zero rows updated = the typed LeaseLost rejection;
+--   - heartbeat: UPDATE heartbeat_at/expires_at WHERE lease_token matches,
+--     expires_at > requested_at, requested_at >= acquired_at, AND
+--     requested_at >= heartbeat_at. The last predicate prevents a stale clock
+--     from rewinding coordination state; zero rows updated = the typed
+--     LeaseLost/invalid-clock rejection;
 --   - release/finalize: DELETE WHERE lease_token matches (a foreign token is
 --     LeaseLost; an absent row is a no-op for releaseLease).
 -- Every fenced evidence append (prepare/persist/record-dead-letter/
