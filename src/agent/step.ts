@@ -27,6 +27,7 @@ import {
   typeName,
   truncate
 } from "../internal/guards.js";
+import { deepFrozenClone } from "../internal/evidence.js";
 import { validateContractId, validateArtifactRef, type ArtifactRef, type ContractId } from "../contracts/artifact.js";
 import { validateUsageReceipt, type UsageReceipt } from "../contracts/usage-receipt.js";
 
@@ -174,6 +175,7 @@ function validateBudget(value: unknown, label: string): AgentStepBudget {
 /** LOUD validator for a frozen agent-step-request.v1. Returns a fresh value. */
 export function validateAgentStepRequest(value: unknown): AgentStepRequest {
   const label = "agent-step request";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, REQUEST_KEYS, label);
   if (raw.schemaVersion !== AGENT_STEP_REQUEST_SCHEMA_VERSION) {
@@ -207,6 +209,7 @@ function validateFailure(value: unknown, label: string): AgentStepFailure {
  */
 export function validateAgentStepResult(value: unknown): AgentStepResult {
   const label = "agent-step result";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, RESULT_KEYS, label);
   if (raw.schemaVersion !== AGENT_STEP_RESULT_SCHEMA_VERSION) {

@@ -53,6 +53,7 @@ import {
   typeName,
   truncate
 } from "./internal/guards.js";
+import { deepFrozenClone } from "./internal/evidence.js";
 
 export const COMPILED_PIPELINE_SCHEMA_VERSION = "compiled-pipeline.v2";
 export const PIPELINE_COMPILER_VERSION = "mission-pipeline-compiler.v1";
@@ -280,7 +281,10 @@ const COMPILED_NODE_KEYS = new Set([
   "configurationFingerprint"
 ]);
 
-function validateCompiledNode(value: unknown, label: string): CompiledPipelineNode {
+export function validateCompiledPipelineNode(
+  value: unknown,
+  label = "compiled pipeline node"
+): CompiledPipelineNode {
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, COMPILED_NODE_KEYS, label);
   const nodeId = assertIdentifier(raw.nodeId, `${label}: nodeId`);
@@ -333,6 +337,7 @@ function validateCompiledNode(value: unknown, label: string): CompiledPipelineNo
  */
 export function validateCompiledPipeline(value: unknown): CompiledPipeline {
   const label = "compiled pipeline";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, COMPILED_KEYS, label);
   if (raw.schemaVersion !== COMPILED_PIPELINE_SCHEMA_VERSION) {
@@ -352,7 +357,7 @@ export function validateCompiledPipeline(value: unknown): CompiledPipeline {
   if (!Array.isArray(raw.nodes) || raw.nodes.length < 1) {
     throw new Error(`${label}: nodes must be a non-empty array (got ${Array.isArray(raw.nodes) ? raw.nodes.length : typeName(raw.nodes)})`);
   }
-  const nodes = raw.nodes.map((nodeRaw, index) => validateCompiledNode(nodeRaw, `${label}: nodes[${index}]`));
+  const nodes = raw.nodes.map((nodeRaw, index) => validateCompiledPipelineNode(nodeRaw, `${label}: nodes[${index}]`));
   if (!Array.isArray(raw.outputs) || raw.outputs.length < 1) {
     throw new Error(`${label}: outputs must be a non-empty array (got ${Array.isArray(raw.outputs) ? raw.outputs.length : typeName(raw.outputs)})`);
   }

@@ -55,6 +55,8 @@ import type { ArtifactEnvelope, ArtifactRef, ContractId } from "./contracts/arti
 import { digest } from "./contracts/digest.js";
 import type { CompiledPipeline } from "./compile.js";
 import type { PipelineDefinition } from "./definition.js";
+import { deepFrozenClone } from "./internal/evidence.js";
+import { captureCapabilityRecord } from "./internal/capability.js";
 
 // ── Typed fencing rejections ──────────────────────────────────────────────
 
@@ -125,6 +127,21 @@ export class BoundEvidencePersistenceError extends Error {
     super(`Externally bound evidence operation failed: ${operation}`, { cause });
     this.name = "BoundEvidencePersistenceError";
     this.operation = operation;
+  }
+}
+
+/**
+ * `completeShard` may have committed even when its response is lost or
+ * malformed. The runner propagates this uncertainty and never appends a
+ * contradictory failed/completed/partial settlement from an untrusted reply.
+ */
+export class ShardSettlementUncertainError extends Error {
+  readonly code = "shard_settlement_uncertain";
+
+  constructor(cause: unknown) {
+    super("Shard completion response is unavailable or untrustworthy", { cause });
+    this.name = "ShardSettlementUncertainError";
+    Object.freeze(this);
   }
 }
 
@@ -418,6 +435,13 @@ export interface OutboxEventInput {
 
 /** Canonical exact-event seal used for created:false commit proofs. */
 export function outboxEventDigest(event: OutboxEventInput): string {
+  const raw = captureCapabilityRecord(
+    event,
+    ["eventType", "payload", "dedupeKey"],
+    ["eventType", "payload"],
+    "outbox event"
+  );
+  event = deepFrozenClone(raw, "outbox event") as unknown as OutboxEventInput;
   return digest({
     eventType: event.eventType,
     payload: event.payload,

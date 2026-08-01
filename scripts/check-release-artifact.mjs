@@ -156,6 +156,9 @@ try {
   ];
   for (const [path, expectedDigest] of manifest) {
     const content = await run("tar", ["-xOzf", first.path, `package/${path}`]);
+    if (content.includes("\0")) {
+      throw new Error(`raw NUL byte found in packed release entry ${path}`);
+    }
     const actualDigest = hash("sha256", Buffer.from(content));
     if (actualDigest !== expectedDigest) {
       throw new Error(

@@ -45,6 +45,7 @@ import {
   truncate,
   type VersionedDigestRef
 } from "../internal/guards.js";
+import { deepFrozenClone } from "../internal/evidence.js";
 
 export const MODEL_STAGE_BINDING_SCHEMA_VERSION = "model-stage-binding.v2";
 
@@ -108,6 +109,7 @@ function assertBoundedInt(value: unknown, min: number, max: number, label: strin
 
 /** LOUD, FAIL-CLOSED validator for {@link InferenceParameters}. */
 export function validateInferenceParameters(value: unknown, label = "inference parameters"): InferenceParameters {
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, PARAMETER_KEYS, label);
   for (const key of PARAMETER_KEYS) {
@@ -163,6 +165,7 @@ function validateProfileBase(raw: Record<string, unknown>, label: string): Omit<
 /** Seal an inference profile ref: validate LOUDLY, stamp profileDigest. */
 export function createInferenceProfileRef(input: unknown): InferenceProfileRef {
   const label = "inference profile";
+  input = deepFrozenClone(input, label);
   const raw = assertPlainObject(input, label);
   assertStrictKeys(raw, PROFILE_INPUT_KEYS, label);
   const base = validateProfileBase(raw, label);
@@ -171,6 +174,7 @@ export function createInferenceProfileRef(input: unknown): InferenceProfileRef {
 
 /** LOUD validator for a SEALED profile ref (digest recomputed). */
 export function validateInferenceProfileRef(value: unknown, label = "inference profile"): InferenceProfileRef {
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, PROFILE_KEYS, label);
   const base = validateProfileBase(raw, label);
@@ -257,6 +261,7 @@ function validateBindingBase(raw: Record<string, unknown>, label: string): Model
  */
 export function createModelStageBinding(input: unknown): ModelStageBinding {
   const label = "model stage binding";
+  input = deepFrozenClone(input, label);
   const raw = assertPlainObject(input, label);
   assertStrictKeys(raw, BINDING_INPUT_KEYS, label);
   const base = validateBindingBase(raw, label);
@@ -266,6 +271,7 @@ export function createModelStageBinding(input: unknown): ModelStageBinding {
 /** LOUD validator for a SEALED binding: full shape + digest recompute. */
 export function validateModelStageBinding(value: unknown): ModelStageBinding {
   const label = "model stage binding";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, BINDING_KEYS, label);
   const base = validateBindingBase(raw, label);
@@ -296,6 +302,7 @@ export function modelStageBindingRef(bindingRaw: unknown): PipelineNodeBindingRe
  * it names THIS exact sealed payload).
  */
 export function resolveModelBindingRef(ref: PipelineNodeBindingRef, bindingRaw: unknown): ModelStageBinding {
+  ref = deepFrozenClone(ref, "model binding resolution ref");
   const binding = validateModelStageBinding(bindingRaw);
   if (ref.kind !== "model") {
     throw new Error(`model binding resolution: ref kind must be "model" (got ${JSON.stringify(ref.kind)})`);

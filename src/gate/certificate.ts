@@ -32,6 +32,7 @@ import {
   typeName,
   truncate
 } from "../internal/guards.js";
+import { deepFrozenClone } from "../internal/evidence.js";
 import {
   MAX_GATE_OBJECTIVES,
   validateGateResourceBounds,
@@ -91,6 +92,7 @@ const PROOF_FLAG_KEYS = [
 ] as const;
 
 export function validateGateTerminationProof(value: unknown, label = "gate termination proof"): GateTerminationProof {
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, PROOF_KEYS, label);
   const entryStepId = assertIdentifier(raw.entryStepId, `${label}: entryStepId`);
@@ -195,6 +197,7 @@ function validateCertificateBase(raw: Record<string, unknown>, label: string): G
  */
 export function createGateTerminationCertificate(input: unknown): GateTerminationCertificate {
   const label = "gate termination certificate";
+  input = deepFrozenClone(input, label);
   const raw = assertPlainObject(input, label);
   assertStrictKeys(raw, CERTIFICATE_INPUT_KEYS, label);
   const base = validateCertificateBase(raw, label);
@@ -209,6 +212,7 @@ export function createGateTerminationCertificate(input: unknown): GateTerminatio
  */
 export function validateGateTerminationCertificate(value: unknown): GateTerminationCertificate {
   const label = "gate termination certificate";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, CERTIFICATE_KEYS, label);
   const base = validateCertificateBase(raw, label);

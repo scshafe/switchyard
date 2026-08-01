@@ -27,12 +27,13 @@ import {
   assertEvidenceAttemptIdentity,
   assertEvidenceDigest,
   assertEvidenceString,
-  deepFrozenClone
+  deepFrozenClone,
+  snapshotEvidenceOutboxContext
 } from "../internal/evidence.js";
-import { captureCapabilityMethod } from "../internal/capability.js";
+import { captureCapabilityMethod, captureCapabilityRecord } from "../internal/capability.js";
 import { validateUsageReceipt } from "../contracts/usage-receipt.js";
 import { createRetrySafeOutboxEvents } from "../execute/outbox.js";
-import type { NodeInvocation, NodeInvoker } from "../execute/shard-runner.js";
+import { snapshotNodeInvocation, type NodeInvocation, type NodeInvoker } from "../execute/shard-runner.js";
 import type {
   OutboxEventInput,
   RetrySafeOutboxEvents
@@ -146,16 +147,16 @@ export function createAgentReceiptLedger(): AgentReceiptLedger {
     ...record
   });
   const peek = (context: AgentReceiptOutboxContext): RetrySafeOutboxEvents => {
-    assertEvidenceAttemptIdentity(
-      { ...context, nodeId: context.node?.nodeId, stage: context.node?.stage },
+    const identity = snapshotEvidenceOutboxContext(
+      context,
       "agent receipt outbox context"
     );
     const key = keyOf(
-      context.runId,
-      context.itemId,
-      context.node.nodeId,
-      context.attempt,
-      context.idempotencyKey
+      identity.runId,
+      identity.itemId,
+      identity.nodeId,
+      identity.attempt,
+      identity.idempotencyKey
     );
     const queue = [...(pending.get(key) ?? [])];
     const events: OutboxEventInput[] = queue.map((record) => ({
@@ -279,9 +280,12 @@ function specKey(stage: { id: string; version: number }): string {
 
 /** Build the kind:"agent" NodeInvoker arm. */
 export function createAgentNodeInvoker(options: AgentNodeInvokerOptions): NodeInvoker {
-  if (options === null || typeof options !== "object") {
-    throw new Error("createAgentNodeInvoker: options must be an object");
-  }
+  options = captureCapabilityRecord(
+    options,
+    ["executor", "specs", "catalogContracts", "onReceipt", "fallback", "now", "setTimer"],
+    ["executor", "specs", "catalogContracts"],
+    "createAgentNodeInvoker options"
+  ) as unknown as AgentNodeInvokerOptions;
   let executeAgentStep: (...args: any[]) => any;
   try {
     executeAgentStep = captureCapabilityMethod(
@@ -378,6 +382,7 @@ export function createAgentNodeInvoker(options: AgentNodeInvokerOptions): NodeIn
 
   return {
     async invoke(invocation: NodeInvocation): Promise<unknown> {
+      invocation = snapshotNodeInvocation(invocation);
       const { node } = invocation;
       if (node.kind !== "agent") {
         if (fallback) return fallback.invoke(invocation);
@@ -400,7 +405,11 @@ export function createAgentNodeInvoker(options: AgentNodeInvokerOptions): NodeIn
         );
       }
 
-      const request = buildRequest(invocation, spec);
+      const request = deepFrozenClone(
+        buildRequest(invocation, spec),
+        "agent provider request"
+      );
+      const providerIdempotencyKey = request.idempotencyKey;
 
       // Deadline race: the invoker owns the wall-clock deadline so a
       // non-cooperative executor still surfaces as timed_out (retryable).
@@ -460,9 +469,13 @@ export function createAgentNodeInvoker(options: AgentNodeInvokerOptions): NodeIn
 
       // Record every receipt (both completed and non-completed steps that
       // reached a provider carry them).
-      result.usage.forEach((receipt, receiptIndex) => {
+      result.usage.forEach((receiptRaw, receiptIndex) => {
+        const receipt = deepFrozenClone(
+          receiptRaw,
+          `agent usage receipt ${receiptIndex}`
+        );
         try {
-          onReceipt?.({
+          onReceipt?.(deepFrozenClone({
             runId: invocation.runId,
             itemId: invocation.itemId,
             nodeId: node.nodeId,
@@ -472,10 +485,10 @@ export function createAgentNodeInvoker(options: AgentNodeInvokerOptions): NodeIn
               invocation.idempotencyKey,
               "agent invocation.idempotencyKey"
             ),
-            providerIdempotencyKey: request.idempotencyKey,
+            providerIdempotencyKey,
             receiptIndex,
             receipt
-          });
+          }, "agent usage receipt callback record"));
         } catch (error) {
           if (error instanceof EvidenceConflictError || error instanceof StageEvidenceAssemblyError) throw error;
           throw new StageEvidenceAssemblyError("provider_receipt", error);

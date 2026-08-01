@@ -43,13 +43,15 @@ import {
   EvidenceConflictError,
   BoundEvidencePersistenceError,
   ShardLeaseLostError,
+  ShardSettlementUncertainError,
   type BoundPipelineEvidenceStore,
   type BoundPipelineExecutionIdentity,
   type BoundPipelineShard,
   type OutboxEvents,
   type PipelineStore,
   type ShardClaim,
-  type ShardClaimItem
+  type ShardClaimItem,
+  type ShardFinalization
 } from "../store.js";
 import {
   classifyStageFailure,
@@ -64,6 +66,7 @@ import {
   type StageFailureOutboxContext
 } from "./durable-stage.js";
 import {
+  isPipelineShardControlError,
   PipelineControlOutcomeError,
   PipelineShardCancelledError,
   PipelineShardDeferredError
@@ -81,6 +84,41 @@ export interface NodeInvocation {
   /** Stable across retries and external-fence takeovers. */
   idempotencyKey: string;
   signal?: AbortSignal;
+}
+
+/** Canonical one-read snapshot for every public NodeInvoker boundary. */
+export function snapshotNodeInvocation(value: unknown): NodeInvocation {
+  const fields = snapshotOptionRecord(
+    value,
+    ["runId", "itemId", "node", "input", "attempt", "idempotencyKey", "signal"],
+    ["runId", "itemId", "node", "input", "attempt", "idempotencyKey"],
+    "node invocation"
+  );
+  const attempt = fields.attempt;
+  if (!Number.isInteger(attempt) || (attempt as number) < 1) {
+    throw new Error("node invocation.attempt must be a positive integer");
+  }
+  const signal = fields.signal;
+  if (
+    signal !== undefined
+    && (
+      signal === null
+      || typeof signal !== "object"
+      || nodeTypes.isProxy(signal)
+      || !isInstanceOf(signal, AbortSignal)
+    )
+  ) {
+    throw new Error("node invocation.signal must be a non-Proxy AbortSignal");
+  }
+  return Object.freeze({
+    runId: assertIdentityString(fields.runId, "node invocation.runId"),
+    itemId: assertIdentityString(fields.itemId, "node invocation.itemId"),
+    node: snapshotJsonData(fields.node, "node invocation.node") as CompiledPipelineNode,
+    input: snapshotJsonData(fields.input, "node invocation.input"),
+    attempt: attempt as number,
+    idempotencyKey: assertDigest(fields.idempotencyKey, "node invocation.idempotencyKey"),
+    ...(signal === undefined ? {} : { signal: signal as AbortSignal })
+  });
 }
 
 /**
@@ -123,9 +161,37 @@ function isInstanceOf<T>(
 export function createFakeNodeInvoker(
   handlers: Record<string, (invocation: NodeInvocation) => unknown | Promise<unknown>> = {}
 ): NodeInvoker {
+  if (
+    handlers === null
+    || typeof handlers !== "object"
+    || nodeTypes.isProxy(handlers)
+    || (
+      Object.getPrototypeOf(handlers) !== Object.prototype
+      && Object.getPrototypeOf(handlers) !== null
+    )
+  ) {
+    throw new Error("fake node handlers must be a plain non-Proxy data object");
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(handlers);
+  const capturedHandlers = new Map<string, (invocation: NodeInvocation) => unknown | Promise<unknown>>();
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== "string") {
+      throw new Error("fake node handlers must not contain symbol keys");
+    }
+    const descriptor = descriptors[key]!;
+    if (
+      !("value" in descriptor)
+      || descriptor.enumerable !== true
+      || typeof descriptor.value !== "function"
+    ) {
+      throw new Error(`fake node handler ${key} must be an enumerable data-property function`);
+    }
+    capturedHandlers.set(key, descriptor.value);
+  }
   return {
     async invoke(invocation: NodeInvocation): Promise<unknown> {
-      const handler = handlers[invocation.node.stage.id];
+      invocation = snapshotNodeInvocation(invocation);
+      const handler = capturedHandlers.get(invocation.node.stage.id);
       return handler === undefined ? invocation.input : handler(invocation);
     }
   };
@@ -1154,7 +1220,10 @@ async function settleShardControl(
   store: PipelineStore,
   now: () => Date
 ): Promise<ShardRunOutcome | undefined> {
-  if (isInstanceOf(error, PipelineShardDeferredError)) {
+  if (
+    isPipelineShardControlError(error)
+    && isInstanceOf(error, PipelineShardDeferredError)
+  ) {
     // A control outcome is true only after its fenced durable settlement.
     // Lost fences therefore propagate instead of manufacturing audit truth.
     await store.deferShard({
@@ -1170,7 +1239,10 @@ async function settleShardControl(
       reasonCode: error.reasonCode
     };
   }
-  if (isInstanceOf(error, PipelineShardCancelledError)) {
+  if (
+    isPipelineShardControlError(error)
+    && isInstanceOf(error, PipelineShardCancelledError)
+  ) {
     await store.cancelShard({
       shardId: claim.shardId,
       leaseToken: claim.leaseToken,
@@ -1287,6 +1359,20 @@ export async function runOneShard(options: ShardRunnerOptions): Promise<ShardRun
     const claim = snapshotShardClaim(claimRaw);
     return await processClaim(claim, capturedOptions);
   } catch (error) {
+    if (
+      isInstanceOf(error, BoundEvidencePersistenceError)
+      || isInstanceOf(error, OutboxEvidenceNotCommittedError)
+      || isInstanceOf(error, StageEvidenceAssemblyError)
+      || isInstanceOf(error, StageResultConflictError)
+      || isInstanceOf(error, EvidenceConflictError)
+      || isInstanceOf(error, ShardSettlementUncertainError)
+    ) {
+      // A stage/evidence append may already have committed. Appending a shard
+      // failure from an untrusted/lost response would manufacture a
+      // contradictory settlement; the host must reconcile authoritative
+      // evidence first.
+      throw error;
+    }
     const controlOutcome = await settleShardControl(
       error,
       settlementClaim,
@@ -1494,7 +1580,10 @@ export async function runBoundShard<TFence>(
       || isInstanceOf(error, StageResultConflictError)
       || isInstanceOf(error, EvidenceConflictError)
     ) throw error;
-    if (isInstanceOf(error, PipelineControlOutcomeError)) {
+    if (
+      isPipelineShardControlError(error)
+      && isInstanceOf(error, PipelineControlOutcomeError)
+    ) {
       return {
         status: "control",
         runId: shard.runId,
@@ -1502,7 +1591,10 @@ export async function runBoundShard<TFence>(
         control: error.outcome
       };
     }
-    if (isInstanceOf(error, PipelineShardDeferredError)) {
+    if (
+      isPipelineShardControlError(error)
+      && isInstanceOf(error, PipelineShardDeferredError)
+    ) {
       return {
         status: "control",
         runId: shard.runId,
@@ -1513,7 +1605,10 @@ export async function runBoundShard<TFence>(
         }
       };
     }
-    if (isInstanceOf(error, PipelineShardCancelledError)) {
+    if (
+      isPipelineShardControlError(error)
+      && isInstanceOf(error, PipelineShardCancelledError)
+    ) {
       return {
         status: "control",
         runId: shard.runId,
@@ -1608,11 +1703,28 @@ async function processClaim(
       })
   });
 
-  const finalization = await options.store.completeShard({
-    shardId: claim.shardId,
-    leaseToken: claim.leaseToken,
-    at: options.now().toISOString()
-  });
+  let finalizationRaw: unknown;
+  try {
+    finalizationRaw = await options.store.completeShard({
+      shardId: claim.shardId,
+      leaseToken: claim.leaseToken,
+      at: options.now().toISOString()
+    });
+  } catch (error) {
+    if (
+      isInstanceOf(error, ShardLeaseLostError)
+      || isPipelineShardControlError(error)
+    ) {
+      throw error;
+    }
+    throw new ShardSettlementUncertainError(error);
+  }
+  let finalization: ShardFinalization;
+  try {
+    finalization = validateShardFinalization(finalizationRaw, metrics);
+  } catch (error) {
+    throw new ShardSettlementUncertainError(error);
+  }
   if (finalization.status === "partial") {
     return {
       status: "partial",
@@ -1633,4 +1745,48 @@ async function processClaim(
     stageExecutionCount: metrics.stageExecutionCount,
     reusedStageCount: metrics.reusedStageCount
   };
+}
+
+function validateShardFinalization(
+  value: unknown,
+  expected: ShardExecutionMetrics
+): ShardFinalization {
+  const record = snapshotExactDataRecord(
+    value,
+    ["status", "itemCount", "completedItemCount", "terminalItemCount"],
+    "shard finalization"
+  );
+  if (record.status !== "completed" && record.status !== "partial") {
+    throw new Error('shard finalization.status must be "completed" or "partial"');
+  }
+  for (const key of ["itemCount", "completedItemCount", "terminalItemCount"] as const) {
+    if (!Number.isInteger(record[key]) || (record[key] as number) < 0) {
+      throw new Error(`shard finalization.${key} must be a non-negative integer`);
+    }
+  }
+  const itemCount = record.itemCount as number;
+  const completedItemCount = record.completedItemCount as number;
+  const terminalItemCount = record.terminalItemCount as number;
+  if (completedItemCount + terminalItemCount !== itemCount) {
+    throw new Error("shard finalization counts must cover the exact shard membership");
+  }
+  if (
+    itemCount !== expected.itemCount
+    || completedItemCount !== expected.completedItemCount
+    || terminalItemCount !== expected.terminalItemCount
+  ) {
+    throw new Error("shard finalization counts do not match executed shard evidence");
+  }
+  if (
+    (record.status === "completed" && terminalItemCount !== 0)
+    || (record.status === "partial" && terminalItemCount < 1)
+  ) {
+    throw new Error("shard finalization status does not match terminal item count");
+  }
+  return Object.freeze({
+    status: record.status,
+    itemCount,
+    completedItemCount,
+    terminalItemCount
+  });
 }

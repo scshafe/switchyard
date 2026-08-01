@@ -35,6 +35,7 @@ import {
   truncate,
   type VersionedDigestRef
 } from "../internal/guards.js";
+import { deepFrozenClone } from "../internal/evidence.js";
 import {
   MAX_PROMPT_DIRECTIVE_LENGTH,
   validateCodeOwnedPromptContract,
@@ -144,6 +145,7 @@ export function compilePromptStack(input: {
   persona: unknown;
   components: readonly unknown[];
 }): CompiledPrompt {
+  input = deepFrozenClone(input, "prompt compilation input");
   const contract = validateCodeOwnedPromptContract(input.contract);
   const stack = validatePromptStackDefinition(input.stack);
   const persona = validatePersonaDefinition(input.persona);
@@ -233,6 +235,7 @@ const COMPILED_PROMPT_KEYS = new Set([
  */
 export function validateCompiledPrompt(value: unknown): CompiledPrompt {
   const label = "compiled prompt";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, COMPILED_PROMPT_KEYS, label);
   if (raw.schemaVersion !== COMPILED_PROMPT_SCHEMA_VERSION) {

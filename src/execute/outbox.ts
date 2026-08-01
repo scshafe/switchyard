@@ -3,6 +3,7 @@ import type {
   OutboxEvents,
   RetrySafeOutboxEvents
 } from "../store.js";
+import { types as nodeTypes } from "node:util";
 import { captureOutboxEvents } from "../internal/outbox.js";
 
 /**
@@ -19,8 +20,8 @@ export function createRetrySafeOutboxEvents(
       "outbox events already have an acknowledge hook; use combineOutboxEvents"
     );
   }
-  if (typeof acknowledge !== "function") {
-    throw new Error("acknowledge must be a function");
+  if (typeof acknowledge !== "function" || nodeTypes.isProxy(acknowledge)) {
+    throw new Error("acknowledge must be a non-Proxy function");
   }
   const batch = [...captured.events] as OutboxEventInput[] & {
     acknowledge(): void;
@@ -31,7 +32,7 @@ export function createRetrySafeOutboxEvents(
     writable: false,
     value: acknowledge
   });
-  return batch;
+  return Object.freeze(batch);
 }
 
 /**

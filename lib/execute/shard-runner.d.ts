@@ -13,6 +13,8 @@ export interface NodeInvocation {
     idempotencyKey: string;
     signal?: AbortSignal;
 }
+/** Canonical one-read snapshot for every public NodeInvoker boundary. */
+export declare function snapshotNodeInvocation(value: unknown): NodeInvocation;
 /**
  * The injected executor for non-code node kinds. The durable executor still
  * owns idempotency, retries, dead letters, and contract validation around

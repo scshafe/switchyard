@@ -170,6 +170,124 @@ test("agent invoker: builds a faithful request (instructions, sealed input artif
   assert.equal(receipts[0].receipt.trust, "provider_reported");
 });
 
+test("agent invoker snapshots invocation and freezes the exact provider request before await", async () => {
+  const receipts = [];
+  let requestMutationRejected = false;
+  const invoker = createAgentNodeInvoker({
+    executor: {
+      async execute(request) {
+        assert.ok(Object.isFrozen(request));
+        assert.ok(Object.isFrozen(request.brief));
+        try {
+          request.idempotencyKey = "f".repeat(64);
+        } catch (error) {
+          requestMutationRejected = error instanceof TypeError;
+        }
+        await Promise.resolve();
+        return {
+          schemaVersion: AGENT_STEP_RESULT_SCHEMA_VERSION,
+          status: "completed",
+          output: { drafted: true },
+          usage: [fakeUsageReceipt()]
+        };
+      }
+    },
+    specs: [{
+      stage: { id: "draft.reply", version: 1 },
+      instructions: "Draft a reply.",
+      environment: ENV,
+      deadlineMs: 50
+    }],
+    catalogContracts: fakeContracts(),
+    onReceipt: (record) => receipts.push(record)
+  });
+  const result = await invoker.invoke(invocation());
+  assert.deepEqual(result, { drafted: true });
+  assert.equal(requestMutationRejected, true);
+  const expectedProviderKey = digest({
+    schemaVersion: "agent-provider-attempt-idempotency.v1",
+    stageIdempotencyKey: AGENT_STAGE_IDEMPOTENCY_KEY,
+    attempt: 1
+  });
+  assert.equal(receipts[0].providerIdempotencyKey, expectedProviderKey);
+  assert.equal(receipts[0].attempt, 1);
+
+  let attemptReads = 0;
+  const hostile = invocation();
+  Object.defineProperty(hostile, "attempt", {
+    enumerable: true,
+    get() {
+      attemptReads += 1;
+      return attemptReads === 1 ? 1 : 2;
+    }
+  });
+  await assert.rejects(
+    invoker.invoke(hostile),
+    /node invocation\.attempt must be an enumerable data property/
+  );
+  assert.equal(attemptReads, 0);
+});
+
+test("agent factory options and receipt-ledger contexts reject accessors without reading them", () => {
+  let specsReads = 0;
+  const options = {
+    executor: { execute: async () => ({}) },
+    catalogContracts: fakeContracts()
+  };
+  Object.defineProperty(options, "specs", {
+    enumerable: true,
+    get() {
+      specsReads += 1;
+      return [];
+    }
+  });
+  assert.throws(
+    () => createAgentNodeInvoker(options),
+    /createAgentNodeInvoker options\.specs must be an enumerable data property/
+  );
+  assert.equal(specsReads, 0);
+
+  const ledger = createAgentReceiptLedger();
+  ledger.onReceipt({
+    runId: "run-1",
+    itemId: "i1",
+    nodeId: "draft",
+    stage: { id: "draft.reply", version: 1 },
+    attempt: 1,
+    idempotencyKey: AGENT_STAGE_IDEMPOTENCY_KEY,
+    providerIdempotencyKey: digest({ provider: 1 }),
+    receiptIndex: 0,
+    receipt: fakeUsageReceipt()
+  });
+  let runReads = 0;
+  const context = {
+    itemId: "i1",
+    node: agentNode(),
+    attempt: 1,
+    idempotencyKey: AGENT_STAGE_IDEMPOTENCY_KEY
+  };
+  Object.defineProperty(context, "runId", {
+    enumerable: true,
+    get() {
+      runReads += 1;
+      return runReads === 1 ? "run-1" : "run-2";
+    }
+  });
+  assert.throws(
+    () => ledger.outboxEventsFor(context),
+    /agent receipt outbox context\.runId must be an enumerable data property/
+  );
+  assert.equal(runReads, 0);
+  const batch = ledger.outboxEventsFor({
+    runId: "run-1",
+    itemId: "i1",
+    node: agentNode(),
+    attempt: 1,
+    idempotencyKey: AGENT_STAGE_IDEMPOTENCY_KEY
+  });
+  assert.equal(batch.length, 1, "the rejected dynamic context did not drain pending evidence");
+});
+
 test("agent invoker: unknown agent stage is LOUD shard-scoped (closed catalog)", async () => {
   const { invoker } = agentInvokerSetup(() => ({ schemaVersion: AGENT_STEP_RESULT_SCHEMA_VERSION, status: "completed", output: {}, usage: [fakeUsageReceipt()] }));
   const node = { ...agentNode(), stage: { id: "unregistered.stage", version: 1 } };

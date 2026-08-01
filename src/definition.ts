@@ -37,6 +37,7 @@ import {
   typeName,
   truncate
 } from "./internal/guards.js";
+import { deepFrozenClone } from "./internal/evidence.js";
 
 export const PIPELINE_DEFINITION_SCHEMA_VERSION = "pipeline-definition.v2";
 export const MAX_PIPELINE_NODES = 64;
@@ -119,6 +120,7 @@ const BINDING_REF_KEYS = new Set(["kind", "bindingId", "version", "bindingDigest
 
 /** LOUD validator for a node input source (exported for compiled-shape reuse). */
 export function validatePipelineNodeInputSource(value: unknown, label: string): PipelineNodeInputSource {
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   if (raw.kind === "pipeline_input") {
     assertStrictKeys(raw, SOURCE_PIPELINE_INPUT_KEYS, label);
@@ -149,6 +151,7 @@ function validateBindingRef(value: unknown, label: string): PipelineNodeBindingR
 
 /** LOUD validator for one {@link PipelineNode}. */
 export function validatePipelineNode(value: unknown, label = "pipeline node"): PipelineNode {
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, NODE_KEYS, label);
   const nodeId = assertIdentifier(raw.nodeId, `${label}: nodeId`);
@@ -250,6 +253,7 @@ function validateDefinitionBase(raw: Record<string, unknown>, label: string): Om
  */
 export function createPipelineDefinition(input: unknown): PipelineDefinition {
   const label = "pipeline definition";
+  input = deepFrozenClone(input, label);
   const raw = assertPlainObject(input, label);
   assertStrictKeys(raw, DRAFT_KEYS, label);
   const base = validateDefinitionBase(raw, label);
@@ -263,6 +267,7 @@ export function createPipelineDefinition(input: unknown): PipelineDefinition {
  */
 export function validatePipelineDefinition(value: unknown): PipelineDefinition {
   const label = "pipeline definition";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, SEALED_KEYS, label);
   const base = validateDefinitionBase(raw, label);

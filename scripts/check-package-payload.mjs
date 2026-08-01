@@ -57,6 +57,9 @@ async function expectedFilesIn(directory, accepts) {
       if (!accepts(packagedPath)) {
         throw new Error(`unexpected file type in ${directory}: ${packagedPath}`);
       }
+      if ((await readFile(path)).includes(0)) {
+        throw new Error(`raw NUL byte is not allowed in package source: ${packagedPath}`);
+      }
       files.push(packagedPath);
     }
   }

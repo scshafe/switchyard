@@ -43,6 +43,7 @@ import {
   truncate,
   type VersionedDigestRef
 } from "../internal/guards.js";
+import { deepFrozenClone } from "../internal/evidence.js";
 import {
   MAX_GATE_DECISION_CODES,
   MAX_GATE_LEVEL_ORDINAL,
@@ -633,6 +634,7 @@ const COMPILED_FLOW_KEYS = new Set([
  */
 export function validateCompiledGateFlow(value: unknown): CompiledGateFlow {
   const label = "compiled gate flow";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, COMPILED_FLOW_KEYS, label);
   if (raw.schemaVersion !== COMPILED_GATE_FLOW_SCHEMA_VERSION) {

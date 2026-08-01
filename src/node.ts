@@ -33,6 +33,7 @@ import {
   assertStrictKeys,
   typeName
 } from "./internal/guards.js";
+import { snapshotValidationData } from "./internal/evidence.js";
 
 export { IDENTIFIER_PATTERN, IDENTIFIER_MIN_LENGTH, IDENTIFIER_MAX_LENGTH } from "./internal/guards.js";
 
@@ -124,6 +125,7 @@ export function stageIdentity(stageId: string, version: number): string {
  */
 export function validateStageDescriptor(value: unknown): StageDescriptor {
   const label = "stage descriptor";
+  value = snapshotValidationData(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, DESCRIPTOR_KEYS, label);
   const stageId = assertIdentifier(raw.stageId, `${label}: stageId`);

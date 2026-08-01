@@ -1,6 +1,6 @@
 import type { CompiledPipelineNode } from "../compile.js";
 import type { ContractValidator } from "../catalog.js";
-import type { NodeInvoker } from "../execute/shard-runner.js";
+import { type NodeInvoker } from "../execute/shard-runner.js";
 import type { RetrySafeOutboxEvents } from "../store.js";
 import type { UsageReceipt } from "../contracts/usage-receipt.js";
 import { type AgentStepRequest, type AgentStepResult, type AgentStepBudget } from "./step.js";

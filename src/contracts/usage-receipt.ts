@@ -28,6 +28,7 @@ import {
   typeName,
   truncate
 } from "../internal/guards.js";
+import { deepFrozenClone } from "../internal/evidence.js";
 
 export const USAGE_RECEIPT_SCHEMA_VERSION = "usage-receipt.v1";
 
@@ -105,6 +106,7 @@ function assertNullableBoundedInt(value: unknown, max: number, label: string): n
  */
 export function validateUsageReceipt(value: unknown): UsageReceipt {
   const label = "usage receipt";
+  value = deepFrozenClone(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, RECEIPT_KEYS, label);
   if (raw.schemaVersion !== USAGE_RECEIPT_SCHEMA_VERSION) {

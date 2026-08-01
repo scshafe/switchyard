@@ -45,6 +45,7 @@ export interface CompiledPipeline {
  * pipeline outputs; and dependency cycles.
  */
 export declare function compilePipeline(definitionRaw: unknown, catalog: StageCatalog): CompiledPipeline;
+export declare function validateCompiledPipelineNode(value: unknown, label?: string): CompiledPipelineNode;
 /**
  * LOUD validator for a sealed {@link CompiledPipeline} (used by B3 to verify
  * store round-trips): full shape validation plus digest recompute — any

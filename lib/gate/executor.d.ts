@@ -3,7 +3,7 @@ import type { ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import type { PipelineNodeBindingRef } from "../definition.js";
 import type { RetrySafeOutboxEvents } from "../store.js";
-import type { NodeInvoker } from "../execute/shard-runner.js";
+import { type NodeInvoker } from "../execute/shard-runner.js";
 import { type ModelBindingResolver, type ModelUsageReceiptRecord } from "../model/invoker.js";
 import type { GateStepKind } from "./contracts.js";
 /** What a deterministic/validator step function receives alongside its input. */

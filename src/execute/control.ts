@@ -26,6 +26,8 @@ import { types as nodeTypes } from "node:util";
 
 import { deepFrozenClone } from "../internal/evidence.js";
 
+const trustedControlErrors = new WeakSet<object>();
+
 export function validatePipelineShardReasonCode(
   value: unknown,
   label = "pipeline shard control"
@@ -56,6 +58,8 @@ export class PipelineShardDeferredError extends Error {
     );
     this.name = "PipelineShardDeferredError";
     this.reasonCode = stable;
+    trustedControlErrors.add(this);
+    Object.freeze(this);
   }
 }
 
@@ -74,6 +78,8 @@ export class PipelineShardCancelledError extends Error {
     );
     this.name = "PipelineShardCancelledError";
     this.reasonCode = stable;
+    trustedControlErrors.add(this);
+    Object.freeze(this);
   }
 }
 
@@ -99,6 +105,8 @@ export class PipelineControlOutcomeError extends Error {
     );
     this.name = "PipelineControlOutcomeError";
     this.outcome = deepFrozenClone(outcome, "pipeline control outcome");
+    trustedControlErrors.add(this);
+    Object.freeze(this);
   }
 }
 
@@ -116,10 +124,14 @@ export function isPipelineShardControlError(
     ) {
       return false;
     }
-    return (
-      error instanceof PipelineShardDeferredError
-      || error instanceof PipelineShardCancelledError
-      || error instanceof PipelineControlOutcomeError
+    const prototype = Object.getPrototypeOf(error);
+    return trustedControlErrors.has(error as object) && (
+      (prototype === PipelineShardDeferredError.prototype
+        && error instanceof PipelineShardDeferredError)
+      || (prototype === PipelineShardCancelledError.prototype
+        && error instanceof PipelineShardCancelledError)
+      || (prototype === PipelineControlOutcomeError.prototype
+        && error instanceof PipelineControlOutcomeError)
     );
   } catch {
     return false;

@@ -2,7 +2,7 @@ import { type UsageReceipt } from "../contracts/usage-receipt.js";
 import type { ContractValidator } from "../catalog.js";
 import type { CompiledPipelineNode } from "../compile.js";
 import { type PipelineStore, type RetrySafeOutboxEvents } from "../store.js";
-import type { NodeInvoker } from "../execute/shard-runner.js";
+import { type NodeInvoker } from "../execute/shard-runner.js";
 import { type CompiledPrompt } from "../prompt/compiler.js";
 import { type ModelStageBinding } from "./binding.js";
 /** What the resolved invoker receives for ONE physical model call. */

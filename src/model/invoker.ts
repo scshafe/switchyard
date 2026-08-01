@@ -41,11 +41,13 @@ import {
   assertEvidenceAttemptIdentity,
   assertEvidenceDigest,
   assertEvidenceString,
-  deepFrozenClone
+  deepFrozenClone,
+  snapshotEvidenceOutboxContext
 } from "../internal/evidence.js";
 import {
   captureCapabilityDataProperty,
-  captureCapabilityMethod
+  captureCapabilityMethod,
+  captureCapabilityRecord
 } from "../internal/capability.js";
 import { digest } from "../contracts/digest.js";
 import type { ContractId } from "../contracts/artifact.js";
@@ -61,7 +63,7 @@ import {
 } from "../store.js";
 import { PipelineStageError, StageEvidenceAssemblyError } from "../execute/durable-stage.js";
 import { createRetrySafeOutboxEvents } from "../execute/outbox.js";
-import type { NodeInvocation, NodeInvoker } from "../execute/shard-runner.js";
+import { snapshotNodeInvocation, type NodeInvocation, type NodeInvoker } from "../execute/shard-runner.js";
 import { validateCompiledPrompt, type CompiledPrompt } from "../prompt/compiler.js";
 import { validateModelStageBinding, type ModelStageBinding } from "./binding.js";
 
@@ -198,16 +200,16 @@ export function createModelReceiptLedger(): ModelReceiptLedger {
     ...record
   });
   const peek = (context: ModelReceiptOutboxContext): RetrySafeOutboxEvents => {
-    assertEvidenceAttemptIdentity(
-      { ...context, nodeId: context.node?.nodeId, stage: context.node?.stage },
+    const identity = snapshotEvidenceOutboxContext(
+      context,
       "model receipt outbox context"
     );
     const key = keyOf(
-      context.runId,
-      context.itemId,
-      context.node.nodeId,
-      context.attempt,
-      context.idempotencyKey
+      identity.runId,
+      identity.itemId,
+      identity.nodeId,
+      identity.attempt,
+      identity.idempotencyKey
     );
     const queue = [...(pending.get(key) ?? [])];
     const events: OutboxEventInput[] = queue.map((record) => ({
@@ -447,9 +449,12 @@ export function verifyResolvedModelBinding(resolvedRaw: unknown, binding: ModelS
  *    item failures — every completed call records a receipt via onReceipt.
  */
 export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeInvoker {
-  if (options === null || typeof options !== "object") {
-    throw new Error("createModelNodeInvoker: options must be an object");
-  }
+  options = captureCapabilityRecord(
+    options,
+    ["resolver", "bindings", "catalogContracts", "onReceipt", "fallback", "concurrency"],
+    ["resolver", "bindings", "catalogContracts"],
+    "createModelNodeInvoker options"
+  ) as unknown as ModelNodeInvokerOptions;
   let resolveBinding: (...args: any[]) => any;
   try {
     resolveBinding = captureCapabilityMethod(
@@ -514,9 +519,13 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
   if (!Array.isArray(options.bindings)) {
     throw new Error("createModelNodeInvoker: bindings must be an array of sealed ModelStageBindings");
   }
+  const bindingEntries = deepFrozenClone(
+    options.bindings,
+    "createModelNodeInvoker bindings"
+  ) as readonly unknown[];
   // Validate every published binding LOUDLY up front; index by sealed digest.
   const bindingsByDigest = new Map<string, ModelStageBinding>();
-  for (const raw of options.bindings) {
+  for (const raw of bindingEntries) {
     const binding = deepFrozenClone(
       validateModelStageBinding(raw),
       "published model binding"
@@ -601,6 +610,7 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
 
   return {
     async invoke(invocation: NodeInvocation): Promise<unknown> {
+      invocation = snapshotNodeInvocation(invocation);
       const { node } = invocation;
       if (node.kind !== "model") {
         if (fallback) return fallback.invoke(invocation);
@@ -634,7 +644,7 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
           stageIdempotencyKey,
           attempt: invocation.attempt
         });
-        const resultRaw = await resolved.invoke(
+        const providerRequest = deepFrozenClone(
           {
             runId: invocation.runId,
             itemId: invocation.itemId,
@@ -645,6 +655,10 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
             input: invocation.input,
             binding
           },
+          "model provider request"
+        );
+        const resultRaw = await resolved.invoke(
+          providerRequest,
           invocation.signal
         );
         let result: ModelInvocationResult;
@@ -680,14 +694,17 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
         }
         let receipt: UsageReceipt;
         try {
-          receipt = validateUsageReceipt(result.usage);
+          receipt = deepFrozenClone(
+            validateUsageReceipt(result.usage),
+            "model usage receipt"
+          );
         } catch (error) {
           // Includes the non-silent-zero floor: estimated_tier_ceiling /
           // unavailable receipts charging 0 are rejected here — TERMINAL.
           throw new PipelineStageError("model_receipt_rejected", false, error, "item");
         }
         try {
-          onReceipt?.({
+          onReceipt?.(deepFrozenClone({
             runId: invocation.runId,
             itemId: invocation.itemId,
             nodeId: node.nodeId,
@@ -697,7 +714,7 @@ export function createModelNodeInvoker(options: ModelNodeInvokerOptions): NodeIn
             providerIdempotencyKey,
             bindingDigest: binding.bindingDigest,
             receipt
-          });
+          }, "model usage receipt callback record"));
         } catch (error) {
           if (error instanceof EvidenceConflictError || error instanceof StageEvidenceAssemblyError) throw error;
           throw new StageEvidenceAssemblyError("provider_receipt", error);

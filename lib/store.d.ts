@@ -43,6 +43,15 @@ export declare class BoundEvidencePersistenceError extends Error {
     readonly operation: BoundEvidenceOperation;
     constructor(operation: BoundEvidenceOperation, cause: unknown);
 }
+/**
+ * `completeShard` may have committed even when its response is lost or
+ * malformed. The runner propagates this uncertainty and never appends a
+ * contradictory failed/completed/partial settlement from an untrusted reply.
+ */
+export declare class ShardSettlementUncertainError extends Error {
+    readonly code = "shard_settlement_uncertain";
+    constructor(cause: unknown);
+}
 /** Same durable provider/action identity produced contradictory evidence. */
 export declare class EvidenceConflictError extends Error {
     readonly code = "evidence_conflict";

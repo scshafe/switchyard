@@ -744,6 +744,120 @@ test("CLOSED STEP REGISTRY: a flow naming an unregistered implementation is reje
   );
 });
 
+test("gate factory and invocation boundaries reject accessors without executing them", async () => {
+  const fixture = gateFixture();
+  for (const key of ["flows", "steps"]) {
+    let reads = 0;
+    const options = {
+      resolver: fixture.resolver,
+      flows: [fixture.compiled],
+      steps: fixture.registry,
+      catalogContracts: fakeContracts()
+    };
+    Object.defineProperty(options, key, {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return key === "flows" ? [fixture.compiled] : fixture.registry;
+      }
+    });
+    assert.throws(
+      () => createGateNodeInvoker(options),
+      new RegExp(`createGateNodeInvoker options\\.${key}.*data property`)
+    );
+    assert.equal(reads, 0, `${key} accessor must never execute`);
+  }
+
+  const invoker = makeGateInvoker(fixture);
+  const hostileInvocation = invocation(GATE_NODE(fixture.compiled.compiledDigest));
+  delete hostileInvocation.attempt;
+  let attemptReads = 0;
+  Object.defineProperty(hostileInvocation, "attempt", {
+    enumerable: true,
+    get() {
+      attemptReads += 1;
+      return 1;
+    }
+  });
+  await assert.rejects(
+    invoker.invoke(hostileInvocation),
+    /node invocation\.attempt.*data property/
+  );
+  assert.equal(attemptReads, 0);
+});
+
+test("gate callback records are immutable snapshots and cannot corrupt path, budget, or escalation evidence", async () => {
+  const receiptRecords = [];
+  const fixture = gateFixture({
+    modelResults: {
+      "action-recall": () => ({ output: { outcome: "candidate", output: { c: 1 } }, usage: withinTierReceipt() }),
+      "action-precision": () => ({ output: { outcome: "agree", output: { c: 2 } }, usage: withinTierReceipt() })
+    },
+    validatorResult: { outcome: "valid", output: { decisionCode: "requires-action" } }
+  });
+  const invoker = makeGateInvoker(fixture, {
+    now: () => 1_000,
+    onReceipt(record) {
+      receiptRecords.push(record);
+      assert.ok(Object.isFrozen(record));
+      assert.ok(Object.isFrozen(record.receipt));
+      assert.throws(() => { record.receipt.chargedTokens = 9_999; }, TypeError);
+      assert.throws(() => { record.receipt.chargedCostMicroUsd = 9_999; }, TypeError);
+      queueMicrotask(() => {
+        assert.throws(() => { record.receipt.chargedTokens = 8_888; }, TypeError);
+      });
+    }
+  });
+  const result = await invoker.invoke(invocation(GATE_NODE(fixture.compiled.compiledDigest)));
+  await Promise.resolve();
+  assert.equal(receiptRecords.length, 2);
+  assert.deepEqual(result.budgetSpent, {
+    pathSteps: 4,
+    modelCalls: 2,
+    chargedTokens: 190,
+    chargedCostMicroUsd: 10,
+    elapsedMs: 0
+  });
+  assert.deepEqual(result.path.map(({ stepId, outcome }) => ({ stepId, outcome })), [
+    { stepId: "evidence", outcome: "eligible" },
+    { stepId: "recall", outcome: "candidate" },
+    { stepId: "precision", outcome: "agree" },
+    { stepId: "validator", outcome: "valid" }
+  ]);
+
+  const escalationRecords = [];
+  const escalating = gateFixture({
+    evidenceOutcome: { outcome: "ineligible", output: { evidence: false } }
+  });
+  const escalationResult = await makeGateInvoker(escalating, {
+    now: () => 1_000,
+    onEscalation(record) {
+      escalationRecords.push(record);
+      assert.ok(Object.isFrozen(record));
+      assert.ok(Object.isFrozen(record.budgetSpent));
+      assert.throws(() => { record.reasonCode = "forged"; }, TypeError);
+      assert.throws(() => { record.budgetSpent.modelCalls = 999; }, TypeError);
+      queueMicrotask(() => {
+        assert.throws(() => { record.budgetSpent.pathSteps = 999; }, TypeError);
+      });
+    }
+  }).invoke(invocation(GATE_NODE(escalating.compiled.compiledDigest)));
+  await Promise.resolve();
+  assert.equal(escalationRecords.length, 1);
+  assert.deepEqual(escalationResult.escalation, {
+    reasonCode: "evidence-ineligible",
+    sourceStepId: "evidence",
+    outcomeCode: "ineligible"
+  });
+  assert.deepEqual(escalationResult.budgetSpent, {
+    pathSteps: 1,
+    modelCalls: 0,
+    chargedTokens: 0,
+    chargedCostMicroUsd: 0,
+    elapsedMs: 0
+  });
+});
+
 test("valid_decision path: the flow walks evidence→recall→precision→validator with receipts and budget accounting", async () => {
   const receipts = [];
   const fixture = gateFixture({

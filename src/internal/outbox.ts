@@ -1,6 +1,7 @@
 import { types as nodeTypes } from "node:util";
 
 import type { OutboxEventInput, OutboxEvents } from "../store.js";
+import { deepFrozenClone } from "./evidence.js";
 
 export interface CapturedOutboxEvents {
   readonly events: readonly OutboxEventInput[];
@@ -59,6 +60,7 @@ export function captureOutboxEvents(
     if (
       !("value" in acknowledgeDescriptor)
       || typeof acknowledgeDescriptor.value !== "function"
+      || nodeTypes.isProxy(acknowledgeDescriptor.value)
       || acknowledgeDescriptor.enumerable !== false
       || acknowledgeDescriptor.configurable !== false
       || acknowledgeDescriptor.writable !== false
@@ -79,7 +81,24 @@ export function captureOutboxEvents(
     ) {
       throw new Error(`${label}[${index}] must be an enumerable data property`);
     }
-    return descriptor.value as OutboxEventInput;
+    const event = deepFrozenClone(
+      descriptor.value,
+      `${label}[${index}]`
+    ) as unknown as Record<string, unknown>;
+    const keys = Reflect.ownKeys(event);
+    if (
+      keys.some((key) =>
+        typeof key !== "string"
+        || !["eventType", "payload", "dedupeKey"].includes(key)
+      )
+      || !Object.prototype.hasOwnProperty.call(event, "eventType")
+      || !Object.prototype.hasOwnProperty.call(event, "payload")
+    ) {
+      throw new Error(
+        `${label}[${index}] must contain exactly eventType, payload, and optional dedupeKey data`
+      );
+    }
+    return event as unknown as OutboxEventInput;
   }));
   return Object.freeze({
     events,

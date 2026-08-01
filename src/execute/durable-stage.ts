@@ -39,7 +39,10 @@ import { types as nodeTypes } from "node:util";
 import { digest } from "../contracts/digest.js";
 import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
-import type { CompiledPipelineNode } from "../compile.js";
+import {
+  validateCompiledPipelineNode,
+  type CompiledPipelineNode
+} from "../compile.js";
 import type { StageContext } from "../node.js";
 import {
   ShardLeaseLostError,
@@ -67,6 +70,10 @@ import {
   assertEvidenceString,
   deepFrozenClone
 } from "../internal/evidence.js";
+import {
+  captureCapabilityRecord,
+  captureDenseArrayItems
+} from "../internal/capability.js";
 import { captureOutboxEvents } from "../internal/outbox.js";
 
 export type { StageFailureScope } from "../store.js";
@@ -256,7 +263,10 @@ export function classifyStageFailure(error: unknown): StageFailure {
     if (isInstanceOf(error, ContractViolationError)) {
       return { code: "immutable_stage_contract_rejected", retryable: false, scope: "shard" };
     }
-    if (isInstanceOf(error, PipelineControlOutcomeError)) {
+    if (
+      isPipelineShardControlError(error)
+      && isInstanceOf(error, PipelineControlOutcomeError)
+    ) {
       // This signal belongs to runBoundShard. If it escapes after runOneShard
       // claimed a Pipeline-owned lease, that lease is settled conclusively
       // instead of being abandoned until expiry.
@@ -308,6 +318,14 @@ function safeErrorText(error: unknown): string {
  * configurationFingerprint (or the promoted "default" placeholder).
  */
 export function stageFingerprint(node: CompiledPipelineNode): string {
+  node = deepFrozenClone(
+    validateCompiledPipelineNode(node, "stage fingerprint node"),
+    "stage fingerprint node"
+  );
+  return stageFingerprintFromSnapshot(node);
+}
+
+function stageFingerprintFromSnapshot(node: CompiledPipelineNode): string {
   return digest({
     bindingFingerprint: node.bindingFingerprint,
     configurationFingerprint: node.configurationFingerprint ?? "default"
@@ -330,13 +348,36 @@ export function stageIdempotencyKey(input: {
   /** Bound execution identity; omitted on the Pipeline-owned legacy path. */
   executionIdentityDigest?: string;
 }): string {
+  const raw = captureCapabilityRecord(
+    input,
+    ["runId", "itemId", "node", "inputDigest", "executionIdentityDigest"],
+    ["runId", "itemId", "node", "inputDigest"],
+    "stage idempotency input"
+  );
+  input = Object.freeze({
+    runId: assertEvidenceString(raw.runId, "stage idempotency input.runId"),
+    itemId: assertEvidenceString(raw.itemId, "stage idempotency input.itemId"),
+    node: deepFrozenClone(
+      validateCompiledPipelineNode(raw.node, "stage idempotency input.node"),
+      "stage idempotency input.node"
+    ),
+    inputDigest: assertEvidenceDigest(raw.inputDigest, "stage idempotency input.inputDigest"),
+    ...(raw.executionIdentityDigest === undefined
+      ? {}
+      : {
+          executionIdentityDigest: assertEvidenceDigest(
+            raw.executionIdentityDigest,
+            "stage idempotency input.executionIdentityDigest"
+          )
+        })
+  });
   const payload: Record<string, unknown> = {
     runId: input.runId,
     itemId: input.itemId,
     nodeId: input.node.nodeId,
     stageId: input.node.stage.id,
     version: input.node.stage.version,
-    fingerprint: stageFingerprint(input.node),
+    fingerprint: stageFingerprintFromSnapshot(input.node),
     inputDigest: input.inputDigest
   };
   if (input.executionIdentityDigest !== undefined) {
@@ -623,7 +664,9 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
 
   while (true) {
     // 3. Fenced reservation + cached-result lookup.
-    const prepared = await store.prepareStageExecution({
+    const prepared = await callBoundEvidence(
+      "prepare",
+      () => store.prepareStageExecution({
       shardId: input.shardId,
       leaseToken: input.leaseToken,
       runId: input.runId,
@@ -634,7 +677,9 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
       inputContract,
       input: composedInput,
       inputDigest
-    });
+      }),
+      validateStagePreparationResult
+    );
     if (prepared.disposition === "cached") {
       const revalidated = contracts.validate(node.outputContract, prepared.output);
       if (!revalidated.ok) {
@@ -702,19 +747,23 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
           "shard"
         );
       }
-      await store.recordDeadLetter({
-        shardId: input.shardId,
-        leaseToken: input.leaseToken,
-        runId: input.runId,
-        itemId: input.itemId,
-        nodeId: node.nodeId,
-        stage: { id: node.stage.id, version: node.stage.version },
-        idempotencyKey,
-        input: composedInput,
-        error: { code: "retry_budget_exhausted", message: `retry budget exhausted after ${attempt - 1} attempts` },
-        attempts: attempt - 1,
-        createdAt: now().toISOString()
-      });
+      await callBoundEvidence(
+        "record_dead_letter",
+        () => store.recordDeadLetter({
+          shardId: input.shardId,
+          leaseToken: input.leaseToken,
+          runId: input.runId,
+          itemId: input.itemId,
+          nodeId: node.nodeId,
+          stage: { id: node.stage.id, version: node.stage.version },
+          idempotencyKey,
+          input: composedInput,
+          error: { code: "retry_budget_exhausted", message: `retry budget exhausted after ${attempt - 1} attempts` },
+          attempts: attempt - 1,
+          createdAt: now().toISOString()
+        }),
+        validateCreatedResult
+      );
       return { status: "terminal", errorCode: "retry_budget_exhausted", idempotencyKey };
     }
 
@@ -799,10 +848,14 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
       const persistFailure = (
         failureInput: PersistStageFailureInput
       ): Promise<void> => {
-        const persistence = failureOutboxBatch.events.length === 0
+        const persist = (): Promise<void> => failureOutboxBatch.events.length === 0
           ? store.persistStageFailure(failureInput)
           : store.persistStageFailure(failureInput, failureOutboxBatch.events);
-        return persistence.then(() => {
+        return callBoundEvidence(
+          "persist_failure",
+          persist,
+          validateVoidEvidenceResult
+        ).then(() => {
           acknowledgeOutboxEvents(failureOutboxBatch.acknowledge);
         });
       };
@@ -878,8 +931,9 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
       "timestamp",
       () => now().toISOString()
     );
-    const persisted = await store.persistStageSuccess(
-      {
+    const persisted = await callBoundEvidence(
+      "persist_success",
+      () => store.persistStageSuccess({
         shardId: input.shardId,
         leaseToken: input.leaseToken,
         executionId: prepared.executionId,
@@ -893,8 +947,8 @@ export async function executeDurableStage(input: DurableStageInput): Promise<Dur
         outputContract: node.outputContract,
         output,
         outputDigest
-      },
-      successOutboxBatch.events
+      }, successOutboxBatch.events),
+      validatePersistedStageResult
     );
     if (persisted.outputDigest !== outputDigest) {
       throw new StageResultConflictError(outputDigest, persisted.outputDigest);
@@ -954,7 +1008,48 @@ export interface BoundDurableStageInput<TFence>
 export async function executeBoundDurableStage<TFence>(
   input: BoundDurableStageInput<TFence>
 ): Promise<DurableStageResult> {
-  const { evidenceStore, fence, executionIdentity, ...stageInput } = input;
+  const raw = snapshotEvidenceResult(
+    input,
+    [
+      "evidenceStore",
+      "fence",
+      "executionIdentity",
+      "contracts",
+      "runId",
+      "itemId",
+      "node",
+      "slots",
+      "invoke"
+    ],
+    [
+      "maxAttempts",
+      "outboxEvents",
+      "failureOutboxEvents",
+      "signal",
+      "now"
+    ],
+    "executeBoundDurableStage input"
+  );
+  const evidenceStore = raw.evidenceStore as BoundPipelineEvidenceStore<TFence>;
+  const fence = raw.fence as TFence;
+  const runId = assertEvidenceString(raw.runId, "executeBoundDurableStage input.runId");
+  const executionIdentity = validateBoundStageExecutionIdentity(
+    raw.executionIdentity,
+    runId
+  );
+  const stageInput = Object.freeze({
+    contracts: raw.contracts as ContractValidator,
+    runId,
+    itemId: raw.itemId as string,
+    node: raw.node as CompiledPipelineNode,
+    slots: raw.slots as readonly ResolvedSlotValue[],
+    invoke: raw.invoke as DurableStageInput["invoke"],
+    ...(raw.maxAttempts === undefined ? {} : { maxAttempts: raw.maxAttempts as number }),
+    ...(raw.outboxEvents === undefined ? {} : { outboxEvents: raw.outboxEvents as DurableStageInput["outboxEvents"] }),
+    ...(raw.failureOutboxEvents === undefined ? {} : { failureOutboxEvents: raw.failureOutboxEvents as DurableStageInput["failureOutboxEvents"] }),
+    ...(raw.signal === undefined ? {} : { signal: raw.signal as AbortSignal }),
+    ...(raw.now === undefined ? {} : { now: raw.now as () => Date })
+  });
   const prepareStageExecution = captureCapabilityMethod(
     evidenceStore,
     "prepareStageExecution",
@@ -1083,6 +1178,9 @@ async function callBoundEvidence<T>(
     if (
       isInstanceOf(error, ExternalFenceRejectedError)
       || isInstanceOf(error, BoundEvidencePersistenceError)
+      || isInstanceOf(error, ShardLeaseLostError)
+      || isInstanceOf(error, WorkLeaseLostError)
+      || isPipelineShardControlError(error)
     ) {
       throw error;
     }
@@ -1128,7 +1226,89 @@ function snapshotEvidenceResult(
     }
     snapshot[key] = descriptor.value;
   }
-  return snapshot;
+  return Object.freeze(snapshot);
+}
+
+function validateBoundStageExecutionIdentity(
+  value: unknown,
+  expectedRunId: string
+): BoundPipelineExecutionIdentity {
+  const identity = snapshotEvidenceResult(
+    deepFrozenClone(value, "bound execution identity"),
+    [
+      "schemaVersion",
+      "hostActionId",
+      "runId",
+      "shardId",
+      "pipeline",
+      "compiledDigest",
+      "itemCount",
+      "itemSetDigest",
+      "identityDigest"
+    ],
+    [],
+    "bound execution identity"
+  );
+  if (identity.schemaVersion !== "bound-pipeline-execution.v1") {
+    throw new Error("bound execution identity schemaVersion is unsupported");
+  }
+  const pipeline = snapshotEvidenceResult(
+    identity.pipeline,
+    ["id", "version", "definitionDigest"],
+    [],
+    "bound execution identity.pipeline"
+  );
+  const hostActionId = assertEvidenceString(identity.hostActionId, "bound execution identity.hostActionId");
+  const runId = assertEvidenceString(identity.runId, "bound execution identity.runId");
+  const shardId = assertEvidenceString(identity.shardId, "bound execution identity.shardId");
+  const pipelineId = assertEvidenceString(pipeline.id, "bound execution identity.pipeline.id");
+  if (!Number.isInteger(pipeline.version) || (pipeline.version as number) < 1) {
+    throw new Error("bound execution identity.pipeline.version must be a positive integer");
+  }
+  const definitionDigest = assertEvidenceDigest(
+    pipeline.definitionDigest,
+    "bound execution identity.pipeline.definitionDigest"
+  );
+  const compiledDigest = assertEvidenceDigest(identity.compiledDigest, "bound execution identity.compiledDigest");
+  const itemSetDigest = assertEvidenceDigest(identity.itemSetDigest, "bound execution identity.itemSetDigest");
+  const identityDigest = assertEvidenceDigest(identity.identityDigest, "bound execution identity.identityDigest");
+  if (!Number.isInteger(identity.itemCount) || (identity.itemCount as number) < 1) {
+    throw new Error("bound execution identity.itemCount must be a positive integer");
+  }
+  if (runId !== expectedRunId) {
+    throw new Error("bound execution identity.runId does not match stage runId");
+  }
+  const payload = {
+    schemaVersion: "bound-pipeline-execution.v1" as const,
+    hostActionId,
+    runId,
+    shardId,
+    pipeline: {
+      id: pipelineId,
+      version: pipeline.version as number,
+      definitionDigest
+    },
+    compiledDigest,
+    itemCount: identity.itemCount as number,
+    itemSetDigest
+  };
+  if (digest(payload) !== identityDigest) {
+    throw new Error("bound execution identity identityDigest does not match payload");
+  }
+  const canonical = deepFrozenClone(
+    { ...payload, identityDigest },
+    "bound execution identity"
+  );
+  if (
+    value !== null
+    && typeof value === "object"
+    && !nodeTypes.isProxy(value)
+    && Object.isFrozen(value)
+    && Object.isFrozen((value as { pipeline?: unknown }).pipeline)
+  ) {
+    return value as BoundPipelineExecutionIdentity;
+  }
+  return canonical;
 }
 
 function validateStagePreparationResult(value: unknown): StagePreparation {
@@ -1140,7 +1320,7 @@ function validateStagePreparationResult(value: unknown): StagePreparation {
   );
   if (base.disposition === "cached") {
     const cached = snapshotEvidenceResult(
-      value,
+      base,
       ["disposition", "output", "outputDigest"],
       [],
       "bound cached prepare result"
@@ -1154,7 +1334,7 @@ function validateStagePreparationResult(value: unknown): StagePreparation {
   }
   if (base.disposition === "terminal") {
     const terminal = snapshotEvidenceResult(
-      value,
+      base,
       ["disposition", "errorCode", "scope"],
       [],
       "bound terminal prepare result"
@@ -1167,7 +1347,7 @@ function validateStagePreparationResult(value: unknown): StagePreparation {
   }
   if (base.disposition === "reserved") {
     const reserved = snapshotEvidenceResult(
-      value,
+      base,
       ["disposition", "executionId", "attempt"],
       ["previousFailure"],
       "bound reserved prepare result"
@@ -1217,11 +1397,12 @@ function validatePersistedStageResult(value: unknown): PersistedStageResult {
   }
   let committedOutboxEventDigests: readonly string[] | undefined;
   if (result.committedOutboxEventDigests !== undefined) {
-    if (!Array.isArray(result.committedOutboxEventDigests)) {
-      throw new Error("bound persisted-success result.committedOutboxEventDigests must be an array");
-    }
+    const committed = captureDenseArrayItems(
+      result.committedOutboxEventDigests,
+      "bound persisted-success result.committedOutboxEventDigests"
+    );
     committedOutboxEventDigests = Object.freeze(
-      result.committedOutboxEventDigests.map((eventDigest, index) =>
+      committed.map((eventDigest, index) =>
         assertEvidenceDigest(
           eventDigest,
           `bound persisted-success result.committedOutboxEventDigests[${index}]`

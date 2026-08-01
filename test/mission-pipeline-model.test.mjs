@@ -523,6 +523,63 @@ test("model invoker happy path: resolves the sealed binding, invokes once, valid
   assert.equal(receipts[0].receipt.trust, "provider_reported");
 });
 
+test("model factory and invoke boundaries reject dynamic caller authority without reading getters", async () => {
+  const { binding, compiledPrompt } = makeBinding();
+  let bindingsReads = 0;
+  const options = {
+    resolver: { resolve: () => ({ invoke: async () => ({}) }) },
+    catalogContracts: fakeContracts()
+  };
+  Object.defineProperty(options, "bindings", {
+    enumerable: true,
+    get() {
+      bindingsReads += 1;
+      return [binding];
+    }
+  });
+  assert.throws(
+    () => createModelNodeInvoker(options),
+    /createModelNodeInvoker options\.bindings must be an enumerable data property/
+  );
+  assert.equal(bindingsReads, 0);
+
+  let requestMutationRejected = false;
+  const receipts = [];
+  const { invoker } = makeInvoker({
+    binding,
+    compiledPrompt,
+    result: (request) => {
+      assert.ok(Object.isFrozen(request));
+      assert.ok(Object.isFrozen(request.binding));
+      try {
+        request.attempt = 99;
+      } catch (error) {
+        requestMutationRejected = error instanceof TypeError;
+      }
+      return { output: { category: "jobs" }, usage: providerReportedReceipt() };
+    },
+    onReceipt: (record) => receipts.push(record)
+  });
+  await invoker.invoke(invocation(NODE_STUB(binding.bindingDigest)));
+  assert.equal(requestMutationRejected, true);
+  assert.equal(receipts[0].attempt, 1);
+
+  let nodeReads = 0;
+  const hostile = invocation(NODE_STUB(binding.bindingDigest));
+  Object.defineProperty(hostile, "node", {
+    enumerable: true,
+    get() {
+      nodeReads += 1;
+      return NODE_STUB(binding.bindingDigest);
+    }
+  });
+  await assert.rejects(
+    invoker.invoke(hostile),
+    /node invocation\.node must be an enumerable data property/
+  );
+  assert.equal(nodeReads, 0);
+});
+
 test("missing receipt is rejected TERMINAL (non-retryable)", async () => {
   const { binding, compiledPrompt } = makeBinding();
   const { invoker } = makeInvoker({ binding, compiledPrompt, result: { output: { category: "jobs" } } });

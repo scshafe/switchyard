@@ -9,6 +9,8 @@
 // STANDALONE: relative imports only (no npm deps, no zod).
 
 import { SHA256_HEX_PATTERN } from "../contracts/artifact.js";
+import { types as nodeTypes } from "node:util";
+import { snapshotValidationData } from "./evidence.js";
 
 /**
  * The identifier grammar shared by stage ids, node ids, slot names, pipeline
@@ -32,16 +34,22 @@ export function truncate(s: string, max = 80): string {
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || nodeTypes.isProxy(value)
+  ) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }
 
 export function assertPlainObject(value: unknown, label: string): Record<string, unknown> {
-  if (!isPlainObject(value)) {
-    throw new Error(`${label}: must be a plain object (got ${typeName(value)})`);
+  const snapshot = snapshotValidationData(value, label);
+  if (!isPlainObject(snapshot)) {
+    throw new Error(`${label}: must be a plain object (got ${typeName(snapshot)})`);
   }
-  return value;
+  return snapshot;
 }
 
 export function assertStrictKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string): void {

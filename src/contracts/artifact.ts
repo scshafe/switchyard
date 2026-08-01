@@ -15,6 +15,7 @@
 // STANDALONE: relative imports only (no npm deps, no zod).
 
 import { canonicalJson, digest } from "./digest.js";
+import { snapshotValidationData } from "../internal/evidence.js";
 
 /** Grammar of a contract id: `<name>.v<number>` (frozen $defs.contractId). */
 export const CONTRACT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*\.v[1-9][0-9]*$/;
@@ -161,6 +162,7 @@ function assertBytes(value: unknown, label: string): number {
  * with the offending path instead.
  */
 export function assertJsonValue(value: unknown, path = "payload"): void {
+  value = snapshotValidationData(value, path);
   if (value === null) return;
   const t = typeof value;
   if (t === "boolean" || t === "string") return;
@@ -189,6 +191,7 @@ export function assertJsonValue(value: unknown, path = "payload"): void {
 /** LOUD validator for the frozen `artifact-ref.v1` shape. Returns the ref. */
 export function validateArtifactRef(value: unknown): ArtifactRef {
   const label = "artifact ref";
+  value = snapshotValidationData(value, label);
   if (!isPlainObject(value)) {
     throw new Error(`${label}: must be a plain object (got ${typeName(value)})`);
   }
@@ -212,6 +215,7 @@ export function validateArtifactRef(value: unknown): ArtifactRef {
  */
 export function validateArtifactEnvelope(value: unknown): ArtifactEnvelope {
   const label = "artifact envelope";
+  value = snapshotValidationData(value, label);
   if (!isPlainObject(value)) {
     throw new Error(`${label}: must be a plain object (got ${typeName(value)})`);
   }
@@ -247,7 +251,8 @@ export function validateArtifactEnvelope(value: unknown): ArtifactEnvelope {
  */
 export function createArtifactEnvelope(contractId: ContractId, payload: unknown): ArtifactEnvelope {
   validateContractId(contractId);
-  assertJsonValue(payload);
+  payload = snapshotValidationData(payload, "payload");
+  assertJsonValue(payload, "payload");
   return {
     contractId,
     digest: digest(payload),

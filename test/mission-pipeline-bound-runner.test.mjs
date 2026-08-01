@@ -9,6 +9,7 @@ import {
   PipelineControlOutcomeError
 } from "mission-pipeline/execute/control";
 import {
+  executeBoundDurableStage,
   PipelineStageError,
   StageEvidenceAssemblyError
 } from "mission-pipeline/execute/durable-stage";
@@ -721,6 +722,110 @@ test("bound execution identity seals host action, run, shard, definition, compil
   });
   assert.deepEqual(bound.operations, []);
   assert.equal(ctx.invocations.length, 0);
+});
+
+test("direct bound-stage execution validates and canonicalizes its sealed identity before evidence", async () => {
+  const ctx = await fixture();
+  const node = ctx.shard.compiled.nodes[0];
+  const item = ctx.shard.items[0];
+  const fence = { taskLeaseId: "direct-stage-fence" };
+  const calls = [];
+  const rejectingStore = {
+    async prepareStageExecution() {
+      calls.push("prepare");
+      throw new Error("evidence must not be reached");
+    },
+    async persistStageSuccess() {
+      calls.push("success");
+      throw new Error("evidence must not be reached");
+    },
+    async persistStageFailure() {
+      calls.push("failure");
+      throw new Error("evidence must not be reached");
+    },
+    async recordDeadLetter() {
+      calls.push("dead-letter");
+      throw new Error("evidence must not be reached");
+    }
+  };
+
+  await assert.rejects(
+    executeBoundDurableStage({
+      evidenceStore: rejectingStore,
+      fence,
+      executionIdentity: {
+        identityDigest: "d".repeat(64),
+        marker: "forged"
+      },
+      contracts: ctx.catalog.contracts,
+      runId: ctx.shard.runId,
+      itemId: item.itemId,
+      node,
+      slots: [{ slot: "item", contract: "item.v1", value: item.input }],
+      invoke: async () => {
+        throw new Error("invoke must not be reached");
+      }
+    }),
+    /bound execution identity.*(?:missing|unexpected|schemaVersion)/
+  );
+  assert.deepEqual(calls, []);
+
+  const originalIdentity = structuredClone(createBoundPipelineExecutionIdentity({
+    hostActionId: "host-action-direct-stage",
+    shard: ctx.shard
+  }));
+  const observedIdentities = [];
+  const observedFences = [];
+  const evidenceStore = {
+    async prepareStageExecution(input) {
+      observedIdentities.push(input.executionIdentity);
+      observedFences.push(input.fence);
+      assert.ok(Object.isFrozen(input.executionIdentity));
+      assert.ok(Object.isFrozen(input.executionIdentity.pipeline));
+      assert.throws(
+        () => { input.executionIdentity.hostActionId = "callback-mutation"; },
+        TypeError
+      );
+      originalIdentity.hostActionId = "caller-mutated-after-capture";
+      originalIdentity.pipeline.id = "caller-mutated.pipeline";
+      return { disposition: "reserved", executionId: "direct-execution", attempt: 1 };
+    },
+    async persistStageSuccess(input) {
+      observedIdentities.push(input.executionIdentity);
+      observedFences.push(input.fence);
+      assert.equal(input.executionIdentity.hostActionId, "host-action-direct-stage");
+      assert.equal(input.executionIdentity.pipeline.id, "bound-runner.fixture");
+      return {
+        output: input.output,
+        outputDigest: input.outputDigest,
+        created: true
+      };
+    },
+    async persistStageFailure() {
+      assert.fail("failure evidence must not be written for a successful direct stage");
+    },
+    async recordDeadLetter() {
+      assert.fail("dead-letter evidence must not be written for a successful direct stage");
+    }
+  };
+
+  const result = await executeBoundDurableStage({
+    evidenceStore,
+    fence,
+    executionIdentity: originalIdentity,
+    contracts: ctx.catalog.contracts,
+    runId: ctx.shard.runId,
+    itemId: item.itemId,
+    node,
+    slots: [{ slot: "item", contract: "item.v1", value: item.input }],
+    invoke: async (input) => ({ value: input.value * 2 }),
+    now: () => new Date("2026-08-01T00:00:00.000Z")
+  });
+  assert.equal(result.status, "succeeded");
+  assert.deepEqual(result.output, { value: 4 });
+  assert.equal(new Set(observedIdentities).size, 1);
+  assert.ok(observedIdentities.every((identity) => Object.isFrozen(identity)));
+  assert.ok(observedFences.every((presented) => presented === fence));
 });
 
 test("bound execution rejects at_most_once nodes before evidence or invocation", async () => {

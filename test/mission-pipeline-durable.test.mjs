@@ -18,7 +18,13 @@ import { createArtifactEnvelope } from "mission-pipeline/contracts/artifact";
 import { createPipelineDefinition } from "mission-pipeline/definition";
 import { StageCatalog } from "mission-pipeline/catalog";
 import { compilePipeline } from "mission-pipeline/compile";
-import { ShardLeaseLostError, WorkLeaseLostError } from "mission-pipeline/store";
+import {
+  BoundEvidencePersistenceError,
+  outboxEventDigest,
+  ShardLeaseLostError,
+  ShardSettlementUncertainError,
+  WorkLeaseLostError
+} from "mission-pipeline/store";
 import { MemoryPipelineStore } from "mission-pipeline/memory-store";
 import {
   ContractViolationError,
@@ -26,13 +32,19 @@ import {
   classifyStageFailure,
   composeStageInput,
   executeDurableStage,
+  stageFingerprint,
   stageIdempotencyKey
 } from "mission-pipeline/execute/durable-stage";
 import {
+  isPipelineShardControlError,
   PipelineControlOutcomeError,
   PipelineShardCancelledError,
   PipelineShardDeferredError
 } from "mission-pipeline/execute/control";
+import {
+  combineOutboxEvents,
+  createRetrySafeOutboxEvents
+} from "mission-pipeline/execute/outbox";
 import {
   createFakeNodeInvoker,
   runOneShard,
@@ -209,6 +221,174 @@ test("stage idempotency key derives from the compiled node alone and shifts with
     key,
     "externally bound shard/definition/action identity namespaces the key"
   );
+});
+
+test("public evidence-digest utilities snapshot caller data once and reject dynamic authority", () => {
+  const { compiled } = setup();
+  const node = structuredClone(nodeById(compiled, "a"));
+  const stableInput = {
+    runId: "snapshot-run",
+    itemId: "snapshot-item",
+    node: structuredClone(node),
+    inputDigest: digest({ value: 1 })
+  };
+  const stableEvent = {
+    eventType: "snapshot.event",
+    payload: { value: 1 },
+    dedupeKey: "snapshot-event-1"
+  };
+  const expectedFingerprint = stageFingerprint(structuredClone(node));
+  const expectedKey = stageIdempotencyKey(structuredClone(stableInput));
+  const expectedEventDigest = outboxEventDigest(structuredClone(stableEvent));
+
+  const fingerprint = stageFingerprint(node);
+  const key = stageIdempotencyKey(stableInput);
+  const eventDigest = outboxEventDigest(stableEvent);
+  node.bindingFingerprint = "f".repeat(64);
+  stableInput.runId = "mutated-run";
+  stableInput.node.nodeId = "mutated-node";
+  stableEvent.eventType = "mutated.event";
+  stableEvent.payload.value = 2;
+  stableEvent.dedupeKey = "mutated-key";
+  assert.equal(fingerprint, expectedFingerprint, "post-call node mutation cannot rewrite a returned fingerprint");
+  assert.equal(key, expectedKey, "post-call input mutation cannot rewrite a returned idempotency key");
+  assert.equal(eventDigest, expectedEventDigest, "post-call event mutation cannot rewrite a returned event seal");
+
+  let fingerprintReads = 0;
+  const switchingNode = structuredClone(nodeById(compiled, "a"));
+  Object.defineProperty(switchingNode, "bindingFingerprint", {
+    enumerable: true,
+    get() {
+      fingerprintReads += 1;
+      return fingerprintReads === 1 ? "a".repeat(64) : "b".repeat(64);
+    }
+  });
+  assert.throws(
+    () => stageFingerprint(switchingNode),
+    /stage fingerprint node\.bindingFingerprint must be an enumerable data property/
+  );
+  assert.equal(fingerprintReads, 0, "getter-switch authority is rejected without invocation");
+
+  let nodeReads = 0;
+  const dynamicInput = { ...structuredClone(stableInput) };
+  Object.defineProperty(dynamicInput, "node", {
+    enumerable: true,
+    get() {
+      nodeReads += 1;
+      if (nodeReads > 1) throw new Error("second node read");
+      return structuredClone(nodeById(compiled, "a"));
+    }
+  });
+  assert.throws(
+    () => stageIdempotencyKey(dynamicInput),
+    /stage idempotency input\.node must be an enumerable data property/
+  );
+  assert.equal(nodeReads, 0, "throw-on-second-read authority is rejected without a first read");
+
+  let dedupeReads = 0;
+  const dynamicEvent = { eventType: "dynamic.event", payload: { value: 1 } };
+  Object.defineProperty(dynamicEvent, "dedupeKey", {
+    enumerable: true,
+    get() {
+      dedupeReads += 1;
+      if (dedupeReads > 1) throw new Error("second dedupe read");
+      return "winner-a";
+    }
+  });
+  assert.throws(
+    () => outboxEventDigest(dynamicEvent),
+    /outbox event\.dedupeKey must be an enumerable data property/
+  );
+  assert.equal(dedupeReads, 0, "dynamic event authority is rejected without invocation");
+
+  assert.throws(
+    () => stageFingerprint(new Proxy(structuredClone(nodeById(compiled, "a")), {})),
+    /stage fingerprint node must not contain Proxies/
+  );
+  assert.throws(
+    () => outboxEventDigest({ eventType: "exotic.event", payload: new Date() }),
+    /outbox event\.payload must be a plain data object/
+  );
+});
+
+test("retry-safe outbox batches bind one deeply frozen event snapshot to acknowledgement", () => {
+  let acknowledgements = 0;
+  const source = {
+    eventType: "receipt.observed",
+    payload: { usage: { chargedTokens: 7 } },
+    dedupeKey: "receipt:1"
+  };
+  const batch = createRetrySafeOutboxEvents([source], () => {
+    acknowledgements += 1;
+  });
+  source.eventType = "forged";
+  source.payload.usage.chargedTokens = 0;
+  assert.deepEqual(batch[0], {
+    eventType: "receipt.observed",
+    payload: { usage: { chargedTokens: 7 } },
+    dedupeKey: "receipt:1"
+  });
+  assert.ok(Object.isFrozen(batch));
+  assert.ok(Object.isFrozen(batch[0]));
+  assert.ok(Object.isFrozen(batch[0].payload));
+  assert.ok(Object.isFrozen(batch[0].payload.usage));
+  assert.throws(() => { batch[0] = { eventType: "other", payload: {} }; }, TypeError);
+  assert.throws(() => { batch[0].payload.usage.chargedTokens = 0; }, TypeError);
+  assert.throws(() => batch.push({ eventType: "other", payload: {} }), TypeError);
+  batch.acknowledge();
+  assert.equal(acknowledgements, 1);
+
+  let first = 0;
+  let second = 0;
+  const combined = combineOutboxEvents(
+    createRetrySafeOutboxEvents([{ eventType: "a", payload: { n: 1 } }], () => { first += 1; }),
+    createRetrySafeOutboxEvents([{ eventType: "b", payload: { n: 2 } }], () => { second += 1; })
+  );
+  assert.ok(Object.isFrozen(combined));
+  assert.deepEqual(combined.map((event) => event.eventType), ["a", "b"]);
+  combined.acknowledge();
+  assert.deepEqual([first, second], [1, 1]);
+
+  let getterReads = 0;
+  const dynamicEvent = { eventType: "dynamic", payload: {} };
+  Object.defineProperty(dynamicEvent, "dedupeKey", {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      return "dynamic:1";
+    }
+  });
+  assert.throws(
+    () => createRetrySafeOutboxEvents([dynamicEvent], () => {}),
+    /dedupeKey must be an enumerable data property/
+  );
+  assert.equal(getterReads, 0);
+  assert.throws(
+    () => createRetrySafeOutboxEvents([new Proxy({ eventType: "x", payload: {} }, {})], () => {}),
+    /plain JSON data/
+  );
+});
+
+test("trusted control errors are immutable and prototype forgeries fail closed", () => {
+  const control = new PipelineControlOutcomeError({ continuation: "c1" });
+  const deferred = new PipelineShardDeferredError("busy");
+  const cancelled = new PipelineShardCancelledError("superseded");
+  for (const error of [control, deferred, cancelled]) {
+    assert.ok(Object.isFrozen(error));
+    assert.ok(isPipelineShardControlError(error));
+  }
+  assert.throws(() => { control.outcome = { forged: true }; }, TypeError);
+  assert.throws(() => Object.defineProperty(deferred, "reasonCode", { get: () => "forged" }), TypeError);
+  assert.throws(() => { cancelled.reasonCode = "forged"; }, TypeError);
+  assert.deepEqual(control.outcome, { continuation: "c1" });
+  assert.equal(deferred.reasonCode, "busy");
+  assert.equal(cancelled.reasonCode, "superseded");
+  assert.equal(
+    isPipelineShardControlError(Object.create(PipelineControlOutcomeError.prototype)),
+    false
+  );
+  class ForgedDeferred extends PipelineShardDeferredError {}
+  assert.equal(isPipelineShardControlError(new ForgedDeferred("busy")), false);
 });
 
 test("composeStageInput: one slot passes the bare value; several compose by slot under the promoted marker contract", () => {
@@ -1417,6 +1597,65 @@ test("an at_most_once node is rejected before invocation or evidence", async () 
   })), []);
 });
 
+test("ordinary stage evidence replies are exact snapshots and cannot forge persisted output", async () => {
+  const forged = setup({ stageA: () => ({ real: true }) });
+  await forged.createRun();
+  const claim = await forged.store.claimNextShard({ leaseOwner: "w1", leaseDurationMs: 60_000 });
+  const store = forwardingStore(forged.store, {
+    persistStageSuccess: async (input, events) => {
+      const committed = await forged.store.persistStageSuccess(input, events);
+      return { ...committed, output: { forged: true } };
+    }
+  });
+  await assert.rejects(
+    executeDurableStage(durableInput(
+      forged,
+      claim,
+      nodeById(forged.compiled, "a"),
+      forged.runItems[0],
+      { store }
+    )),
+    (error) =>
+      error instanceof BoundEvidencePersistenceError
+      && error.operation === "persist_success"
+  );
+
+  const dynamic = setup();
+  await dynamic.createRun();
+  const dynamicClaim = await dynamic.store.claimNextShard({ leaseOwner: "w1", leaseDurationMs: 60_000 });
+  let dispositionReads = 0;
+  const dynamicStore = forwardingStore(dynamic.store, {
+    prepareStageExecution: async () => {
+      const reply = {};
+      Object.defineProperties(reply, {
+        disposition: {
+          enumerable: true,
+          get() {
+            dispositionReads += 1;
+            return "reserved";
+          }
+        },
+        executionId: { enumerable: true, value: "execution-1" },
+        attempt: { enumerable: true, value: 1 }
+      });
+      return reply;
+    }
+  });
+  await assert.rejects(
+    executeDurableStage(durableInput(
+      dynamic,
+      dynamicClaim,
+      nodeById(dynamic.compiled, "a"),
+      dynamic.runItems[0],
+      { store: dynamicStore }
+    )),
+    (error) =>
+      error instanceof BoundEvidencePersistenceError
+      && error.operation === "prepare"
+  );
+  assert.equal(dispositionReads, 0, "preparation accessors are rejected without invocation");
+});
+
 // ── Per-item isolation + finalization states (the runner) ─────────────────
 
 test("one poisoned item terminalizes alone: downstream skipped for it, other items complete, shard partial", async () => {
@@ -1461,7 +1700,67 @@ test("a clean run completes: all nodes execute per item, the shard finalizes com
   assert.equal(await ctx.store.claimNextShard({ leaseOwner: "worker-2", leaseDurationMs: 60_000 }), undefined);
 });
 
-test("a committed completion with a lost response propagates fence loss instead of fabricating failure", async () => {
+test("fabricated and accessor-backed completeShard replies never report completion", async () => {
+  const fabricated = setup();
+  await fabricated.createRun();
+  const fabricatedStore = forwardingStore(fabricated.store, {
+    completeShard: async (input) => {
+      await fabricated.store.completeShard(input);
+      return {
+        status: "completed",
+        itemCount: 999,
+        completedItemCount: 999,
+        terminalItemCount: 0
+      };
+    }
+  });
+  await assert.rejects(
+    runOneShard({
+      store: fabricatedStore,
+      catalog: fabricated.catalog,
+      leaseOwner: "worker-1"
+    }),
+    ShardSettlementUncertainError
+  );
+
+  const dynamic = setup();
+  await dynamic.createRun();
+  let statusReads = 0;
+  let failCalls = 0;
+  const dynamicStore = forwardingStore(dynamic.store, {
+    completeShard: async () => {
+      const reply = {
+        itemCount: 1,
+        completedItemCount: 1,
+        terminalItemCount: 0
+      };
+      Object.defineProperty(reply, "status", {
+        enumerable: true,
+        get() {
+          statusReads += 1;
+          reply.itemCount = 444;
+          return "completed";
+        }
+      });
+      return reply;
+    },
+    failShard: async () => {
+      failCalls += 1;
+    }
+  });
+  await assert.rejects(
+    runOneShard({
+      store: dynamicStore,
+      catalog: dynamic.catalog,
+      leaseOwner: "worker-1"
+    }),
+    ShardSettlementUncertainError
+  );
+  assert.equal(statusReads, 0, "finalization accessors are rejected without invocation");
+  assert.equal(failCalls, 0, "uncertain completion is not rewritten as shard failure");
+});
+
+test("a committed completion with a lost response propagates settlement uncertainty instead of fabricating failure", async () => {
   const ctx = setup();
   await ctx.createRun();
   const store = forwardingStore(ctx.store, {
@@ -1477,7 +1776,7 @@ test("a committed completion with a lost response propagates fence loss instead 
       catalog: ctx.catalog,
       leaseOwner: "worker-1"
     }),
-    ShardLeaseLostError
+    ShardSettlementUncertainError
   );
   assert.equal(ctx.store.shardLeaseSnapshot("shard-1"), undefined);
   assert.equal(

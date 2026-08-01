@@ -637,7 +637,11 @@ export class MemoryPipelineStore implements PipelineStore {
             event.executionId === existing.executionId
             && event.attempt === existing.attempt
         )
-        .map(outboxEventDigest);
+        .map((event) => outboxEventDigest({
+          eventType: event.eventType,
+          payload: event.payload,
+          ...(event.dedupeKey === undefined ? {} : { dedupeKey: event.dedupeKey })
+        }));
       return {
         output: clone(existing.output),
         outputDigest: existing.outputDigest,

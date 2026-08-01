@@ -1,6 +1,6 @@
 import type { ContractId } from "../contracts/artifact.js";
 import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
-import type { CompiledPipelineNode } from "../compile.js";
+import { type CompiledPipelineNode } from "../compile.js";
 import type { StageContext } from "../node.js";
 import { type BoundPipelineEvidenceStore, type BoundPipelineExecutionIdentity, type OutboxEvents, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
 export type { StageFailureScope } from "../store.js";
