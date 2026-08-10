@@ -21,7 +21,7 @@
     "pipeline"
   ],
   "engines": {
-    "node": ">=22.22.0 <23"
+    "node": ">=24.18.0 <25"
   },
   "packageManager": "npm@10.9.4",
   "main": "./lib/index.js",
