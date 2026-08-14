@@ -9,17 +9,17 @@ compiled graph durably.
 
 ```mermaid
 flowchart LR
-    Contracts[ContractValidator] --> Catalog[StageCatalog]
-    Stages[Stage descriptors<br/>and executables] --> Catalog
-    Draft[Pipeline definition draft] --> Seal[createPipelineDefinition]
-    Seal --> Compile[compilePipeline]
+    Contracts["ContractValidator"] --> Catalog["StageCatalog"]
+    Stages["Stage descriptors and executables"] --> Catalog
+    Draft["Pipeline definition draft"] --> Seal["createPipelineDefinition"]
+    Seal --> Compile["compilePipeline"]
     Catalog --> Compile
-    Compile --> Compiled[Digest-sealed<br/>CompiledPipeline]
-    Compiled --> Run[PipelineStore.createRun]
-    Items[Input items and shards] --> Run
-    Run --> Worker[runOneShard]
+    Compile --> Compiled["Digest-sealed CompiledPipeline"]
+    Compiled --> Run["PipelineStore.createRun"]
+    Items["Input items and shards"] --> Run
+    Run --> Worker["runOneShard"]
     Catalog --> Worker
-    Worker --> Evidence[Results, attempts,<br/>dead letters, outbox events]
+    Worker --> Evidence["Results, attempts, dead letters, and outbox events"]
 ```
 
 There are four pieces to put together:

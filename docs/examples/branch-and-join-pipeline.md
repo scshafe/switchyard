@@ -6,12 +6,12 @@ joins both results into a payment decision.
 
 ```mermaid
 flowchart LR
-    Input([order.v1]) --> Validate[validate<br/>validate.order@1]
-    Validate -->|validated-order.v1| Price[price<br/>price.order@1]
-    Validate -->|validated-order.v1| Risk[risk<br/>score.order-risk@1]
-    Price -->|priced-order.v1<br/>slot: order| Authorize[authorize<br/>authorize.payment@1]
-    Risk -->|risk-result.v1<br/>slot: risk| Authorize
-    Authorize --> Output([payment-decision.v1])
+    Input(["order.v1"]) --> Validate["validate (validate.order@1)"]
+    Validate -->|"validated-order.v1"| Price["price (price.order@1)"]
+    Validate -->|"validated-order.v1"| Risk["risk (score.order-risk@1)"]
+    Price -->|"priced-order.v1; slot order"| Authorize["authorize (authorize.payment@1)"]
+    Risk -->|"risk-result.v1; slot risk"| Authorize
+    Authorize --> Output(["payment-decision.v1"])
 ```
 
 The two middle nodes both name `validate` as their source. The `authorize`

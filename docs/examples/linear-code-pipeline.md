@@ -7,9 +7,9 @@ durable run.
 
 ```mermaid
 flowchart LR
-    Input([task.v1]) -->|task| Normalize[normalize<br/>normalize.task@1]
-    Normalize -->|normalized-task.v1| Prioritize[prioritize<br/>prioritize.task@1]
-    Prioritize --> Output([prioritized-task.v1])
+    Input(["task.v1"]) -->|"task"| Normalize["normalize (normalize.task@1)"]
+    Normalize -->|"normalized-task.v1"| Prioritize["prioritize (prioritize.task@1)"]
+    Prioritize --> Output(["prioritized-task.v1"])
 ```
 
 The arrow labels are contracts, not TypeScript types. The host's
