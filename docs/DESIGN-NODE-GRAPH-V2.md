@@ -29,6 +29,18 @@ removes the cause instead of managing the symptoms:
 > and enqueues whatever matches. A human decision is a node like any other —
 > its turn just completes from the console instead of a worker.
 
+The operator's canonical articulation (2026-08-27), which this design must
+always satisfy: **every node has its own queue. The completion of a node's
+turn for a unit results in the unit being queued at every node whose
+queuing conditions are satisfied by that completion.** Per-node queues are
+literal in the store (claiming is per-node; the queue is an index over the
+journey). "Queuing conditions" are declared in two places that together
+cover the sentence: outcome edges (source-anchored — which completions
+offer the unit onward, and where) and join requirements (target-anchored —
+what a receiving node demands before the offer becomes a queued turn).
+Evaluation is scoped to the just-completed node's outcome, exactly as the
+sentence scopes it.
+
 Under per-turn leasing there is nothing special about waiting: no suspended
 execution, no lease held across days, no orchestrator that must survive.
 Crash recovery is trivial because between turns nothing is running.
