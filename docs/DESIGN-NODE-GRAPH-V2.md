@@ -262,16 +262,38 @@ anticipates cross-system joins of the same shape. v2 deliberately matches
 that model so a later decision could carry units as substrate envelopes —
 but nothing here depends on it, and no substrate change is proposed.
 
-## 10. Open questions for ratification
+## 10. Decisions (ratified by the operator, 2026-08-27)
 
-1. Naming: `MissionPipelineUnit` vs `MissionUnit`/`WorkUnit`; "journey" vs
-   "trace".
-2. Join semantics detail: n-of-m timeout behavior; late-arrival edges after
-   a join fired.
-3. Unit fan-out: may one turn EMIT new units (one email → N extracted
-   tasks), or is unit creation admission-only in v2.0?
-4. Human-node queue policy: TTL/expiry, escalation edges on timeout
-   (a `callback` timer node composes for this — is that enough?).
-5. Outcome vocabulary evolution: adding an outcome is a new node version
-   (strict) — confirm no soft path.
-6. Priority/fairness at shared nodes (many graphs, one model host).
+N0 is complete. Each answer below is binding for v2.0; changing one later
+is a design revision, not a drive-by.
+
+1. **Naming.** `MissionPipelineNode`, `MissionPipelineUnit`, and `journey`
+   for the append-only turn history — the operator's coinages, kept.
+2. **Joins.** A join declares `all` or `nOf` over its declared inbound
+   edges and fires AT MOST ONCE per unit. A join that can never complete
+   (an inbound leg reached a terminal outcome) deterministically resolves
+   to the declared `join_unsatisfiable` outcome, which — like every
+   outcome — must route or be terminal under the completeness check. A
+   late inbound offer arriving after the join has fired is recorded in the
+   journey and enqueues nothing (idempotent no-op). There are NO
+   engine-level timeouts anywhere in routing; time-based escape is a
+   `callback` timer node composed in the graph.
+3. **Unit creation is admission-only in v2.0.** A turn may not emit new
+   units. One-email-to-N-extractions is one unit whose artifact carries N
+   entries. Mid-graph unit spawning (independent child journeys,
+   provenance lineage, re-joining) is explicitly deferred to a future
+   design revision — the first ceiling to revisit if per-extraction
+   independent routing is wanted.
+4. **Human queues never expire in the engine.** No TTL, no engine-side
+   escalation. Time enters the graph only as a declared timer `callback`
+   node whose firing is a recorded event routed by ordinary edges, so
+   escalation policy is visible in the sealed graph. The console owns
+   queue presentation/ordering.
+5. **Outcome vocabularies are strict.** Adding or removing an outcome is a
+   NEW node version, always; the graph re-seals and the completeness
+   check re-runs. There is no additive/soft path and no default route.
+6. **Fairness at shared nodes, v2.0**: FIFO per node with per-graph
+   round-robin at claim time. Richer policy (priority classes, weights)
+   waits for contention evidence and slots into the claim query without
+   touching graph semantics; the production model path additionally rides
+   the scheduler substrate, which owns its own fairness story.

@@ -20,9 +20,11 @@ consumer repo, behind ports the package defines.
 
 ---
 
-## N0 — Ratification and naming (operator, ~one sitting)
+## N0 — Ratification and naming — ✅ RATIFIED 2026-08-27
 
-The DESIGN's §10 questions, decided before code:
+The operator ratified all six proposals as written; DESIGN §10 is now the
+binding decision record (including the join at-most-once / late-arrival
+no-op rule made explicit at ratification). Retained below as proposed:
 
 1. **Names**: `MissionPipelineNode` / `MissionPipelineUnit` / `journey`
    (proposed: keep all three as the operator coined them).
@@ -41,8 +43,8 @@ The DESIGN's §10 questions, decided before code:
 6. **Fairness at shared nodes**: v2.0 = FIFO per node with per-graph
    round-robin at claim time; anything richer waits for evidence.
 
-Deliverable: DESIGN §10 rewritten as §10 "Decisions", this plan's
-assumptions confirmed. Evidence: none (a docs commit).
+Deliverable: DONE — DESIGN §10 rewritten as the ratified decision
+record; this plan's assumptions stand confirmed. Next phase: N1.
 
 ## N1 — Contracts core: outcomes, edges, graphs (mission-pipeline)
 
@@ -296,7 +298,7 @@ loop at N9.
 
 | Where | Decision |
 |-------|----------|
-| N0    | §10 ratifications (names, joins, fan-out, TTL, evolution, fairness) |
+| N0    | ✅ ratified 2026-08-27 (names, joins, fan-out, TTL, evolution, fairness) |
 | N6    | Dev account choice + per-lane token consents |
 | N8    | P4-02: substrate as the production model path |
 | N9    | When (if ever) to promote out of development → commissioning ceremony |
