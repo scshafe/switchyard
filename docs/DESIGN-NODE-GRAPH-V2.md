@@ -215,18 +215,30 @@ EVOLVES:
   (journeys, queues, leases) — same fencing discipline, new nouns. Postgres
   is the obvious home, as today.
 
-## 8. Migration story
+## 8. Migration story — none, by operator directive
 
-- A v1 pipeline is a degenerate v2 graph: a linear chain of code/model
-  nodes, single "ok" outcomes edge-connected in order, terminal error
-  outcomes. Mechanical translation.
-- Equivalence proof strategy (the house method): run the v3 Inbox pipelines
-  and their v2-graph translations over the same seed corpus and assert
-  byte-identical output artifacts and digests, node for node — the same
-  dual-run discipline that proved the D2/D3 slices.
-- The Gmail redeploy (successor commissioning family) targets v2 directly —
-  we are pre-commissioning, so nothing live migrates; the v1 plane simply
-  never ships to production.
+**Operator directive (2026-08-27): the project is entirely in development.
+Collected data and uptime are explicitly unimportant. Build it the right
+way; do not spend effort preserving what was built the wrong way.**
+
+Consequences, taken literally:
+
+- There is NO data migration. The v2 store starts from a fresh, empty
+  database. No v1 rows are carried, translated, or dual-written.
+- There is NO equivalence obligation. A v1 pipeline is still a degenerate
+  v2 graph (linear chain, single "ok" outcomes), and per-stage golden
+  vectors remain useful as cheap regression seeds for node BODIES — but
+  byte-identity between the v1 and v2 ENGINES is not a gate, because
+  nothing depends on the v1 engine's outputs.
+- v1 execution surfaces (shard runner, gate terminality, chaining) are
+  deleted as soon as v2 carries the flows — not deprecated, not shimmed.
+- The Gmail redeploy targets v2 directly; the v1/D3 plane never ships.
+
+What the directive does NOT relax (these are correctness, not compat):
+hostile provider content, zero-authority models, least-authority per-node
+principals, append-only evidence, digest-sealing, deterministic edges, no
+send authority, and MC's scheduler-substrate freezes (a different system's
+rules).
 
 ## 9. Relationship to the wider estate (context, not scope)
 
