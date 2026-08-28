@@ -51,6 +51,37 @@ export interface MemoryUnitStoreOptions {
     readonly idFactory?: (kind: "queue" | "lease" | "outbox" | "dead-letter") => string;
     /** Test-driver fault. Pre-commit throws roll back; post_commit_reply does not. */
     readonly settleCheckpoint?: (checkpoint: SettleTransactionCheckpoint) => void;
+    /** Privileged normalized state, normally loaded by a durable adapter. */
+    readonly initialState?: MemoryUnitStoreStateSnapshot;
+}
+export declare const MEMORY_UNIT_STORE_STATE_SNAPSHOT_SCHEMA_VERSION: "mission-pipeline-memory-unit-store-state.v1";
+export interface MemoryUnitStoreStateSnapshot {
+    readonly schemaVersion: typeof MEMORY_UNIT_STORE_STATE_SNAPSHOT_SCHEMA_VERSION;
+    readonly unitGraphs: readonly Readonly<{
+        unitId: string;
+        graph: GraphDefinition;
+    }>[];
+    readonly units: readonly MissionPipelineUnit[];
+    readonly artifacts: readonly ArtifactEnvelope[];
+    readonly queues: readonly UnitQueueOccurrence[];
+    readonly journey: readonly UnitJourneyRecord[];
+    readonly joins: readonly JoinProgress[];
+    readonly attempts: readonly AttemptReservation[];
+    readonly cachedCompletions: readonly CachedCompletionRow[];
+    readonly failures: readonly FailureRow[];
+    readonly settlements: readonly SettlementRow[];
+    readonly outbox: readonly UnitOutboxEventRecord[];
+    readonly outboxDedupeKeys: readonly string[];
+    readonly deadLetters: readonly UnitDeadLetterRecord[];
+    readonly leases: readonly Readonly<{
+        queueId: string;
+        lease: LeaseRow;
+    }>[];
+    readonly fairnessCursor: readonly Readonly<{
+        sharedNodeKey: string;
+        lastGraphLaneKey: string;
+    }>[];
+    readonly nextEnqueueSequence: number;
 }
 export interface MemoryUnitStoreEvidenceSnapshot {
     readonly units: readonly MissionPipelineUnit[];
@@ -93,5 +124,10 @@ export declare class MemoryUnitStore implements UnitStore, GraphStore {
     listDeadLetters(inputRaw?: ListUnitEvidenceInput): Promise<readonly UnitDeadLetterRecord[]>;
     /** Privileged normalized observer used only by the shipped conformance driver. */
     evidenceSnapshot(): MemoryUnitStoreEvidenceSnapshot;
+    /**
+     * Privileged, serialization-safe continuation state for a durable adapter.
+     * This includes mutable coordination projections in addition to evidence.
+     */
+    stateSnapshot(): MemoryUnitStoreStateSnapshot;
 }
 export {};
