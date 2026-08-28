@@ -510,6 +510,130 @@ declared category routes to its branch; a review case queues at a human
 node, `recordDecision` routes it onward; the whole journey reproducible
 from seed + graphDigest.
 
+### N5 implementation clarification (recorded 2026-08-28)
+
+**Where does the graph's required `spam` filter outcome come from when none
+of the five frozen v2 code bodies classifies spam?** Answer used for N5: the
+`filter` node wraps the unchanged normalize body and derives only its routing
+outcome from provider evidence already present on the admitted seed. An exact
+provider label of `SPAM` (compared case-insensitively) yields `spam`; otherwise
+it yields `clean`. This adds no content heuristic and calls no provider. A
+future content-derived spam rule is new intelligence and therefore requires a
+new node version and graph digest. The `spam` outcome is explicitly terminal;
+`clean` alone routes to security.
+
+**What constitutes journal-first execution for the action-model nodes?** The
+engine's durable turn-attempt reservation is necessary but is not the physical
+provider-dispatch journal retained by the v1 host pattern. N5 therefore adds an
+independent, append-only provider-attempt admission to the consumer's fresh v2
+PostgreSQL chain (`sql/postgres-v2/003...`). The exact profile/model capacity
+fence encloses that admission and `classifyWithEvidence`, in that order, so
+capacity rejection happens before the journal and invents no usage. An exact
+existing admission refuses a second physical call and records a non-success,
+indeterminate turn with one tier-ceiling usage receipt because the earlier
+provider effect may have occurred. The provider returns output and its real
+usage receipt as one attempt-scoped value. Outside that recovery case, a
+deliberately explicit `telemetry: unavailable` legacy arm is the only normal
+post-provider path allowed to charge the published tier ceiling; an ordinary
+pre-provider rejection invents no usage.
+
+**Does the engine turn-attempt reservation satisfy classification's existing
+journal-first requirement?** No. It proves engine execution identity, not the
+physical provider boundary. N5 adds the parallel fresh-v2 classification
+journal in `sql/postgres-v2/004...`; its capacity fence likewise encloses
+durable admission and provider I/O. Across the corpus this produces 16 retained
+classification admissions and 34 retained action admissions. Both journals
+use the actual `v2_worker` principal, refuse conflicting or replayed physical
+dispatch, and preserve one conservative receipt when a committed admission has
+no known provider result.
+
+**Where did the action flow's per-tier retry limits go when DecisionRuntime
+orchestration dissolved?** Into the sealed node definitions. Deterministic and
+validator nodes retain one attempt, Qwen recall/precision retain two each, and
+the Mistral arbiter retains one. A generic worker default is not allowed to
+widen the frozen decision budget.
+
+**Where are action-model token and cost ceilings enforced after the historical
+DecisionRuntime dissolves?** N5 transfers retry authority into each sealed
+node's `maxAttempts` and guarantees receipt retention at the physical-call
+boundary; it does not promote the historical DecisionRuntime budget ledger
+into generic graph-engine policy. The N8 host must enforce the exact
+binding/profile request limits, concurrency/capacity fence, and any token or
+paid-spend admission policy before fresh-v2 provider-attempt admission and
+provider I/O. A post-call policy violation must still retain the actual
+validated receipt and terminalize without repeating the physical call. For an
+admitted attempt whose result is unknown, the frozen usage-receipt contract
+forbids silent zero accounting: the local tiers' conservative fallback
+therefore charges the 2,048-token ceiling and a 1 micro-USD accounting floor.
+That floor is neither observed cost nor paid-provider authority and does not
+revise the current local tier's zero-cost policy. Introducing a paid provider,
+a different ceiling, or different enforcement semantics requires a new exact
+binding/profile, a new node version and graph digest, plus N8 prove-it-bites
+evidence that denial occurs before journal/provider dispatch and that
+already-incurred usage is never discarded.
+
+**Why are the action node refs version 3 while the frozen action-pilot v2
+handlers remain unchanged?** The graph adapter adds a durable
+`action-decision-graph-state.v1` envelope that seals both source authority and
+`inputArtifactId`, revalidates them on every turn, projects wall-clock duration
+out of content identity, and carries provider receipts on the turn sidecar.
+Those are executable node-boundary semantics, so they require new node
+versions and a newly sealed graph even though the underlying v2 decision logic
+is reused byte-for-byte.
+
+**How do JobTrack and notification effects remain atomic without importing the
+frozen v1 database chain?** The consumer maps exact successful node artifacts
+to strict v2 source-outbox events before `settleTurn`. Those source events commit
+in the engine's one settlement transaction with journey, artifact, routing,
+successor queues, and lease release. Their payloads pin the existing proposal
+event metadata and dedupe identity for a later delivery adapter; they grant no
+automatic JobTrack transition or mail-send authority.
+
+### N5 executable evidence (2026-08-28)
+
+- In `inbox-pipeline`, the exact phase gate
+  `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable`
+  exited 0 as one uninterrupted command. The hermetic suite reported 1,348
+  tests across 203 suites: 1,302 passed, 46 intentionally skipped, and 0 failed
+  or cancelled. The demo processed both fixture messages. The same command then
+  passed the frozen-v1 schema-39 disposable gate and the fresh-v2 PostgreSQL 18
+  gate.
+- The sealed `inbox.email-graph.v1` definition has digest
+  `b795469f86890a27ef88e60bac9577ab7915ad58345c55c403e714ee10b96f27`:
+  16 nodes, 23 outcome edges, nine explicit terminal node/outcome pairs, and 43
+  exact output-contract bindings. Eight checked-in legacy vectors (all six eval
+  cases plus both fixture messages) traverse all five unchanged deterministic
+  bodies with canonical payload-byte, digest, contract, and size parity; the
+  six eval vectors additionally pin exact risk, ordered flags, and category.
+- The memory executable-spec run completed 17 seeded journeys and 164 settled
+  turns. It retained one receipt for each of 50 model turns, proved 50 journal
+  admissions immediately precede their exact 50 provider calls, emitted 52
+  atomic source-outbox records, and reproduced all 17 sealed journey digests.
+  Spam stopped at `filter/spam`; all six deterministic and seven declared model
+  categories routed; hostile and defensive paths traversed real human queues.
+  Wrong, foreign, and cross-unit human approvals were rejected before journey
+  mutation while their queues remained intact.
+- The identical corpus and the complete N2/N3 conformance contract then ran
+  against PostgreSQL: 19/19 pristine tests plus 82/82 stateful tests, 101/101
+  total. Canonical journey and outbox evidence was byte-identical to memory;
+  the provider boundary retained 16 classification and 34 action admissions.
+  All eight named settle crash points recovered exactly once with the unit at
+  its source or complete successors, never between.
+- Fresh-v2 migrations `[1, 2, 3, 4]` applied once, replayed with none newly
+  applied, and sealed ledger summary `1:4:4:4:4`. Migration 003 has checksum
+  `faa0eed2b9c4271572423e01f7688ec6801c3a1f4ce0b6d012286c8df04f405d`;
+  migration 004 has checksum
+  `2d931724bbb32b87ae432419a68c16d0898ac96684f22ee1a513157f56a6dbfb`.
+  Actual `v2_worker`, `v2_console`, and `v2_callback` principals received real
+  SQLSTATE `42501` denials outside their authority; owner mutation of both
+  append-only journals received `55000`; conflicting replay received `23505`.
+  The frozen v1 1–39 chain and fresh-v2 migrations 001–002 remained byte-for-byte
+  unchanged.
+- In `mission-pipeline`, `npm run check` passed with 351/351 source tests, both
+  packed-install smokes, and the exact 150-file release payload. The packed
+  `mission-pipeline-0.2.0.tgz` artifact SHA-256 remained
+  `525d70d78c7dbe96dbb8a8a0ae7f3078d2cee3de095fb1c4d6ae8ce901eb00d8`.
+
 ## N6 — Gmail intake as admission (inbox-pipeline)
 
 The operator's intake decision (Gmail API + tokens, no Mac) lands here.
@@ -548,7 +672,11 @@ Two-stage by design, so engine work never waits on MC's P4:
 
 - **Dev binding (immediate)**: `ModelNodePort` host → llama-swap direct
   over the tailnet (the lab's proven caller/guard), throughput-capped;
-  acceptable while everything is dev-mode.
+  acceptable while everything is dev-mode. The N5 classification boundary
+  exports a raw exact-catalog resolver for this host; N8 must bind its fresh-v2
+  capacity port around that resolver and must not compose the frozen-v1
+  `createInboxMissionCatalogModelResolver` attempt executor (which would
+  double-fence and require the historical database).
 - **Production binding (the P4-02 ratification)**: the same host submits
   turns as substrate envelopes via mission-substrate-client (the exact
   pattern the Inbox lab's matrix cells already run live). One port, two
