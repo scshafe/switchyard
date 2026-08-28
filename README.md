@@ -1,13 +1,14 @@
 # mission-pipeline
 
-The static compiled-DAG pipeline engine, promoted from the `inbox-pipeline` repo
-into an independently versioned package: pipelines are a CLOSED
-catalog of digest-sealed, content-addressed definitions compiled to a static DAG
-and executed node-by-node — there is deliberately NO DSL, no dynamic stage
-loading, and no runtime mutation of a published definition. Every contract
-artifact (definitions, bindings, node inputs/outputs) is addressed by the
-canonical-JSON SHA-256 rule shared with the frozen `execution-contracts`
-package, so digests are byte-identical across repos.
+The standalone Mission Pipeline engine, promoted from the `inbox-pipeline`
+repo into an independently versioned package. The shipped v1 surface is a
+closed catalog of digest-sealed definitions compiled to a static DAG. The
+additive v2 surface now begins with the N1 node-graph contracts/compiler: typed
+outcomes, deterministic outcome predicates, per-target joins, terminal
+outcomes, sealed graph definitions, and frozen inbound/outbound indexes. There
+is deliberately NO routing DSL, dynamic stage loading, or runtime mutation of
+a published definition. Every contract artifact is addressed by the canonical-
+JSON SHA-256 rule shared with the frozen `execution-contracts` package.
 
 **STANDALONE constraint** (enforced by `test/import-boundary.test.mjs`): this
 package imports `node:` builtins and its own relative files ONLY — never
@@ -35,6 +36,27 @@ B2 ships the static model: `src/node.ts` (StageDescriptor + CodeStage),
 (StageCatalog with ATOMIC register + the ContractValidator port), and
 `src/compile.ts` (compilePipeline with the compile-time parity check and gate
 terminality).
+
+Node-graph v2 N1 ships additively beside those v1 execution surfaces:
+
+- `src/graph/outcome.ts` — the non-empty, unique `OutcomeVocabulary`, tied to
+  the owning versioned node ref.
+- `src/graph/edge.ts` — stable edge identities and the closed predicate
+  language `{outcome} | {anyOf} | {outcome, where:[{pointer,equals}]}`. Pointers
+  are RFC 6901 over the sealed output `ArtifactEnvelope`; conditional arms are
+  additive and do not silently become defaults.
+- `src/graph/definition.ts` — `MissionPipelineNode` for
+  `code|model|agent|human|callback`, explicit per-node principals and joins,
+  terminal outcomes, and canonical-JSON SHA-256 sealed `GraphDefinition`.
+- `src/graph/compile.ts` — `compileGraph`: exact outcome completeness,
+  references, reachability, joins, and binding rules, producing deeply frozen
+  authored-order node/edge indexes. Aggregate validation budgets reject hostile
+  inputs before recursive snapshotting/canonicalization. This compiler
+  intentionally does not inherit v1 DAG/cycle or gate-terminality rules.
+
+N1 is contracts only: unit journeys, queues, turn execution, join progress,
+stores, and provider/host bindings land in later v2 phases. The v1 execution
+surfaces remain untouched until the explicit N10 deletion phase.
 
 B3 ships durable execution:
 
@@ -178,8 +200,8 @@ npm run test:fresh-clone
 `npm run verify` removes and rebuilds the committed `lib/` artifacts, runs the
 independent contract, model, durable-execution, gate, agent, and import-boundary
 suites, proves that the tracked build is reproducible, checks the exact package
-payload, and installs the resulting tarball into a fresh consumer for a runtime
-export smoke test.
+payload, and installs the resulting tarball into a fresh consumer for runtime
+and TypeScript export smoke tests.
 
 The PostgreSQL reference gate is separate because it requires an exact local
 PostgreSQL 18.4 toolchain. It initializes a disposable, Unix-socket-only

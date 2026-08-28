@@ -55,7 +55,23 @@ export function assertPlainObject(value: unknown, label: string): Record<string,
 export function assertStrictKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string): void {
   const unknown = Object.keys(value).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
-    throw new Error(`${label}: unknown key(s) ${unknown.map((k) => JSON.stringify(k)).join(", ")} (strict object — allowed: ${[...allowed].join(", ")})`);
+    const shown = unknown.slice(0, 8).map((key) => JSON.stringify(key)).join(", ");
+    const remainder = unknown.length > 8 ? `, … and ${unknown.length - 8} more` : "";
+    throw new Error(`${label}: unknown key(s) ${shown}${remainder} (strict object — allowed: ${[...allowed].join(", ")})`);
+  }
+}
+
+/** Required keys must be own data captured by the validation snapshot. */
+export function assertRequiredKeys(
+  value: Record<string, unknown>,
+  required: ReadonlySet<string>,
+  label: string
+): void {
+  const missing = [...required].filter((key) => !Object.hasOwn(value, key));
+  if (missing.length > 0) {
+    throw new Error(
+      `${label}: missing required key(s) ${missing.map((key) => JSON.stringify(key)).join(", ")}`
+    );
   }
 }
 
@@ -75,6 +91,16 @@ export function assertIdentifier(value: unknown, label: string): string {
 export function assertPositiveInt(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
     throw new Error(`${label}: must be a positive integer (got ${typeName(value) === "number" ? String(value) : typeName(value)})`);
+  }
+  return value;
+}
+
+/** Identity/version integers must round-trip through JSON without aliasing. */
+export function assertSafePositiveInt(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(
+      `${label}: must be a safe positive integer (got ${typeName(value) === "number" ? String(value) : typeName(value)})`
+    );
   }
   return value;
 }

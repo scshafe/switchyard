@@ -1,7 +1,7 @@
 {
   "name": "mission-pipeline",
   "version": "0.2.0",
-  "description": "Standalone, dependency-free, digest-sealed compiled-DAG pipeline engine for host applications.",
+  "description": "Standalone, dependency-free, digest-sealed pipeline and node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
   "author": "mission-pipeline contributors",

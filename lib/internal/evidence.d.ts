@@ -27,6 +27,19 @@ export interface EvidenceOutboxAttemptIdentity {
  */
 export declare function snapshotEvidenceOutboxContext(value: unknown, label: string): EvidenceOutboxAttemptIdentity;
 export declare function deepFrozenClone<T>(value: T, label: string): T;
+export interface ValidationDataLimits {
+    readonly maxDepth: number;
+    readonly maxValues: number;
+    readonly maxStringCodeUnits: number;
+}
+/**
+ * Iterative, descriptor-only admission budget for hostile validation input.
+ * Run this before a recursive snapshot: it prevents stack exhaustion and
+ * bounds the aggregate data that cloning/canonicalization may duplicate.
+ */
+export declare function assertBoundedValidationData(value: unknown, label: string, limits: ValidationDataLimits): void;
+/** Budget first, then return the ordinary descriptor-safe frozen snapshot. */
+export declare function snapshotBoundedValidationData<T>(value: T, label: string, limits: ValidationDataLimits): T;
 /**
  * Descriptor-first validation snapshot that preserves invalid leaf values so
  * public validators can retain their precise legacy diagnostics. Plain

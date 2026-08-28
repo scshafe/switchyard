@@ -80,6 +80,11 @@ try {
     'import * as root from "mission-pipeline";',
     'import { compilePipeline, validateCompiledPipelineNode } from "mission-pipeline/compile";',
     'import { createPipelineDefinition } from "mission-pipeline/definition";',
+    'import { validateOutcomeVocabulary } from "mission-pipeline/graph/outcome";',
+    'import { validateEdge } from "mission-pipeline/graph/edge";',
+    'import { createGraphDefinition } from "mission-pipeline/graph/definition";',
+    'import { compileGraph } from "mission-pipeline/graph/compile";',
+    'import { MAX_GRAPH_VALIDATION_DEPTH } from "mission-pipeline/graph/limits";',
     'import { createGateTerminationCertificate } from "mission-pipeline/gate/certificate";',
     'import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "mission-pipeline/agent/step";',
     'import { createRetrySafeOutboxEvents, combineOutboxEvents } from "mission-pipeline/execute/outbox";',
@@ -89,7 +94,12 @@ try {
     'import schema from "mission-pipeline/schemas/pipeline-definition.v2.schema.json" with { type: "json" };',
     'import metadata from "mission-pipeline/package.json" with { type: "json" };',
     "if (root.compilePipeline !== compilePipeline) throw new Error('root compiler export mismatch');",
+    "if (root.compileGraph !== compileGraph) throw new Error('root graph compiler export mismatch');",
     "if (typeof createPipelineDefinition !== 'function') throw new Error('definition export missing');",
+    "if (typeof createGraphDefinition !== 'function' || typeof validateOutcomeVocabulary !== 'function' || typeof validateEdge !== 'function') throw new Error('graph exports missing');",
+    "if (MAX_GRAPH_VALIDATION_DEPTH !== 16) throw new Error('graph limits export missing');",
+    'const graph = createGraphDefinition({graphId:"install.smoke",version:1,description:"Packed graph smoke.",entry:"only",nodes:[{nodeId:"only",ref:{id:"smoke.only",version:1},kind:"code",input:"smoke-input.v1",outcomes:{version:1,outcomes:["done"]},principal:{id:"v2_worker"},turn:{idempotency:"per (unitId, nodeId, attemptNumber)",leaseMs:1000,maxAttempts:1,retryTaxonomy:"retryable vs terminal, as v1 durable-stage"}}],edges:[],terminals:[{nodeId:"only",outcome:"done"}]});',
+    "if (compileGraph(graph).graph.digest !== graph.graphDigest) throw new Error('packed graph compile mismatch');",
     "if (typeof validateCompiledPipelineNode !== 'function') throw new Error('compiled-node validator export missing');",
     "if (typeof createGateTerminationCertificate !== 'function') throw new Error('gate export missing');",
     "if (AGENT_STEP_REQUEST_SCHEMA_VERSION !== 'agent-step-request.v1') throw new Error('agent export mismatch');",
@@ -104,6 +114,14 @@ try {
   await writeFile(join(consumer, "smoke.mjs"), `${smoke}\n`);
   await run("node", ["smoke.mjs"], { cwd: consumer });
   const typeSmoke = `
+    import { GRAPH_VALIDATION_LIMITS } from "mission-pipeline/graph/limits";
+    import type { OutcomeVocabulary as DirectOutcomeVocabulary } from "mission-pipeline/graph/outcome";
+    import type { OutcomePredicate as DirectOutcomePredicate } from "mission-pipeline/graph/edge";
+    import type {
+      GraphDefinition as DirectGraphDefinition,
+      MissionPipelineNode as DirectMissionPipelineNode
+    } from "mission-pipeline/graph/definition";
+    import type { CompiledGraph as DirectCompiledGraph } from "mission-pipeline/graph/compile";
     import {
       BoundEvidencePersistenceError,
       EvidenceConflictError,
@@ -112,6 +130,8 @@ try {
       StageEvidenceAssemblyError,
       StageResultConflictError,
       combineOutboxEvents,
+      compileGraph,
+      createGraphDefinition,
       createBoundPipelineExecutionIdentity,
       createRetrySafeOutboxEvents,
       executeBoundDurableStage,
@@ -121,10 +141,19 @@ try {
       runWithShardHeartbeat,
       snapshotNodeInvocation,
       validateCompiledPipelineNode,
+      validateEdge,
+      validateGraphDefinition,
+      validateOutcomeVocabulary,
       validateBoundPipelineExecutionIdentity,
       type BoundPipelineExecutionIdentity,
       type BoundPipelineShard,
       type BoundDurableStageInput,
+      type CompiledGraph,
+      type GraphDefinition,
+      type GraphDefinitionDraft,
+      type MissionPipelineNode,
+      type OutcomePredicate,
+      type OutcomeVocabulary,
       type OutboxEvents,
       type RetrySafeOutboxEvents
     } from "mission-pipeline";
@@ -137,6 +166,8 @@ try {
       StageEvidenceAssemblyError,
       StageResultConflictError,
       combineOutboxEvents,
+      compileGraph,
+      createGraphDefinition,
       createBoundPipelineExecutionIdentity,
       createRetrySafeOutboxEvents,
       executeBoundDurableStage,
@@ -146,6 +177,9 @@ try {
       runWithShardHeartbeat,
       snapshotNodeInvocation,
       validateCompiledPipelineNode,
+      validateEdge,
+      validateGraphDefinition,
+      validateOutcomeVocabulary,
       validateBoundPipelineExecutionIdentity
     };
     const events: OutboxEvents = [];
@@ -153,11 +187,42 @@ try {
     const identity = undefined as unknown as BoundPipelineExecutionIdentity;
     const directInput = undefined as unknown as BoundDurableStageInput<{ generation: number }>;
     const directShard: BoundPipelineShard = directInput.shard;
+    const graphDraft = undefined as unknown as GraphDefinitionDraft;
+    const graph = undefined as unknown as GraphDefinition;
+    const compiledGraph = undefined as unknown as CompiledGraph;
+    const graphNode = undefined as unknown as MissionPipelineNode;
+    const outcomes = undefined as unknown as OutcomeVocabulary;
+    const predicate = undefined as unknown as OutcomePredicate;
+    const directOutcomes = undefined as unknown as DirectOutcomeVocabulary;
+    const directPredicate = undefined as unknown as DirectOutcomePredicate;
+    const directGraph = undefined as unknown as DirectGraphDefinition;
+    const directNode = undefined as unknown as DirectMissionPipelineNode;
+    const directCompiled = undefined as unknown as DirectCompiledGraph;
+    // @ts-expect-error sealed graph arrays are readonly in the public contract
+    graph.nodes.push(graphNode);
+    // @ts-expect-error sealed node fields are readonly in the public contract
+    graphNode.kind = "code";
+    // @ts-expect-error sealed outcome arrays are readonly in the public contract
+    outcomes.outcomes.push("late");
+    // @ts-expect-error compiled graph properties are readonly in the public contract
+    compiledGraph.entry = "late";
     void exported;
     void events;
     void retrySafe;
     void identity;
     void directShard;
+    void graphDraft;
+    void graph;
+    void compiledGraph;
+    void graphNode;
+    void outcomes;
+    void predicate;
+    void GRAPH_VALIDATION_LIMITS;
+    void directOutcomes;
+    void directPredicate;
+    void directGraph;
+    void directNode;
+    void directCompiled;
   `;
   await writeFile(join(consumer, "smoke.ts"), typeSmoke);
   await writeFile(

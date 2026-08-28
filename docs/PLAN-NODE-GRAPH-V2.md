@@ -81,6 +81,43 @@ adversarial fixtures (unreachable node, uncovered outcome, join over
 non-inbound edge, undeclared outcome in an edge) each rejected LOUDLY.
 House rule applies: every guard test proves it bites.
 
+### N1 implementation clarifications (recorded 2026-08-27)
+
+These questions are below the ratified N0 decisions; they do not reopen
+DESIGN §10. They were recorded before implementation because the illustrative
+shapes above do not determine them completely.
+
+1. **Does an `outcome + where` edge by itself satisfy outcome completeness?**
+   Provisional answer: **no**. Its field predicate can be false at runtime, so
+   counting it alone would violate the load-bearing rule that no declared
+   outcome can fall silently. Every declared outcome must therefore have an
+   unconditional `{outcome}` / `{anyOf}` route or be explicitly terminal.
+   Declaring an outcome terminal while any edge also mentions it is rejected as
+   contradictory (terminal means that completion enqueues no successor).
+2. **How does a join name a declared inbound edge when the illustrative `Edge`
+   shape has no identity field?** Provisional answer: add a stable,
+   author-supplied `edgeId` to `Edge`, and declare a join as
+   `{inbound: edgeId[], require: "all" | {nOf}}`. Array indexes, source-node
+   IDs, and structural hashes are not stable/unambiguous enough for durable N3
+   join progress when multiple predicates share a source. The compiler verifies
+   that the declared IDs equal the node's actual inbound-edge set (no unnamed
+   offers with undefined join semantics) and emits edge-ID indexes.
+3. **May the admission `entry` node itself declare a join?** Provisional
+   answer: **no**. Admission queues the new unit at `entry` without an inbound
+   edge offer, so allowing a join there would either bypass its declared
+   requirement or deadlock. `compileGraph` rejects an entry join; a cycle may
+   still route back to an ordinary non-entry join node.
+4. **Where is the binding decision that one `(node ref id, version)` always
+   names one node definition enforced?** The definition-bound signature is
+   `{kind, input contract, outcome set}`; `nodeId`, principal, binding, turn,
+   and join are graph-instance configuration. N1 rejects inconsistent reuse of
+   a ref/version inside one graph. Cross-graph comparison is necessarily
+   stateful, so the N3 graph-publication store must atomically remember the
+   first definition-bound signature for each ref/version and reject any later
+   publish whose signature differs. The same store-conformance test must run
+   against Postgres in N4. This is enforcement of DESIGN §10.5, not a soft
+   evolution path; changing the outcome set always requires a new node version.
+
 ## N2 — The turn executor and node-kind ports (mission-pipeline)
 
 Generalize what exists; invent as little as possible.

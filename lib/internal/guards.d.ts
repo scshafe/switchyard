@@ -13,8 +13,12 @@ export declare function truncate(s: string, max?: number): string;
 export declare function isPlainObject(value: unknown): value is Record<string, unknown>;
 export declare function assertPlainObject(value: unknown, label: string): Record<string, unknown>;
 export declare function assertStrictKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string): void;
+/** Required keys must be own data captured by the validation snapshot. */
+export declare function assertRequiredKeys(value: Record<string, unknown>, required: ReadonlySet<string>, label: string): void;
 export declare function assertIdentifier(value: unknown, label: string): string;
 export declare function assertPositiveInt(value: unknown, label: string): number;
+/** Identity/version integers must round-trip through JSON without aliasing. */
+export declare function assertSafePositiveInt(value: unknown, label: string): number;
 export declare function assertSha256Hex(value: unknown, label: string): string;
 export declare function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T;
 /**
