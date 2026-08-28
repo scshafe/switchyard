@@ -405,6 +405,48 @@ equivalence.
    <25`, and CI runs `verify` on both minimum versions. Inbox keeps its exact
    Node 22 contract; Mission Control keeps its exact Node 24 contract. Node 23
    remains unsupported rather than becoming an untested accidental promise.
+2. **How is arbitrary sealed JSON represented without weakening the existing
+   digest rule?** Artifact envelopes, graph definitions, unit definitions,
+   journey records, queue records, join progress, outbox records, and dead
+   letters are stored as bounded C-collated canonical-JSON `TEXT`. PostgreSQL
+   `jsonb` cannot represent the otherwise valid JSON string escape `\u0000`;
+   converting provider content to `jsonb` would therefore narrow the engine's
+   hostile-content boundary. Typed relational columns and bounded `jsonb`
+   metadata remain the query/constraint projection. The adapter validates
+   canonical form and every seal both before persistence and after hydration.
+3. **May a caller-supplied principal select database credentials?** No. A
+   production `PostgresUnitStore` instance owns one pool already authenticated
+   as exactly one startup-bound principal and checks `current_user` on each
+   checkout. Principal IDs in port inputs are authorization assertions, never
+   credential-routing input. The conformance-only composite delegates to four
+   independently authenticated stores so the unchanged package suite can
+   exercise all roles without introducing that authority pattern into runtime
+   composition.
+4. **What is the PostgreSQL settle and retry boundary?** Admission, claims,
+   external inspection/claim, attempt preparation, failure recording, and
+   settlement hydrate package state inside a `SERIALIZABLE` transaction and
+   apply one normalized delta. Settlement retains the N3 boundary as one
+   transaction: journey append, artifact retention, deterministic edge
+   evaluation, join progress, successor enqueue, outbox append, and lease
+   release commit together. A pre-commit `40001` retries the whole transaction
+   with the original logical timestamp; no sub-step is retried, and no retry is
+   attempted after COMMIT or simulated post-commit reply loss.
+5. **What is the authoritative input for rebuilding the claimable queue?**
+   Every queue insertion has an append-only `journey_queue_effects` row linked
+   to its source journey sequence and digest. `unit_queue` is the mutable
+   claimable projection of those effects. Only the owner maintenance authority
+   may rebuild it, and only with zero active leases; runtime principals receive
+   a real `42501`. Rebuild restores every physical queue column byte-for-byte,
+   including terminal source occurrences retained as journey-position
+   evidence.
+6. **How are queue visibility and turn-kind authority separated?** A queue read
+   is scoped by the store's sealed principal and requested node; it does not
+   infer that a principal name is a node kind. Mutating routines independently
+   enforce the graph node kind and capability role: workers handle code,
+   model, and agent turns; the console handles human turns; callbacks handle
+   callback turns; and the admitter alone publishes/adopts graphs and admits
+   units. This keeps visibility policy from becoming an accidental settlement
+   grant.
 
 ## N5 — Node bodies: the email graph, re-expressed (inbox-pipeline)
 
