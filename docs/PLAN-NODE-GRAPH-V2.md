@@ -395,6 +395,17 @@ settle a human turn — proven as a 42501-class denial, not absence of a
 code path); crash-point test against real transactions; queue-rebuild
 equivalence.
 
+### N4 implementation clarifications (recorded 2026-08-28)
+
+1. **How can the N3 engine package be consumed by Inbox's frozen Node 22
+   runtime when Mission Control tests it on Node 24?** The implementation is
+   compatible with both supported estate runtimes: the engine's complete 344-
+   test suite passes under Node 22.23.2 as well as Node 24.18.0. Its package
+   range is therefore the explicit disjunction `>=22.22.0 <23 || >=24.18.0
+   <25`, and CI runs `verify` on both minimum versions. Inbox keeps its exact
+   Node 22 contract; Mission Control keeps its exact Node 24 contract. Node 23
+   remains unsupported rather than becoming an untested accidental promise.
+
 ## N5 — Node bodies: the email graph, re-expressed (inbox-pipeline)
 
 Port the real processing onto v2 — no new intelligence, new arrangement.

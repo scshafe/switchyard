@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   verify:
+    strategy:
+      matrix:
+        node-version: [22.22.0, 24.18.0]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -20,7 +23,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 24.18.0
+          node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
       - run: npm run verify
