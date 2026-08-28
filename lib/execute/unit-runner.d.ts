@@ -129,6 +129,7 @@ export interface RecordTurnFailureInput extends PreparedAttemptIdentity {
     readonly unitId: string;
     readonly nodeId: string;
     readonly leaseToken: string;
+    readonly principalId: string;
     readonly startedAt: string;
     readonly failedAt: string;
     readonly errorCode: string;

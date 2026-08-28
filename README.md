@@ -3,10 +3,11 @@
 The standalone Mission Pipeline engine, promoted from the `inbox-pipeline`
 repo into an independently versioned package. The shipped v1 surface is a
 closed catalog of digest-sealed definitions compiled to a static DAG. The
-additive v2 surface now includes the N1 node-graph contracts/compiler and N2
-per-node turn boundary: typed outcomes, deterministic predicates, joins,
-sealed graph definitions, exact attempt identity, five node-kind ports, and a
-single atomic settlement capability. There
+additive v2 surface now includes the N1 node-graph contracts/compiler, N2
+per-node turn boundary, and N3 append-only graph/unit stores: typed outcomes,
+deterministic predicates, joins, sealed graph definitions, exact attempt
+identity, five node-kind ports, per-node queues, and one atomic settlement
+capability. There
 is deliberately NO routing DSL, dynamic stage loading, or runtime mutation of
 a published definition. Every contract artifact is addressed by the canonical-
 JSON SHA-256 rule shared with the frozen `execution-contracts` package.
@@ -74,10 +75,32 @@ host dependency:
   journey, artifact, deterministic routing/join updates, successor queues,
   outbox rows, and lease release in that one transaction.
 
-N2 deliberately declares a narrow store protocol before implementing it. N3's
-memory `UnitStore` becomes the executable specification and completes the
-crash-point evidence; N4 reruns the same suite against Postgres. The v1
-execution surfaces remain untouched until the explicit N10 deletion phase.
+Node-graph v2 N3 makes that store boundary executable without introducing a
+database or host dependency:
+
+- `src/store/graph-store.ts` and `src/store/memory-graph-store.ts` — immutable
+  sealed graph publication/load plus the cross-graph node-definition signature
+  registry (`kind`, input contract, outcome set).
+- `src/store/unit-store.ts` and `src/store/memory-unit-store.ts` — admission,
+  retained per-node FIFO queues, per-graph round-robin claims, fenced leases,
+  exact attempt recovery, append-only journeys/artifacts/dead letters/outbox,
+  deterministic edge routing, and `all|nOf` join progress. Settlement is a
+  copy-on-write transaction in memory: journey, artifacts, edges, joins,
+  successors, outbox, and lease release become visible together or not at all.
+- `src/store/routing.ts` — descriptor-safe evaluation of the closed edge
+  predicate language and pure join threshold arithmetic.
+- `src/store/graph-store-conformance.ts` and
+  `src/store/unit-store-conformance.ts` — factory-driven executable contracts.
+  N3 runs them against memory; N4 imports the same registrars for Postgres.
+  The unit suite injects a process-death fault after every logical settlement
+  step plus post-commit reply loss and proves exactly-once replay.
+
+Unsatisfiable joins fire at most once under the reserved
+`mission_pipeline.engine` principal and emit a sealed
+`mission-pipeline.join-unsatisfiable.v1` artifact. Late offers remain journey-
+recorded no-ops. Human queues never expire engine-side; callback timer nodes
+express time in the graph. The v1 execution surfaces remain untouched until
+the explicit N10 deletion phase.
 
 That N2→N3 protocol is a closed attempt state machine. Prepare reserves an
 exact attempt identity and repeats that unresolved reservation on reclaim;

@@ -365,6 +365,20 @@ test("unmetered completion: code, human, and callback ports cannot smuggle usage
   }
 });
 
+test("callback completion must carry the admitted event artifact", () => {
+  assert.throws(
+    () => validateNodeTurnCompletion(callbackNode, { outcome: "received" }),
+    /callback node callback-work must return outputArtifact/
+  );
+  assert.deepEqual(
+    validateNodeTurnCompletion(callbackNode, {
+      outcome: "received",
+      outputArtifact: OUTPUT
+    }),
+    { outcome: "received", outputArtifact: OUTPUT }
+  );
+});
+
 test("ordinary port completion: engine-reserved and undeclared outcomes fail with exact node/outcome", () => {
   assert.throws(
     () => validateNodeTurnCompletion(codeNode, {

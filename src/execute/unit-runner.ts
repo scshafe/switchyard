@@ -37,6 +37,10 @@ import {
   deepFrozenClone
 } from "../internal/evidence.js";
 import { snapshotGraphValidationData } from "../graph/limits.js";
+import {
+  nodeTurnFailureDigest,
+  nodeTurnSettlementDigest
+} from "./turn-evidence.js";
 import { classifyExecutionFailure } from "./failure.js";
 import {
   ENGINE_JOIN_UNSATISFIABLE_OUTCOME,
@@ -216,6 +220,7 @@ export interface RecordTurnFailureInput extends PreparedAttemptIdentity {
   readonly unitId: string;
   readonly nodeId: string;
   readonly leaseToken: string;
+  readonly principalId: string;
   readonly startedAt: string;
   readonly failedAt: string;
   readonly errorCode: string;
@@ -1261,26 +1266,6 @@ function safeFailureMessage(error: unknown, fallback: string): string {
   return message.length === 0 ? fallback : message;
 }
 
-function failureDigest(input: Omit<RecordTurnFailureInput, "failureDigest">): string {
-  // A reclaim presents a different coordination fence for the same durable
-  // attempt. Lease tokens therefore never enter immutable evidence identity.
-  return digest({
-    queueId: input.queueId,
-    unitId: input.unitId,
-    nodeId: input.nodeId,
-    attemptNumber: input.attemptNumber,
-    attemptIndex: input.attemptIndex,
-    idempotencyKey: input.idempotencyKey,
-    startedAt: input.startedAt,
-    failedAt: input.failedAt,
-    errorCode: input.errorCode,
-    errorMessage: input.errorMessage,
-    retryable: input.retryable,
-    terminal: input.terminal,
-    usage: input.usage
-  });
-}
-
 interface CapturedTurnFailure {
   readonly errorCode: string;
   readonly errorMessage: string;
@@ -1342,6 +1327,7 @@ async function recordFailure(
   store: TurnExecutionStore,
   claim: ClaimedUnitTurn,
   attempt: PreparedAttemptIdentity,
+  principalId: string,
   startedAt: string,
   failedAt: string,
   failure: CapturedTurnFailure,
@@ -1363,11 +1349,21 @@ async function recordFailure(
       nodeId: claim.nodeId,
       leaseToken: claim.leaseToken,
       ...attempt,
+      principalId,
       startedAt,
       failedAt,
       ...failure
     });
-    const sealedFailureDigest = failureDigest(failureBase);
+    const sealedFailureDigest = nodeTurnFailureDigest({
+      queueId: claim.queueId,
+      unitId: claim.unitId,
+      nodeId: claim.nodeId,
+      ...attempt,
+      principalId,
+      startedAt,
+      failedAt,
+      ...failure
+    });
     input = frozenNullRecord({
       ...failureBase,
       failureDigest: sealedFailureDigest
@@ -1446,34 +1442,6 @@ function captureSettleResult(
   });
 }
 
-function computeSettlementDigest(input: {
-  readonly queueId: string;
-  readonly unitId: string;
-  readonly nodeId: string;
-  readonly attemptNumber: number;
-  readonly attemptIndex: number;
-  readonly idempotencyKey: string;
-  readonly principalId: string;
-  readonly actorId?: string;
-  readonly startedAt: string;
-  readonly settledAt: string;
-  readonly completionDigest: string;
-}): string {
-  return digest({
-    queueId: input.queueId,
-    unitId: input.unitId,
-    nodeId: input.nodeId,
-    attemptNumber: input.attemptNumber,
-    attemptIndex: input.attemptIndex,
-    idempotencyKey: input.idempotencyKey,
-    principalId: input.principalId,
-    ...(Object.hasOwn(input, "actorId") ? { actorId: input.actorId } : {}),
-    startedAt: input.startedAt,
-    settledAt: input.settledAt,
-    completionDigest: input.completionDigest
-  });
-}
-
 async function settleCompletion(
   store: Pick<TurnExecutionStore, "settleTurn">,
   claim: ClaimedUnitTurn,
@@ -1495,7 +1463,7 @@ async function settleCompletion(
       "settled turn.startedAt",
       "settled turn.settledAt"
     );
-    const settlementDigest = computeSettlementDigest({
+    const settlementDigest = nodeTurnSettlementDigest({
       queueId: claim.queueId,
       unitId: claim.unitId,
       nodeId: claim.nodeId,
@@ -1782,7 +1750,14 @@ export async function runClaimedUnitTurn(
         attempts: prepared.attempts
       });
     }
-    const attempt: PreparedAttemptIdentity = prepared;
+    // Strip the preparation discriminant before constructing persistence
+    // inputs. A structural TypeScript assignment would retain `disposition`
+    // at runtime and violate the store's closed input contracts.
+    const attempt: PreparedAttemptIdentity = Object.freeze({
+      attemptNumber: prepared.attemptNumber,
+      attemptIndex: prepared.attemptIndex,
+      idempotencyKey: prepared.idempotencyKey
+    });
     let completion: NodeTurnCompletion;
     let completionDigest: string;
     let startedAt: string;
@@ -1894,6 +1869,7 @@ export async function runClaimedUnitTurn(
           store,
           claim,
           attempt,
+          principalId,
           startedAt,
           failedAt,
           failure,
@@ -2247,7 +2223,7 @@ function assertExactExternalSettlement(
   if (
     settled.attemptIndex > node.turn.maxAttempts
     || settled.idempotencyKey !== attemptKey(inspection, node, settled.attemptNumber)
-    || settled.settlementDigest !== computeSettlementDigest({
+    || settled.settlementDigest !== nodeTurnSettlementDigest({
       queueId: settled.queueId,
       unitId: settled.unitId,
       nodeId: settled.nodeId,
@@ -2475,7 +2451,11 @@ async function completeExternalTurn(
   const settled = await settleCompletion(
     store,
     claim,
-    prepared,
+    Object.freeze({
+      attemptNumber: prepared.attemptNumber,
+      attemptIndex: prepared.attemptIndex,
+      idempotencyKey: prepared.idempotencyKey
+    }),
     principalId,
     actorId,
     completion,

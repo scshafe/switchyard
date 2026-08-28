@@ -119,6 +119,7 @@ test("v2 turn core cannot reach v1 traversal/store/gate or host provider modules
     "src/execute/failure.ts",
     "src/execute/ports.ts",
     "src/execute/turn.ts",
+    "src/execute/turn-evidence.ts",
     "src/execute/unit-runner.ts",
     "src/contracts/artifact.ts",
     "src/contracts/digest.ts",

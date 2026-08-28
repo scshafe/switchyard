@@ -394,6 +394,11 @@ export function validateNodeTurnCompletion<K extends MissionPipelineNodeKind>(
       }
       outputArtifact = validateArtifactEnvelope(raw.outputArtifact);
     }
+    if (node.kind === "callback" && outputArtifact === undefined) {
+      throw new Error(
+        `${label}: callback node ${node.nodeId} must return outputArtifact for the admitted event`
+      );
+    }
 
     return deepFrozenClone(
       {

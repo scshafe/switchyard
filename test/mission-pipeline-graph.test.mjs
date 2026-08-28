@@ -23,6 +23,8 @@ import {
 import {
   createGraphDefinition,
   graphDefinitionRef,
+  JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
+  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
   validateMissionPipelineNode,
   validateMissionPipelineNodeBindingRef
@@ -722,4 +724,43 @@ test("v2 graph structure: reachable cycles compile (no inherited v1 DAG rule)", 
   };
   const compiled = sealAndCompile(cyclic);
   assert.deepEqual(compiled.outboundByNode.b.map((edge) => edge.edgeId), ["b-to-a"]);
+});
+
+test("N3 guard bites: authored nodes cannot claim the reserved engine principal", () => {
+  const reserved = clone(fixtureGraphs["filter-chain"]);
+  reserved.nodes[0].principal.id = MISSION_PIPELINE_ENGINE_PRINCIPAL_ID;
+  assert.throws(
+    () => sealAndCompile(reserved),
+    /Graph node filter cannot use reserved engine principal mission_pipeline\.engine/
+  );
+});
+
+test("N3 guard bites: only a declared join may expose the engine outcome", () => {
+  const ordinary = clone(fixtureGraphs["filter-chain"]);
+  ordinary.nodes[0].outcomes.outcomes.push("join_unsatisfiable");
+  ordinary.terminals.push({ nodeId: "filter", outcome: "join_unsatisfiable" });
+  assert.throws(
+    () => sealAndCompile(ordinary),
+    /Graph non-join node filter cannot declare engine-reserved outcome "join_unsatisfiable"/
+  );
+});
+
+test("N3 guard bites: routed join_unsatisfiable names the incompatible target", () => {
+  const routed = clone(fixtureGraphs.join);
+  routed.nodes.push(node("recover", ["done"], { input: "unit-artifact.v1" }));
+  routed.edges.push({
+    edgeId: "join-unsatisfiable-recovery",
+    from: "join",
+    when: { outcome: "join_unsatisfiable" },
+    to: ["recover"]
+  });
+  routed.terminals = routed.terminals
+    .filter(({ nodeId, outcome }) => !(nodeId === "join" && outcome === "join_unsatisfiable"))
+    .concat({ nodeId: "recover", outcome: "done" });
+  assert.throws(
+    () => sealAndCompile(routed),
+    new RegExp(
+      `Graph edge join-unsatisfiable-recovery routes join_unsatisfiable to node recover, which requires ${JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT.replaceAll(".", "\\.")}`
+    )
+  );
 });

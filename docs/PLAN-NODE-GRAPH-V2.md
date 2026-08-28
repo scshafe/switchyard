@@ -257,7 +257,7 @@ the execution/store seam precise enough to implement N2 before N3.
     expire a human queue. The engine has no semantic timeout: delays and
     escalation remain graph-authored callback timer nodes under N0.
 
-## N3 — GraphStore/UnitStore ports + memory implementation (mission-pipeline)
+## N3 — GraphStore/UnitStore ports + memory implementation (mission-pipeline) ✅ COMPLETE 2026-08-27
 
 The store contract is the heart; the memory implementation is the
 executable spec (v1's memory-store pattern).
@@ -279,6 +279,93 @@ Evidence: the N2 suite runs entirely on this; plus store-focused
 properties — join `all` and `nOf` firing exactly once, `join_unsatisfiable`
 emission when an inbound leg dies, no successor enqueue without journey
 append (and vice versa), lease expiry → reclaim → cached-attempt reuse.
+
+### N3 implementation clarifications (recorded 2026-08-27)
+
+These rules close the two questions deliberately deferred by N2 and the
+occurrence-level details needed to make the memory store an unambiguous N4
+specification. They are below N0 and do not reopen its binding decisions.
+
+1. **What exactly counts as one join offer, including when cycles revisit a
+   source node?** Join progress is per `(unitId, joinNodeId, inboundEdgeId)`.
+   The first predicate-matching completion offers that edge; later duplicate
+   or cyclic matches are append-only no-op evidence. An unmatched/terminal
+   source occurrence does not prematurely kill the edge while another live
+   occurrence can still offer it. After each atomic routing projection, a
+   still-pending edge becomes impossible only when no unresolved queue
+   occurrence has a structural graph path (including a zero-length path) to
+   that edge's source node. This conservative liveness rule accounts for
+   already-queued duplicates and possible cycle revisits without predicting a
+   future outcome. The threshold counts distinct offered edge IDs, never turn
+   count; once offered or impossible, an edge never changes state.
+2. **Which artifact does the fired join receive?** All still-pending matched
+   offers from one source settlement are applied in the sealed
+   `join.inbound` order before any impossible resolutions from that same
+   settlement. Once the requirement is met, the queued occurrence receives
+   the artifact carried by the earliest accepted edge in that sealed order.
+   The store validates every accepted artifact against the join node's input
+   contract and seals the complete accepted-offer provenance (edge ID,
+   source occurrence/evidence identity, artifact ref, and authored order) on
+   the queue/journey evidence. Thus arrival order is durable evidence, while
+   the selected input is deterministic for the accepted set. The join queues
+   at most once; every later offer is an explicit journey-recorded no-op.
+3. **Who and when synthesize `join_unsatisfiable`, and what can it route?** The
+   reserved principal is `mission_pipeline.engine`; graph compilation rejects
+   that principal on authored nodes. The synthetic journey outcome has no
+   actor, body invocation, lease, cache row, attempt, or usage. Its effective
+   time is exactly the canonical `failedAt`/`settledAt` of the causal durable
+   event (both synthetic start and settle timestamps use that value), never a
+   second wall-clock read. It emits a digest-sealed
+   `mission-pipeline.join-unsatisfiable.v1` artifact containing the graph/unit,
+   join requirement, accepted/impossible edge provenance, cause evidence
+   digest, and resolution time. An authored successor of the unsatisfiable
+   outcome must therefore declare that exact input contract; ordinary target
+   contract validation remains atomic and LOUD. This handles both zero-offer
+   and partial-offer unsatisfiability without privileging an unrelated seed or
+   falsely labeling engine data as an application contract. `compileGraph`
+   rejects a routed `join_unsatisfiable` target whose input is not that
+   reserved contract, so the guard bites before publication as well as at the
+   atomic store boundary.
+4. **Can one completion enqueue the same ordinary target multiple times?** No.
+   For a non-join target, all matched edge IDs from one source settlement are
+   retained as provenance but create one queue occurrence for that target.
+   Distinct later source settlements may create later occurrences. Join
+   targets still count each distinct declared inbound edge independently.
+5. **What are the transaction crash checkpoints?** The conformance driver
+   names stable logical checkpoints after journey append, artifact retention,
+   edge evaluation, join progress, successor queue projection, outbox append,
+   and lease release, plus a post-commit reply-loss arm. A fault before commit
+   exposes none of those staged writes; replay sees the source occurrence and
+   its exact cached attempt. A fault after commit recovers the one settlement
+   and its complete successor set. These names are test-driver hooks, not
+   separately committable production operations.
+6. **How is the round-robin cursor initialized and scoped?** A shared queue key
+   is `(nodeId, nodeRef.id, nodeRef.version)`; the sealed graph ref is the lane.
+   With no cursor, claim chooses the eligible lane with the oldest FIFO head
+   (graph-ref lexical order breaks an exact sequence tie). Thereafter it picks
+   the next eligible lane in stable graph-ref order after the last served lane.
+   A homogeneous batch takes up to `N` FIFO occurrences from only that chosen
+   graph/node lane, as the N2 runner requires. The last-served cursor is
+   mutable short-lived claim coordination like a lease, never journey or
+   evidence; changing it cannot alter durable unit position.
+
+### N3 executable evidence (2026-08-27)
+
+- `npm test` — 344 passed, 0 failed. This includes the complete N1/N2 suite,
+  N3 publication/store/routing coverage, and every guard's prove-it-bites case.
+- `node --test test/mission-pipeline-graph-store.test.mjs test/mission-pipeline-memory-unit-store.test.mjs test/mission-pipeline-store-routing.test.mjs`
+  — 51 passed, 0 failed: 10 GraphStore cases, 34 MemoryUnitStore cases, and 7
+  pure routing/join-arithmetic cases.
+- The reusable `registerUnitStoreConformanceTests` contract contributes 33 of
+  those memory cases: 25 backend-neutral scenarios plus one property case for
+  each of the eight settle checkpoints. Every pre-commit crash exposes neither
+  side of the position change; post-commit reply loss replays one settlement
+  and the complete successor set.
+- `node --test test/mission-pipeline-node-ports.test.mjs test/mission-pipeline-node-turn.test.mjs`
+  — 65 passed, 0 failed against the N2 boundary.
+- `npm run check`, `npm run verify`, and `npm run test:fresh-clone` — release
+  payload, reproducible artifact, clean install, generated-output parity, and
+  fresh-clone gates all passed at the phase boundary.
 
 ## N4 — Postgres store (inbox-pipeline)
 

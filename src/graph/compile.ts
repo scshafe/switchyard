@@ -2,6 +2,8 @@
 
 import {
   graphDefinitionRef,
+  JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
+  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
   type GraphDefinitionRef,
   type MissionPipelineNode,
@@ -48,6 +50,11 @@ function frozenRecord<T>(entries: readonly (readonly [string, T])[]): Readonly<R
 }
 
 function validateBindingRules(node: MissionPipelineNode): void {
+  if (node.principal.id === MISSION_PIPELINE_ENGINE_PRINCIPAL_ID) {
+    throw new Error(
+      `Graph node ${node.nodeId} cannot use reserved engine principal ${MISSION_PIPELINE_ENGINE_PRINCIPAL_ID}`
+    );
+  }
   const binding = Object.hasOwn(node, "binding") ? node.binding : undefined;
   if (node.kind === "model" && binding === undefined) {
     throw new Error(`Graph model node ${node.nodeId} requires a model binding`);
@@ -97,8 +104,17 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
       throw new Error(`Graph edge ${edge.edgeId} references unknown source node ${edge.from}`);
     }
     for (const target of edge.to) {
-      if (nodesById[target] === undefined) {
+      const targetNode = nodesById[target];
+      if (targetNode === undefined) {
         throw new Error(`Graph edge ${edge.edgeId} references unknown target node ${target}`);
+      }
+      if (
+        predicateOutcomes(edge.when).includes("join_unsatisfiable")
+        && targetNode.input !== JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT
+      ) {
+        throw new Error(
+          `Graph edge ${edge.edgeId} routes join_unsatisfiable to node ${target}, which requires ${JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT} as its input contract (got ${targetNode.input})`
+        );
       }
     }
     const declared = new Set(source.outcomes.outcomes);
@@ -130,6 +146,11 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
   for (const node of definition.nodes) {
     validateBindingRules(node);
     const join = Object.hasOwn(node, "join") ? node.join : undefined;
+    if (join === undefined && node.outcomes.outcomes.includes("join_unsatisfiable")) {
+      throw new Error(
+        `Graph non-join node ${node.nodeId} cannot declare engine-reserved outcome "join_unsatisfiable"`
+      );
+    }
     if (node.nodeId === definition.entry && join !== undefined) {
       throw new Error(
         `Graph entry node ${node.nodeId} cannot declare a join; admission queues entry without an inbound edge offer`
