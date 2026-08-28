@@ -47,11 +47,13 @@ export interface ArtifactEnvelope {
     payload: unknown;
 }
 /**
- * LOUD guard that a payload is a strict JSON value: null, boolean, FINITE
- * number, string, array, or plain object. Anything else (undefined, NaN,
- * Infinity, functions, class instances, Dates, Maps…) would be silently
- * mangled by JSON serialization — corrupting the sealed digest — so it throws
- * with the offending path instead.
+ * Descriptor-safe detachment under the artifact contract's hostile-data
+ * budget. Semantic envelope validation remains the caller's next step.
+ */
+export declare function snapshotArtifactValidationData<T>(value: T, label: string): T;
+/**
+ * LOUD guard for one bounded strict JSON value. Validation is descriptor-safe:
+ * accessors and Proxies are rejected without executing caller code.
  */
 export declare function assertJsonValue(value: unknown, path?: string): void;
 /** LOUD validator for the frozen `artifact-ref.v1` shape. Returns the ref. */

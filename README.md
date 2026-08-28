@@ -3,9 +3,10 @@
 The standalone Mission Pipeline engine, promoted from the `inbox-pipeline`
 repo into an independently versioned package. The shipped v1 surface is a
 closed catalog of digest-sealed definitions compiled to a static DAG. The
-additive v2 surface now begins with the N1 node-graph contracts/compiler: typed
-outcomes, deterministic outcome predicates, per-target joins, terminal
-outcomes, sealed graph definitions, and frozen inbound/outbound indexes. There
+additive v2 surface now includes the N1 node-graph contracts/compiler and N2
+per-node turn boundary: typed outcomes, deterministic predicates, joins,
+sealed graph definitions, exact attempt identity, five node-kind ports, and a
+single atomic settlement capability. There
 is deliberately NO routing DSL, dynamic stage loading, or runtime mutation of
 a published definition. Every contract artifact is addressed by the canonical-
 JSON SHA-256 rule shared with the frozen `execution-contracts` package.
@@ -54,9 +55,58 @@ Node-graph v2 N1 ships additively beside those v1 execution surfaces:
   inputs before recursive snapshotting/canonicalization. This compiler
   intentionally does not inherit v1 DAG/cycle or gate-terminality rules.
 
-N1 is contracts only: unit journeys, queues, turn execution, join progress,
-stores, and provider/host bindings land in later v2 phases. The v1 execution
-surfaces remain untouched until the explicit N10 deletion phase.
+Node-graph v2 N2 adds the execution boundary without introducing storage or a
+host dependency:
+
+- `src/execute/failure.ts` — the traversal-neutral stable
+  retryable-versus-terminal taxonomy shared by v1 compatibility execution and
+  v2 turns.
+- `src/execute/ports.ts` — strict least-authority Code, Model, Agent, Human,
+  and Callback ports. Results are snapshotted receipt-first, outcome-checked
+  against the exact node version, and forbidden from supplying routing,
+  spawning, or engine-timer directives.
+- `src/execute/turn.ts` — the canonical attempt fingerprint and idempotency
+  digest, worker-kind dispatch, hostile completion validation, and completion
+  conflict seal.
+- `src/execute/unit-runner.ts` — one-unit and homogeneous-batch runners plus
+  authenticated human/callback completion. `TurnRunnerStore.settleTurn` is the
+  only successful position-changing mutation; N3 stores must append the
+  journey, artifact, deterministic routing/join updates, successor queues,
+  outbox rows, and lease release in that one transaction.
+
+N2 deliberately declares a narrow store protocol before implementing it. N3's
+memory `UnitStore` becomes the executable specification and completes the
+crash-point evidence; N4 reruns the same suite against Postgres. The v1
+execution surfaces remain untouched until the explicit N10 deletion phase.
+
+That N2→N3 protocol is a closed attempt state machine. Prepare reserves an
+exact attempt identity and repeats that unresolved reservation on reclaim;
+cache-completion and failure are mutually exclusive; only a committed
+nonterminal failure advances the queue-local counter exactly once and obtains a
+strictly greater (possibly non-consecutive) global unit/node attempt number;
+and settle requires the exact cached completion. `cacheTurnCompletion` is
+non-authoritative recovery storage: it
+cannot append journey, publish artifacts, mutate queues or joins, evaluate
+edges, append outbox rows, or release the lease. `settleTurn` is the sole
+successful graph-position transition.
+
+A terminal failure is the other conclusive occurrence transition. Atomically it
+appends failure evidence and a dead letter, releases that queued occurrence's
+lease, makes only that lane occurrence's outbound offers impossible, and
+updates affected joins, synthesizing the declared `join_unsatisfiable` outcome
+when their requirements can no longer be met. It does not cancel the unit or
+kill independent queued occurrences.
+
+Human and callback completion adapters inspect and validate the sealed
+occurrence before claiming it; stores retain that read-only graph/input
+snapshot after settlement so response-loss recovery remains reachable. An
+exact actor/completion/outbox retry returns the prior settlement; a conflicting
+retry fails loudly. External input settles its reserved attempt directly and
+never enters the worker completion cache. Actor identity is attribution, never
+authority. Lease heartbeat is coordination for a
+short-lived executing-body fence only: it supplies no engine timeout, never
+expires a human queue, and cannot route or escalate. Time policy remains
+graph-authored through callback timer nodes.
 
 B3 ships durable execution:
 

@@ -114,6 +114,69 @@ test("v2 graph core transitively depends only on contracts and validation primit
   );
 });
 
+test("v2 turn core cannot reach v1 traversal/store/gate or host provider modules", () => {
+  const allowedFiles = new Set([
+    "src/execute/failure.ts",
+    "src/execute/ports.ts",
+    "src/execute/turn.ts",
+    "src/execute/unit-runner.ts",
+    "src/contracts/artifact.ts",
+    "src/contracts/digest.ts",
+    "src/contracts/usage-receipt.ts",
+    "src/graph/limits.ts",
+    "src/graph/outcome.ts",
+    "src/graph/edge.ts",
+    "src/graph/definition.ts",
+    "src/graph/compile.ts",
+    "src/internal/guards.ts",
+    "src/internal/evidence.ts",
+    "src/internal/capability.ts"
+  ]);
+  const allowedBuiltins = new Set(["node:crypto", "node:util"]);
+  const pending = [
+    resolve(root, "src/execute/ports.ts"),
+    resolve(root, "src/execute/turn.ts"),
+    resolve(root, "src/execute/unit-runner.ts")
+  ];
+  const visited = new Set();
+  const violations = [];
+
+  while (pending.length > 0) {
+    const file = pending.shift();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    const source = readFileSync(file, "utf8");
+    for (const pattern of importPatterns) {
+      for (const match of source.matchAll(pattern)) {
+        const specifier = match[1];
+        if (specifier.startsWith("node:")) {
+          if (!allowedBuiltins.has(specifier)) {
+            violations.push(`${relative(root, file)} -> ${specifier} (builtin outside v2 turn allowlist)`);
+          }
+          continue;
+        }
+        if (!specifier.startsWith(".")) {
+          violations.push(`${relative(root, file)} -> ${specifier} (bare import)`);
+          continue;
+        }
+        const target = resolve(dirname(file), specifier.replace(/\.js$/, ".ts"));
+        const targetRelative = relative(root, target).split("\\").join("/");
+        if (!allowedFiles.has(targetRelative)) {
+          violations.push(`${relative(root, file)} -> ${targetRelative} (module outside v2 turn allowlist)`);
+          continue;
+        }
+        pending.push(target);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, []);
+  assert.deepEqual(
+    [...visited].map((file) => relative(root, file).split("\\").join("/")).sort(),
+    [...allowedFiles].sort()
+  );
+});
+
 test("package declares no runtime or local-path dependencies", () => {
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {

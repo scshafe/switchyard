@@ -152,6 +152,111 @@ settle), cached reuse, retry/dead-letter parity with the v1 suites, a
 human turn settled via `recordDecision` routing a unit onward, a
 callback turn doing the same, batching claims settling per-unit.
 
+### N2 implementation clarifications (recorded 2026-08-27)
+
+These answers are below N0 and do not reopen its binding decisions. They make
+the execution/store seam precise enough to implement N2 before N3.
+
+1. **How are retries distinguished from a later visit to the same node when
+   cycles are legal?** Each durable queued occurrence has an opaque `queueId`.
+   `attemptNumber` is allocated monotonically for `(unitId, nodeId)` across the
+   whole journey and remains part of the binding N2 digest. A separate
+   `attemptIndex` counts `1..maxAttempts` for this `queueId`; the retry budget
+   never compares the global `attemptNumber` directly with `maxAttempts`.
+2. **What is the node execution fingerprint?** It is exactly the v1 shape
+   adapted to a v2 binding ref:
+   `digest({bindingFingerprint: node.binding?.bindingDigest ?? "none",
+   configurationFingerprint: "default"})`. The versioned `nodeRef` is already
+   a separate idempotency-key component; principal, lease policy, join, and
+   routing do not silently alter a physical attempt's identity.
+3. **How can N2 compile before N3 owns `UnitStore`?** N2 declares narrow
+   structural `WorkerTurnRunnerStore` and `ExternalTurnRunnerStore`
+   capabilities (plus their combined `TurnRunnerStore`) for claim,
+   prepare/recover, failed-attempt evidence where applicable, and the single
+   atomic settle call. N3's `UnitStore` extends and implements them. N2 lands
+   hostile fake-protocol evidence now; the phase's
+   named memory-store/crash evidence becomes complete when the same suite runs
+   through `MemoryUnitStore` in N3, and then through Postgres in N4.
+4. **What flows onward when a completion omits `outputArtifact`?** The journey
+   records no new output artifact and an unconditional routed offer carries the
+   already-validated turn input. If an output artifact is present, that artifact
+   is carried instead. A conditional `where` predicate still means exactly
+   what DESIGN says—fields of the *output* artifact—so it does not match when
+   no output artifact was produced. N3 settlement checks the effective carried
+   artifact against each matched target's input contract inside the atomic
+   transaction; no implicit coercion is permitted.
+5. **Which artifact does a multi-offer join body receive?** Deferred explicitly
+   to N3: the store supplies one already-resolved, digest-sealed turn input to
+   N2. N3 must record a deterministic composition/provenance rule before its
+   join implementation lands; the runner does not choose an inbound winner.
+6. **May a node body return `join_unsatisfiable`?** No. It is an engine-reserved
+   outcome synthesized only by join bookkeeping when declared inbound progress
+   becomes impossible. N3 must record the reserved engine principal and
+   timestamps used for that synthetic journey entry before implementation.
+7. **How are agent turns with multiple provider receipts represented?** N2
+   preserves the receipt collection; it never silently chooses or adds receipts.
+   Model completions contain exactly one receipt, code/human/callback none, and
+   agent completions may contain the ordered validated collection reported by
+   their host. N3 will make `TurnRecord.usage` an ordered collection (the
+   DESIGN §2.2 shape is illustrative) while the outbox retains one evidence
+   event per receipt. Cached reuse produces neither a new invocation nor new
+   receipt evidence.
+8. **Where is routing evaluated?** The runner never accepts or computes
+   worker-authored successors. Its sole success mutation is
+   `settleTurn({queueId, leaseToken, completion, outboxEvents})`; the store
+   re-evaluates the unit's sealed graph and effective artifact inside the same
+   transaction that appends the journey, records the artifact, advances joins,
+   queues successors, appends outbox rows, and releases the lease. An unknown
+   or malformed response after that call is settlement uncertainty, never a
+   failure/dead-letter append.
+9. **What is the normative attempt state machine?** `prepareTurnAttempt`
+   reserves one attempt for one `queueId`; reclaiming an unresolved reservation
+   returns the exact same `attemptNumber`, `attemptIndex`, and idempotency key.
+   From that reservation, exactly one of `cacheTurnCompletion` or
+   `recordTurnFailure` may be created, and a contradictory repeat fails loudly.
+   A nonterminal failed-attempt append is the only transition that advances to
+   a new reservation: its queue-local `attemptIndex` increments exactly once,
+   while its newly allocated global `(unitId, nodeId)` `attemptNumber` is
+   strictly greater and may skip values allocated concurrently to another
+   queued occurrence. A cached completion can transition only through
+   `settleTurn`, which requires its exact completion and digest. A terminal
+   preparation means the terminal failure and dead letter are already durable;
+   it is not permission to execute or settle.
+10. **What authority does `cacheTurnCompletion` have?** None over the unit's
+    durable graph position. It may retain only the attempt's recovery bytes and
+    exact conflict seal. It cannot append journey evidence, publish an output
+    artifact, evaluate an edge, change queue or join state, append an outbox
+    event, or release a lease. Only `settleTurn` makes a successful completion
+    visible and advances graph position.
+11. **What does a terminal execution failure terminate?** Only the queued
+    occurrence identified by `queueId`, including its lane. In one transaction
+    the store appends the failed-attempt evidence and dead letter, releases that
+    occurrence's lease, makes only that occurrence's outbound offers
+    impossible, and updates the affected joins. If those impossible offers make
+    a declared join unsatisfiable, the store synthesizes its declared
+    `join_unsatisfiable` outcome under the recorded engine principal and time.
+    Other queued occurrences for the unit remain live; terminal failure does
+    not cancel the unit or kill its other queues.
+12. **How do external completions recover and validate?** A human or callback
+    retry that exactly matches an already committed settlement—queue
+    coordinates, authenticated principal, actor attribution, outcome,
+    artifact, and exact outbox-event digest batch—returns that prior settlement
+    instead of reporting "not queued". Any conflicting retry fails loudly.
+    The read-only inspection metadata is retained for already-settled
+    occurrences as well as queued ones so a response-loss retry can validate
+    before reaching the settled-recovery claim arm. Before acquiring a
+    completion lease, the adapter validates that sealed snapshot's exact
+    unit/node coordinates, node kind, principal, outcome, artifact, and outbox
+    batch; invalid input never claims the occurrence. External decisions/events
+    settle their reserved attempt directly rather than entering the worker body
+    cache. Actor attribution remains evidence and never substitutes for the
+    authenticated principal.
+13. **Does lease heartbeat introduce a timeout?** No. A heartbeat only extends
+    the short-lived fenced lease used to coordinate an executing body. Its
+    failure cannot become a node outcome, route an edge, resolve a join, or
+    expire a human queue. The engine has no semantic timeout: delays and
+    escalation remain graph-authored callback timer nodes under N0.
+
 ## N3 — GraphStore/UnitStore ports + memory implementation (mission-pipeline)
 
 The store contract is the heart; the memory implementation is the

@@ -3,23 +3,22 @@ import type { ContractValidationIssue, ContractValidator } from "../catalog.js";
 import { type CompiledPipelineNode } from "../compile.js";
 import type { StageContext } from "../node.js";
 import { type BoundPipelineEvidenceStore, type BoundPipelineExecutionIdentity, type BoundPipelineShard, type OutboxEvents, type PipelineStageEvidenceStore, type StageFailureScope } from "../store.js";
+import { ExecutionFailureError, type ExecutionFailure } from "./failure.js";
+export { ExecutionFailureError, classifyExecutionFailure } from "./failure.js";
+export type { ExecutionFailure } from "./failure.js";
 export type { StageFailureScope } from "../store.js";
 /** Multi-slot composed inputs are prepared under this promoted marker contract. */
 export declare const COMPOSITE_INPUT_CONTRACT: ContractId;
 /** The promoted default retry budget (inbox durable-pipeline maxAttempts ?? 2). */
 export declare const DEFAULT_MAX_ATTEMPTS = 2;
-export interface StageFailure {
-    code: string;
-    retryable: boolean;
+export interface StageFailure extends ExecutionFailure {
     scope: StageFailureScope;
 }
 /**
  * The typed, deliberate stage failure. Stages/invokers throw it to control
  * routing precisely; anything else is classified by {@link classifyStageFailure}.
  */
-export declare class PipelineStageError extends Error {
-    readonly code: string;
-    readonly retryable: boolean;
+export declare class PipelineStageError extends ExecutionFailureError {
     readonly scope: StageFailureScope;
     constructor(code: string, retryable: boolean, cause?: unknown, scope?: StageFailureScope);
 }

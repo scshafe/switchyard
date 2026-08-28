@@ -1,10 +1,10 @@
 # DESIGN — The node-graph execution model (v2)
 
-**Status: DRAFT for operator review, 2026-08-27.** Direction set by the
+**Status: RATIFIED by the operator, 2026-08-27; N0 complete.** Direction set by the
 operator: one abstract node interface, one abstract unit interface, per-turn
 atomicity, and outcome-conditional routing evaluated after every turn — in the
-engine, not in a layer above it. Nothing in the current engine is retired
-until this is ratified; the v1 model keeps running everything it runs today.
+engine, not in a layer above it. The v1 model remains available during the
+additive phases and is retired only by the explicit N10 deletion commit.
 
 ## 1. Why
 

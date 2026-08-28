@@ -24,11 +24,16 @@
 import {
   assertEnum,
   assertPlainObject,
+  assertRequiredKeys,
   assertStrictKeys,
   typeName,
   truncate
 } from "../internal/guards.js";
-import { deepFrozenClone } from "../internal/evidence.js";
+import {
+  deepFrozenClone,
+  snapshotBoundedValidationData,
+  type ValidationDataLimits
+} from "../internal/evidence.js";
 
 export const USAGE_RECEIPT_SCHEMA_VERSION = "usage-receipt.v1";
 
@@ -85,6 +90,21 @@ const RECEIPT_KEYS = new Set([
   "routeAlias",
   "signature"
 ]);
+const RECEIPT_REQUIRED_KEYS = new Set([
+  "schemaVersion",
+  "trust",
+  "observedInputTokens",
+  "observedOutputTokens",
+  "chargedTokens",
+  "observedCostMicroUsd",
+  "chargedCostMicroUsd",
+  "durationMs"
+]);
+const USAGE_RECEIPT_VALIDATION_LIMITS: ValidationDataLimits = Object.freeze({
+  maxDepth: 8,
+  maxValues: 64,
+  maxStringCodeUnits: 8_192
+});
 
 function assertBoundedInt(value: unknown, min: number, max: number, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
@@ -106,9 +126,14 @@ function assertNullableBoundedInt(value: unknown, max: number, label: string): n
  */
 export function validateUsageReceipt(value: unknown): UsageReceipt {
   const label = "usage receipt";
-  value = deepFrozenClone(value, label);
+  value = snapshotBoundedValidationData(
+    value,
+    label,
+    USAGE_RECEIPT_VALIDATION_LIMITS
+  );
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, RECEIPT_KEYS, label);
+  assertRequiredKeys(raw, RECEIPT_REQUIRED_KEYS, label);
   if (raw.schemaVersion !== USAGE_RECEIPT_SCHEMA_VERSION) {
     throw new Error(
       `${label}: schemaVersion must be ${JSON.stringify(USAGE_RECEIPT_SCHEMA_VERSION)} (got ${typeof raw.schemaVersion === "string" ? JSON.stringify(truncate(raw.schemaVersion)) : typeName(raw.schemaVersion)})`
@@ -161,7 +186,30 @@ export function validateUsageReceipt(value: unknown): UsageReceipt {
     }
   }
 
-  const receipt: UsageReceipt = {
+  let routeAlias: string | undefined;
+  if (Object.hasOwn(raw, "routeAlias")) {
+    if (typeof raw.routeAlias !== "string" || raw.routeAlias.length < 1 || raw.routeAlias.length > 100 || !USAGE_ROUTE_ALIAS_PATTERN.test(raw.routeAlias)) {
+      throw new Error(
+        `${label}: routeAlias must be a 1..100 char string matching ${USAGE_ROUTE_ALIAS_PATTERN} (got ${typeof raw.routeAlias === "string" ? JSON.stringify(truncate(raw.routeAlias)) : typeName(raw.routeAlias)})`
+      );
+    }
+    routeAlias = raw.routeAlias;
+  }
+  let signature: string | undefined;
+  // Frozen allOf #3: a signature is present EXACTLY when trust=provider_signed.
+  if (Object.hasOwn(raw, "signature")) {
+    if (trust !== "provider_signed") {
+      throw new Error(`${label}: signature is only permitted on provider_signed receipts`);
+    }
+    if (typeof raw.signature !== "string" || raw.signature.length < 1 || raw.signature.length > 4096) {
+      throw new Error(`${label}: signature must be a 1..4096 char string (got ${typeName(raw.signature)})`);
+    }
+    signature = raw.signature;
+  } else if (trust === "provider_signed") {
+    throw new Error(`${label}: provider_signed receipt requires a signature`);
+  }
+
+  return deepFrozenClone<UsageReceipt>({
     schemaVersion: USAGE_RECEIPT_SCHEMA_VERSION,
     trust,
     observedInputTokens,
@@ -169,27 +217,8 @@ export function validateUsageReceipt(value: unknown): UsageReceipt {
     chargedTokens,
     observedCostMicroUsd,
     chargedCostMicroUsd,
-    durationMs
-  };
-  if ("routeAlias" in raw) {
-    if (typeof raw.routeAlias !== "string" || raw.routeAlias.length < 1 || raw.routeAlias.length > 100 || !USAGE_ROUTE_ALIAS_PATTERN.test(raw.routeAlias)) {
-      throw new Error(
-        `${label}: routeAlias must be a 1..100 char string matching ${USAGE_ROUTE_ALIAS_PATTERN} (got ${typeof raw.routeAlias === "string" ? JSON.stringify(truncate(raw.routeAlias)) : typeName(raw.routeAlias)})`
-      );
-    }
-    receipt.routeAlias = raw.routeAlias;
-  }
-  // Frozen allOf #3: a signature is present EXACTLY when trust=provider_signed.
-  if ("signature" in raw) {
-    if (trust !== "provider_signed") {
-      throw new Error(`${label}: signature is only permitted on provider_signed receipts`);
-    }
-    if (typeof raw.signature !== "string" || raw.signature.length < 1 || raw.signature.length > 4096) {
-      throw new Error(`${label}: signature must be a 1..4096 char string (got ${typeName(raw.signature)})`);
-    }
-    receipt.signature = raw.signature;
-  } else if (trust === "provider_signed") {
-    throw new Error(`${label}: provider_signed receipt requires a signature`);
-  }
-  return receipt;
+    durationMs,
+    ...(routeAlias === undefined ? {} : { routeAlias }),
+    ...(signature === undefined ? {} : { signature })
+  }, label);
 }

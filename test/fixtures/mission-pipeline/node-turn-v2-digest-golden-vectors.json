@@ -1,0 +1,87 @@
+{
+  "fingerprints": [
+    {
+      "node": {
+        "nodeId": "golden-code",
+        "ref": { "id": "golden.code", "version": 2 },
+        "kind": "code",
+        "input": "turn-input.v1",
+        "outcomes": { "version": 2, "outcomes": ["done"] },
+        "principal": { "id": "v2_worker" },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 30000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      "expected": "8cca852cc1d0f270357d57df85a0bec088d07c80c6c5c9b375515c43538c3db9"
+    },
+    {
+      "node": {
+        "nodeId": "golden-model",
+        "ref": { "id": "golden.model", "version": 2 },
+        "kind": "model",
+        "input": "turn-input.v1",
+        "outcomes": { "version": 2, "outcomes": ["done"] },
+        "principal": { "id": "v2_model" },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 30000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "golden.binding",
+          "version": 3,
+          "bindingDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": "b4d745e35eb37bea82184220f5f5af0276f4825e1154434c72772b58755e774e"
+    }
+  ],
+  "idempotencyKeys": [
+    {
+      "input": {
+        "unitId": "unit-golden",
+        "nodeId": "golden-code",
+        "attemptNumber": 7,
+        "nodeRef": { "id": "golden.code", "version": 2 },
+        "fingerprint": "8cca852cc1d0f270357d57df85a0bec088d07c80c6c5c9b375515c43538c3db9",
+        "inputDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": "257dc25df6fc4739736298d0d0e646e2be56567e73b55b7df62cc40b9b065595"
+    },
+    {
+      "input": {
+        "unitId": "unit-golden",
+        "nodeId": "golden-code",
+        "attemptNumber": 7,
+        "nodeRef": { "id": "golden.code", "version": 2 },
+        "fingerprint": "8cca852cc1d0f270357d57df85a0bec088d07c80c6c5c9b375515c43538c3db9",
+        "inputDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "executionIdentityDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "expected": "d98fd3f1a3becdfbbbea055d2708f1f301ca78228284a0a6f605a0d7b3d4eefb"
+    }
+  ],
+  "completions": [
+    {
+      "completion": { "outcome": "done" },
+      "expected": "5af360c11ed8b258d738834234fe76c591667a9e3179ab2d1f874459fe8358c0"
+    },
+    {
+      "completion": {
+        "outcome": "done",
+        "outputArtifact": {
+          "contractId": "turn-input.v1",
+          "digest": "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+          "bytes": 7,
+          "payload": { "a": 1 }
+        }
+      },
+      "expected": "ad960807f2cef4c00b18717d54fcdefc19c2f202138418145b82ef4bf005c4ac"
+    }
+  ]
+}

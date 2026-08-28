@@ -77,6 +77,17 @@ import {
   captureDenseArrayItems
 } from "../internal/capability.js";
 import { captureOutboxEvents } from "../internal/outbox.js";
+import {
+  ExecutionFailureError,
+  classifyExecutionFailure,
+  type ExecutionFailure
+} from "./failure.js";
+
+export {
+  ExecutionFailureError,
+  classifyExecutionFailure
+} from "./failure.js";
+export type { ExecutionFailure } from "./failure.js";
 
 export type { StageFailureScope } from "../store.js";
 
@@ -88,9 +99,7 @@ export const DEFAULT_MAX_ATTEMPTS = 2;
 
 // ── Failure taxonomy (promoted from worker/service.ts stableFailure) ──────
 
-export interface StageFailure {
-  code: string;
-  retryable: boolean;
+export interface StageFailure extends ExecutionFailure {
   scope: StageFailureScope;
 }
 
@@ -116,16 +125,12 @@ function isInstanceOf<T>(
  * The typed, deliberate stage failure. Stages/invokers throw it to control
  * routing precisely; anything else is classified by {@link classifyStageFailure}.
  */
-export class PipelineStageError extends Error {
-  readonly code: string;
-  readonly retryable: boolean;
+export class PipelineStageError extends ExecutionFailureError {
   readonly scope: StageFailureScope;
 
   constructor(code: string, retryable: boolean, cause?: unknown, scope: StageFailureScope = "shard") {
-    super(code, cause === undefined ? undefined : { cause });
+    super(code, retryable, cause);
     this.name = "PipelineStageError";
-    this.code = code;
-    this.retryable = retryable;
     this.scope = scope;
   }
 }
@@ -278,14 +283,11 @@ export function classifyStageFailure(error: unknown): StageFailure {
         scope: "shard"
       };
     }
-    const text = safeErrorText(error).toLowerCase();
-    if (/schema|contract|identity|digest|binding|pipeline node|executable|topolog/.test(text)) {
-      return { code: "immutable_configuration_rejected", retryable: false, scope: "shard" };
-    }
-    if (/timeout|timed out|fetch|connect|econn|socket|model|503|502|429/.test(text)) {
-      return { code: "dependency_unavailable", retryable: true, scope: "item" };
-    }
-    return { code: "stage_execution_failed", retryable: true, scope: "item" };
+    const failure = classifyExecutionFailure(error);
+    return {
+      ...failure,
+      scope: failure.retryable ? "item" : "shard"
+    };
   } catch {
     return {
       code: "stage_failure_classification_failed",
@@ -300,15 +302,6 @@ function errorMessage(error: unknown): string {
     return isInstanceOf(error, Error) ? `${error.name}: ${error.message}` : String(error);
   } catch (formatError) {
     throw new StageEvidenceAssemblyError("failure_metadata", formatError);
-  }
-}
-
-function safeErrorText(error: unknown): string {
-  try {
-    if (!isInstanceOf(error, Error)) return "";
-    return `${error.name} ${error.message}`;
-  } catch {
-    return "";
   }
 }
 

@@ -21,7 +21,10 @@ export function captureCapabilityRecord(
   }
   const descriptors = Object.getOwnPropertyDescriptors(target);
   const allowed = new Set(allowedKeys);
-  const captured: Record<string, unknown> = {};
+  // A null prototype is part of the security boundary. Callers intentionally
+  // read optional fields from this snapshot, so Object.prototype must never be
+  // able to manufacture a capability or alter digest input through inheritance.
+  const captured = Object.create(null) as Record<string, unknown>;
   for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new Error(
@@ -49,7 +52,8 @@ export function captureCapabilityRecord(
 
 export function captureDenseArrayItems(
   value: unknown,
-  label: string
+  label: string,
+  maximumLength = Number.MAX_SAFE_INTEGER
 ): readonly unknown[] {
   if (
     !Array.isArray(value)
@@ -58,11 +62,7 @@ export function captureDenseArrayItems(
   ) {
     throw new Error(`${label} must be a plain non-Proxy array`);
   }
-  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<
-    string,
-    PropertyDescriptor
-  >;
-  const lengthDescriptor = descriptors.length;
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
   if (
     lengthDescriptor === undefined
     || !("value" in lengthDescriptor)
@@ -73,6 +73,17 @@ export function captureDenseArrayItems(
     throw new Error(`${label}.length must be a data property`);
   }
   const length = lengthDescriptor.value;
+  if (
+    !Number.isSafeInteger(maximumLength)
+    || maximumLength < 0
+    || length > maximumLength
+  ) {
+    throw new Error(`${label} must contain at most ${maximumLength} items (got ${length})`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<
+    string,
+    PropertyDescriptor
+  >;
   const keys = Reflect.ownKeys(descriptors);
   if (
     keys.some((key) =>
@@ -110,6 +121,12 @@ export function captureCapabilityDataProperty(
   }
   let cursor: object | null = target as object;
   while (cursor !== null) {
+    // Class prototypes are valid capability carriers; ambient intrinsic roots
+    // are not. Accepting Object.prototype/Function.prototype would let global
+    // prototype poisoning manufacture any missing authority method.
+    if (cursor === Object.prototype || cursor === Function.prototype) {
+      return undefined;
+    }
     if (nodeTypes.isProxy(cursor)) {
       throw new Error(`${label} prototype chain must not contain a Proxy`);
     }

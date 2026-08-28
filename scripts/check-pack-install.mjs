@@ -88,6 +88,10 @@ try {
     'import { createGateTerminationCertificate } from "mission-pipeline/gate/certificate";',
     'import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "mission-pipeline/agent/step";',
     'import { createRetrySafeOutboxEvents, combineOutboxEvents } from "mission-pipeline/execute/outbox";',
+    'import { classifyExecutionFailure } from "mission-pipeline/execute/failure";',
+    'import { validateNodeTurnCompletion } from "mission-pipeline/execute/ports";',
+    'import { nodeExecutionFingerprint, nodeTurnIdempotencyKey } from "mission-pipeline/execute/turn";',
+    'import { runClaimedUnitTurn, runNextUnitTurns, recordHumanNodeDecision, admitCallbackNodeEvent } from "mission-pipeline/execute/unit-runner";',
     'import { StageEvidenceAssemblyError, OutboxEvidenceNotCommittedError, StageResultConflictError, executeBoundDurableStage } from "mission-pipeline/execute/durable-stage";',
     'import { createBoundPipelineExecutionIdentity, validateBoundPipelineExecutionIdentity, runBoundShard, executeClaimedShard, runWithShardHeartbeat, snapshotNodeInvocation } from "mission-pipeline/execute/shard-runner";',
     'import { BoundEvidencePersistenceError, EvidenceConflictError, ShardSettlementUncertainError, outboxEventDigest } from "mission-pipeline/store";',
@@ -104,6 +108,10 @@ try {
     "if (typeof createGateTerminationCertificate !== 'function') throw new Error('gate export missing');",
     "if (AGENT_STEP_REQUEST_SCHEMA_VERSION !== 'agent-step-request.v1') throw new Error('agent export mismatch');",
     "if (typeof createRetrySafeOutboxEvents !== 'function' || typeof combineOutboxEvents !== 'function') throw new Error('outbox exports missing');",
+    "if (typeof classifyExecutionFailure !== 'function' || typeof validateNodeTurnCompletion !== 'function') throw new Error('node turn port exports missing');",
+    "if (typeof nodeExecutionFingerprint !== 'function' || typeof nodeTurnIdempotencyKey !== 'function') throw new Error('node turn identity exports missing');",
+    "if (typeof runClaimedUnitTurn !== 'function' || typeof runNextUnitTurns !== 'function' || typeof recordHumanNodeDecision !== 'function' || typeof admitCallbackNodeEvent !== 'function') throw new Error('unit runner exports missing');",
+    "if ('NodeTurnResultError' in root || 'NodeTurnInvocationUncertainError' in root) throw new Error('internal node-turn error constructor leaked');",
     "if (typeof StageEvidenceAssemblyError !== 'function' || typeof OutboxEvidenceNotCommittedError !== 'function' || typeof StageResultConflictError !== 'function' || typeof executeBoundDurableStage !== 'function') throw new Error('durable evidence exports missing');",
     "if (typeof createBoundPipelineExecutionIdentity !== 'function' || typeof validateBoundPipelineExecutionIdentity !== 'function') throw new Error('bound identity exports missing');",
     "if (typeof runBoundShard !== 'function' || executeClaimedShard !== runBoundShard || typeof runWithShardHeartbeat !== 'function' || typeof snapshotNodeInvocation !== 'function') throw new Error('runner exports missing');",
@@ -130,17 +138,25 @@ try {
       StageEvidenceAssemblyError,
       StageResultConflictError,
       combineOutboxEvents,
+      classifyExecutionFailure,
       compileGraph,
       createGraphDefinition,
       createBoundPipelineExecutionIdentity,
       createRetrySafeOutboxEvents,
       executeBoundDurableStage,
       executeClaimedShard,
+      admitCallbackNodeEvent,
+      nodeExecutionFingerprint,
+      nodeTurnIdempotencyKey,
       outboxEventDigest,
+      recordHumanNodeDecision,
+      runClaimedUnitTurn,
+      runNextUnitTurns,
       runBoundShard,
       runWithShardHeartbeat,
       snapshotNodeInvocation,
       validateCompiledPipelineNode,
+      validateNodeTurnCompletion,
       validateEdge,
       validateGraphDefinition,
       validateOutcomeVocabulary,
@@ -155,7 +171,12 @@ try {
       type OutcomePredicate,
       type OutcomeVocabulary,
       type OutboxEvents,
-      type RetrySafeOutboxEvents
+      type RetrySafeOutboxEvents,
+      type TurnExecutionStore,
+      type TurnRunnerStore,
+      type WorkerTurnRunnerStore,
+      type ExternalTurnRunnerStore,
+      type WorkerNodeTurnContext
     } from "mission-pipeline";
 
     const exported = {
@@ -166,17 +187,25 @@ try {
       StageEvidenceAssemblyError,
       StageResultConflictError,
       combineOutboxEvents,
+      classifyExecutionFailure,
       compileGraph,
       createGraphDefinition,
       createBoundPipelineExecutionIdentity,
       createRetrySafeOutboxEvents,
       executeBoundDurableStage,
       executeClaimedShard,
+      admitCallbackNodeEvent,
+      nodeExecutionFingerprint,
+      nodeTurnIdempotencyKey,
       outboxEventDigest,
+      recordHumanNodeDecision,
+      runClaimedUnitTurn,
+      runNextUnitTurns,
       runBoundShard,
       runWithShardHeartbeat,
       snapshotNodeInvocation,
       validateCompiledPipelineNode,
+      validateNodeTurnCompletion,
       validateEdge,
       validateGraphDefinition,
       validateOutcomeVocabulary,
@@ -198,6 +227,11 @@ try {
     const directGraph = undefined as unknown as DirectGraphDefinition;
     const directNode = undefined as unknown as DirectMissionPipelineNode;
     const directCompiled = undefined as unknown as DirectCompiledGraph;
+    const turnStore = undefined as unknown as TurnRunnerStore;
+    const executionStore = undefined as unknown as TurnExecutionStore;
+    const workerTurnStore = undefined as unknown as WorkerTurnRunnerStore;
+    const externalTurnStore = undefined as unknown as ExternalTurnRunnerStore;
+    const workerContext = undefined as unknown as WorkerNodeTurnContext;
     // @ts-expect-error sealed graph arrays are readonly in the public contract
     graph.nodes.push(graphNode);
     // @ts-expect-error sealed node fields are readonly in the public contract
@@ -206,6 +240,14 @@ try {
     outcomes.outcomes.push("late");
     // @ts-expect-error compiled graph properties are readonly in the public contract
     compiledGraph.entry = "late";
+    // @ts-expect-error node bodies receive no store or admission capability
+    workerContext.store.prepareTurnAttempt({});
+    // @ts-expect-error the execution-side store seam cannot admit units
+    executionStore.admitUnit({});
+    // @ts-expect-error worker claims do not grant external inspection authority
+    workerTurnStore.inspectExternalUnitTurn({});
+    // @ts-expect-error external completion does not grant worker claim authority
+    externalTurnStore.claimUnitTurns({});
     void exported;
     void events;
     void retrySafe;
@@ -223,6 +265,11 @@ try {
     void directGraph;
     void directNode;
     void directCompiled;
+    void turnStore;
+    void executionStore;
+    void workerTurnStore;
+    void externalTurnStore;
+    void workerContext;
   `;
   await writeFile(join(consumer, "smoke.ts"), typeSmoke);
   await writeFile(
