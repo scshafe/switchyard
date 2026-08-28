@@ -448,6 +448,40 @@ equivalence.
    units. This keeps visibility policy from becoming an accidental settlement
    grant.
 
+### N4 executable evidence (2026-08-28)
+
+- In `mission-pipeline`, `npm run check` passed under Node 22.23.2 and
+  Node 24.18.0: 351 passed and 0 failed on each runtime. The release payload
+  contained exactly 150 files, and both runtimes produced the same package
+  artifact SHA-256,
+  `525d70d78c7dbe96dbb8a8a0ae7f3078d2cee3de095fb1c4d6ae8ce901eb00d8`.
+- In `inbox-pipeline`, the exact phase gate
+  `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable`
+  exited 0 as one uninterrupted command. The hermetic suite reported 1,271 tests total:
+  1,228 passed, 43 intentionally skipped, and 0 failed. The demo processed
+  both fixture messages. The disposable command then passed the frozen-v1
+  database gate followed by the fresh-v2 PostgreSQL 18 gate.
+- PostgreSQL 18 applied only fresh v2 migrations `[1, 2]`; immediate replay
+  applied none and remained at version 2. The exact migration checksums were
+  `00994a175a97746c9aefb8156ab612153709128c178e59835ed58040d6276eaf`
+  and `150a8b011e627ba372da049b48678257802feccc8b85baf7beb82d9fe9d41217`.
+  The frozen v1 1–39 family was neither extended nor imported.
+- `node --test --test-concurrency=1 dist/test/postgres-v2-*.test.js` reported
+  72 passed, 0 failed, and 0 skipped. Its live shared-store portion used 46
+  pristine per-case databases: 10 `GraphStore` cases and 36
+  `PostgresUnitStore` cases.
+- The 36 live unit-store cases include the unchanged 33-case N2/N3
+  conformance contract (25 backend-neutral cases plus all eight named settle
+  checkpoint scenarios) and dedicated hostile-content, authority, and rebuild
+  proofs. Every pre-commit crash recovered with the unit claimable at its
+  source or fully queued at its successors; post-commit reply loss recovered
+  exactly one settlement and the complete successor set.
+- The actual `v2_worker` principal received SQLSTATE `42501` when attempting
+  to settle a human turn. Owner-only reconstruction restored every physical
+  queue column byte-for-byte while runtime rebuild authority was denied
+  without residue. A digest-sealed artifact containing U+0000 round-tripped
+  through canonical-JSON `TEXT` exactly.
+
 ## N5 — Node bodies: the email graph, re-expressed (inbox-pipeline)
 
 Port the real processing onto v2 — no new intelligence, new arrangement.
