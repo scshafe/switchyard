@@ -752,6 +752,68 @@ Evidence: end-to-end through a person: a unit queued at `approve draft?`
 decided from the console, journey shows the actor principal, routing
 proceeds; a `v2_worker` credential attempting the same settle is denied.
 
+### N7 implementation clarifications (2026-08-28)
+
+Two host-level questions are not engine-semantic changes and do not reopen
+N0:
+
+1. **What graph supplies the literal `approve draft?` evidence?** The sealed
+   Inbox Email graph published in N5 has `action-context-review` and
+   `action-validation-review`, not a draft-approval node. Provisional answer:
+   the N7 end-to-end proof publishes a dedicated consumer fixture expressing
+   N1's ratified human-in-the-middle shape (`draft` -> `approve-draft` ->
+   `publish`). It exercises the same v2 store, console principal, decision
+   executor, journey, and successor routing without changing the N5 production
+   graph or its outcome vocabulary.
+2. **Where does browser/CLI actor attribution come from?** The existing Inbox
+   dashboard relies on its external Pocket ID/oauth2-proxy door and network
+   boundary; its application currently uses the forwarded email only as
+   chrome. Provisional answer: keep authority exclusively in the server-held
+   `v2_console` database principal, accept door-provided identity only from the
+   configured exact non-loopback proxy lane and exact HTTPS browser origin for
+   browser attribution, and accept bounded explicit attribution only from the
+   loopback CLI lane with a server-owned loopback-literal Host. Neither actor
+   string is authority. Both clients use the same HTTP decision endpoint; the
+   CLI never receives a database credential. Host/Origin checks and the
+   prohibition on loopback trusted-proxy peers prevent DNS rebinding from
+   entering either lane.
+
+### N7 phase evidence (2026-08-28)
+
+- Consumer commits `b41d4b6`, `bc86e19`, and `86b087e` add fresh-v2 migration
+  `006`, the database-built safe projection, the isolated `v2_console`
+  executor, one HTTP controller shared by the CLI and existing dashboard, and
+  the architecture/security/operator documentation. Migration `006` is pinned
+  at
+  `0e61fd57924f8e448175a1d406f4d8a4e47ac9d13ea9e1239de79a28655ebe80`.
+- The hermetic console suite passed 2/2. It proves FIFO safe list/detail,
+  hostile-content exclusion, strict DTO rejection, exact coordinate/outcome/
+  view-digest guards with zero journey/queue/outbox/dead-letter mutation,
+  browser Origin and HMAC-CSRF rejection, DNS-rebinding rejection (`421`) with
+  zero mutation, exact settlement replay, conflicting replay rejection, the
+  shipped CLI subprocess list/show/decide path, and dashboard routing.
+- The fresh PostgreSQL proof publishes the dedicated
+  `draft -> approve-draft -> publish` graph, exercises both unknown-contract
+  sealed identity and a known-contract bounded summary containing hostile extra
+  fields, records `owner@example.com` as actor under the actual `v2_console`
+  principal, and executes `publish`. An actual `v2_worker` connection receives
+  SQLSTATE `42501` both when calling the review list routine and when substituted
+  for final human settlement; the denied settlement leaves no human journey
+  record.
+- The checksum/static guard suite passed 14/14, including mutation-based
+  prove-it-bites checks for the human-node fence, FIFO order, unknown-contract
+  seal, known-contract allowlist, console session capability, settled-detail
+  status, raw-envelope exclusion, and leaked worker EXECUTE authority.
+- The exact consumer phase gate
+  `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable`
+  exited zero. The general corpus was 1,330 pass / 48 expected environment
+  skips / 0 fail from 1,378 tests; the demo processed both fixtures; the frozen
+  v1 disposable harness remained 156/156 across 28 summary runs; fresh v2 was
+  115/115 (19 pristine + 96 stateful/authority tests).
+- No laptop stack, live graph/database, credential, or door configuration was
+  changed. The additive console remains dark until N9's first-live-enrollment
+  approval.
+
 ## N8 — Model path onto the substrate (inbox-pipeline ↔ MC, gated)
 
 Two-stage by design, so engine work never waits on MC's P4:
