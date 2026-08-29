@@ -835,6 +835,41 @@ Operator gate: the MC P4-02 consumer walk ratifies the substrate binding
 Evidence: same node, both hosts, identical journey/artifact digests
 modulo usage receipts; substrate leg proves grant/settle round-trip.
 
+### N8 implementation clarifications (2026-08-28)
+
+The following host decisions preserve the ratified graph and binding
+semantics; they do not reopen N0:
+
+1. **P4-02 is not yet ratified.** The immediate N8 slice implements and proves
+   only the dev direct-llama host. The production substrate host, envelope
+   submission, grants, and settle round-trip remain dark behind the P4-02
+   operator gate. No Mission Control source, configuration, service, database,
+   or live consumer binding changes as part of this slice.
+2. **Logical endpoint identity versus dev transport.** The exact catalog
+   profiles retain their sealed logical `runtimeHostRef` and loopback
+   `endpointRef`; the graph binding is unchanged. A checked-in,
+   canonical-JSON/SHA-256-sealed dev route manifest maps that logical endpoint
+   to one exact private HTTPS tailnet URL. Its route digest is physical-attempt
+   evidence only. It must appear in the provider-attempt fingerprint/journal
+   and must never enter graph artifacts, so direct and substrate hosts remain
+   content-addressably equivalent. The older clean-production prohibition on
+   Tailscale Serve remains intact; this is the explicitly authorized N8 dev
+   exception, not a production-policy change.
+3. **A route is boot-fixed across admitted work.** Provider-attempt
+   idempotency remains engine-owned and does not acquire a transport dimension.
+   Therefore a direct host freezes one validated manifest for its lifetime,
+   and operators must drain every admitted/open attempt before replacing that
+   manifest. A route change is never a hot reload or an invitation to replay a
+   journaled physical call.
+4. **Fresh-v2 capacity is an exact paired lease.** Admission and physical I/O
+   are enclosed by one worker-principal capacity lease over the immutable
+   binding's model and inference-profile limits. The qwen model limit is shared
+   by classification, recall, and precision; the Mistral limit is shared by
+   arbiter calls. Ordinary contention waits while the claimed engine turn is
+   heartbeated and does not deliberately consume another provider attempt;
+   journal admission remains after capacity acquisition. Capacity
+   infrastructure failure follows the normal retry taxonomy.
+
 ## N9 — Dev deployment loop (inbox-pipeline + infra)
 
 Development mode means a fast loop, not a commissioning ceremony.
