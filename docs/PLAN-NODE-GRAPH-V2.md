@@ -869,6 +869,98 @@ semantics; they do not reopen N0:
    heartbeated and does not deliberately consume another provider attempt;
    journal admission remains after capacity acquisition. Capacity
    infrastructure failure follows the normal retry taxonomy.
+5. **Post-call host-policy violations terminal-fail the node.** The word
+   "terminalize" in the N5 clarification above means a receipt-bearing engine
+   failure with no successor, not the action graph's ordinary, declared
+   `invalid` outcome. A wrong response model, forbidden finish, malformed
+   output contract, or reported token overrun is host-policy evidence, whereas
+   a valid model result that the frozen action handler judges invalid remains a
+   graph-authored semantic outcome. The host retains the actual validated
+   receipt (or exact conservative fallback), the provider journal prevents a
+   crash replay from making a second physical call, and the graph definition
+   does not acquire a soft diagnostic outcome vocabulary.
+6. **The provider request body has a universal one-MiB hard limit.** This is a
+   hostile-input transport safety bound, not a new token or paid-spend budget:
+   the exact UTF-8 body that either host would submit is limited to 1,048,576
+   bytes and that value is sealed into the host-neutral request fingerprint.
+   The direct composition preflights it before capacity acquisition or journal
+   admission, and the transport independently rechecks immediately before
+   network I/O. Changing the bound requires a new host request-policy revision
+   and direct/substrate equivalence evidence; silently widening it is not an
+   environment option.
+7. **What does the provider response `model` identify through llama-swap?** A
+   direct-route smoke exposed that the logical request `qwen2.5-14b` is
+   legitimately returned by llama.cpp as the physical upstream identity
+   `/models/Qwen2.5-14B-Instruct-Q5_K_M.gguf`. Provisional answer: the request
+   model and every graph/logical fingerprint remain the exact catalog model,
+   while the boot-fixed route manifest seals exactly one expected provider-
+   reported value for each exact catalog model ref (id, version, and digest).
+   That physical value participates only in the route digest and physical-
+   attempt fingerprint. A missing mapping, null response model, or byte-
+   different value remains a receipt-bearing `model_identity_violation` with
+   no successor. Changing the mapping requires a new manifest version/digest
+   and a drain; changing weights or quantization additionally requires a new
+   model/binding revision and may not be hidden as a route-only edit. This
+   keeps the translation sealed instead of depending on mutable upstream
+   `--alias` configuration.
+
+### N8-dev phase evidence (2026-08-29)
+
+- Consumer commits `175444f` and `2db3e9f` add the direct llama-swap
+  `ModelNodePort` host, the four-node email host, fresh-v2 capacity/journal
+  bindings, and the architecture/security/operator documentation. Sealed route
+  `inbox.dev.ubuntu.llama-swap.tailnet@2` has canonical route digest
+  `fbfe562ad3083287024db44c99065f918662986e80384bf5e4df04fe3b28cba3`.
+  Its exact provider-response map is catalog-complete and affects only the
+  physical-attempt fingerprint; independent architecture/security review
+  found no blocker.
+- The focused direct-host suite passed 27/27. It proves all four exact logical
+  bindings, boot-fixed route identity, deep-frozen response mappings, a
+  universal 1,048,576-byte UTF-8 request preflight before capacity or journal
+  admission plus transport recheck, shared-model/profile capacity, and a final
+  capacity heartbeat/fence after the result. Wrong/missing response model,
+  forbidden finish, malformed output, and reported or raw partial-token
+  overruns retain receipt evidence and terminal-fail with no successor or
+  second provider call.
+- Fresh-v2 migrations `007_model_capacity_leases.sql` and
+  `008_terminal_failure_replay.sql` are pinned respectively at
+  `2d5ecd182ae23c939045afb19120f3b5fd19b279d762223beaadfca4921b52da`
+  and
+  `754a7133bfed6b65344908f804d2f2a22c70ed72436436457e46d9f567d01522`.
+  The actual-PostgreSQL capacity suite passed 13/13: the real `v2_worker`
+  acquires, heartbeats, releases, and journals through the bounded routines;
+  non-worker and direct bearer-token access receive SQLSTATE `42501`; owner
+  mutation receives `55000`; provider-attempt bindings remain append-only.
+- A retained-terminal-evidence replay parity guard first failed 121/122 against
+  PostgreSQL after settlement removed the lease, proving the memory/PostgreSQL
+  suite caught the defect. Migration `008` made only the exact settled
+  same-attempt recovery admissible. The corrected suite proves one physical
+  call across a simulated post-result crash, byte-identical retained evidence,
+  terminal failure under route drift or a tier ceiling, no successor, and no
+  bypass of principal, capability, coordinate, or current-attempt checks.
+- The exact consumer phase gate
+  `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable`
+  exited zero. The general corpus was 1,384 pass / 49 expected environment
+  skips / 0 fail from 1,433 tests; the demo processed both fixtures; the frozen
+  v1 disposable harness remained 156/156 across 28 summary runs; fresh v2 was
+  146/146 (23 pristine + 123 stateful/authority tests). All eight settle crash
+  checkpoints retained the queued-here-or-queued-at-successors invariant.
+- A synthetic provider-only smoke made exactly one request through the sealed
+  tailnet route. It returned category `jobs` and a provider-reported receipt of
+  455 input, 100 output, and 555 charged tokens in 6,765 ms. The logical
+  fingerprint was
+  `model-provider-logical:65abaa3cc5aeabf587f0ffa475bedef6a3ec454d8621c7b39a9a78b93db9fd31`;
+  the physical fingerprint added only
+  `:route=fbfe562ad3083287024db44c99065f918662986e80384bf5e4df04fe3b28cba3`.
+  It used no Gmail credential, PostgreSQL, Mission Control surface, deployment,
+  or live email, so it is route/transport evidence rather than a capacity or
+  journal proof.
+- In `mission-pipeline`, `npm run check` exits zero with 351 source tests, both
+  packed-install smokes, and the exact 150-file release payload.
+- This closes only the immediate N8 dev binding. P4-02 remains unratified, so
+  the production substrate host and direct/substrate equivalence proof remain
+  gated. No third host or Mission Control mutation was introduced, and N9's
+  first-live-enrollment pause has not been crossed.
 
 ## N9 — Dev deployment loop (inbox-pipeline + infra)
 
