@@ -647,11 +647,97 @@ The operator's intake decision (Gmail API + tokens, no Mac) lands here.
 - Dev mode: one dev Gmail account/lane is enough to build against;
   fixture source stays first-class for tests.
 
-Operator gates: which account(s), and the per-lane token consents (the
-T2 ceremony, four consents outstanding).
+Operator gates: resolved 2026-08-28 for the development slice —
+`owner@example.com`, with per-lane consent approved. Generated live status
+showed all four declared grants exact and zero undeclared grants, so no OAuth
+rotation was needed; N6 uses only the active readonly grant and leaves send
+inactive.
 Evidence: a real mailbox page admitted end-to-end into the graph on the
 dev lane; duplicate-page replay admits zero duplicate units; checkpoint
 crash/resume proven.
+
+### N6 implementation clarification (recorded 2026-08-28)
+
+**What is the unit identity when the intentional one-second live overlap, or
+live and historical scans, observe the same immutable email revision?** The
+unit identity excludes scan, lane, and observation time. It seals the exact
+graph reference, provider/account/message identity, and `ingested-email.v2`
+seed artifact reference. The admission adapter looks up an existing unit and
+reuses its retained `admittedAt` when calling `UnitStore.admitUnit`, making the
+overlap an exact replay; a changed seed artifact is a distinct revision/unit.
+
+**What commits with the lane checkpoint?** PostgreSQL initializes a sealed
+per-account/per-lane plan before the provider read. A live lane first commits
+its sealed window opening; for each returned page, one `SERIALIZABLE`
+transaction checks the predecessor, applies every admission via the N3 memory
+state machine and N4 normalized delta routine, appends the exact page-to-unit
+receipts, and advances the append-only plan checkpoint. A pre-commit crash
+exposes none of the page's units or successor checkpoint; a post-commit reply
+loss replays the retained transition and admits zero new units. The frozen v1
+chain remains untouched.
+
+**May a page checkpoint advance past a deferred or quarantined content
+hydration?** Implemented answer: **no**. N6 has no graph-authored hydration
+retry or terminal node, so dropping that message while advancing the provider
+cursor would make it unreachable. Every member of a checkpointed page must
+have complete processing-input evidence; otherwise the whole page is rejected
+before unit admission and the provider position remains retryable. A future
+hydration lane must be an explicit graph/version change, not a hidden intake
+timeout or side queue.
+
+**How does the rolling live lane persist opening its next bounded window?**
+Implemented answer: as an explicit append-only `live_window_opened` plan
+transition, not as an ephemeral object and not as a synthetic provider page.
+The transition seals the closed predecessor, next plan, start/end cutoffs,
+query, and scan identity under `v2_admitter`; it must commit before the first
+provider read in that window. Page transitions and window-open transitions
+share the same per-plan predecessor fork fence, so a restart can resume the
+opened window and a closed window can have at most one durable successor.
+
+### N6 executable evidence (2026-08-28)
+
+- The generated credential-edge status command exited zero with four declared
+  grants exact and zero undeclared grants. The approved
+  `owner@example.com` readonly lane was active; its send lane remained
+  inactive. No OAuth rotation or send authorization was performed.
+- The memory/account executable-spec slice passed 24/24 tests. It covers
+  historical backfill, two reconstructed rolling live windows with the
+  intentional one-second overlap, fixture/source parity, cross-lane immutable
+  revision replay, closed account/bucket/scope/selector authority, whole-page
+  rejection for incomplete hydration, exact replay, and all four pre-commit
+  page crash points plus post-commit reply loss.
+- A fresh PostgreSQL 18 instance passed the N6 intake suite 11/11 under the
+  actual roles. Backend termination at both live-window commit sides and all
+  five page transaction checkpoints recovered with the complete page, seed
+  artifacts, entry queues, and admission journeys present exactly once or all
+  absent. Direct runtime relation access and cross-principal routines returned
+  real SQLSTATE `42501`; owner update/delete/truncate attempts returned
+  `55000`. The same-transaction admitted-time/XID adversary returned `23514`
+  and proved that exact guard bites independently.
+- Fresh-v2 migration 005 is
+  `17547ef213bfa4a47866759f5d23888d9f323653e1509969dd14638c58f9f1e5`;
+  its manifest matched and migrations 001–004 remained byte-identical. The
+  full fresh-v2 disposable gate passed 19/19 pristine corpus tests plus 94/94
+  stateful/authority tests across 13 suites.
+- The approved isolated real-mailbox proof admitted one inbox page/message to
+  one unit queued at `filter`. Its exact replay created zero transitions and
+  zero units and replayed the one retained unit. Graph, page, manifest,
+  transition, and successor-plan digests were
+  `b795469f86890a27ef88e60bac9577ab7915ad58345c55c403e714ee10b96f27`,
+  `8c2cc08f05d34f726bed06013048626a73225d034637618c77531bc40901bb50`,
+  `9102c32baca6540559c8c98916d8999d3d8848286b14834cac81fca980f83fc0`,
+  `811485e1ba84cf0b7d468fe228dc62a11d434b88d3d708909b1b3a4dc60110c4`,
+  and `09c5a0e6fd6cf3aa05e7d6c411015a284b19bce1800a40e95d0468877b138786`.
+  The container mounted five readonly-lane credential files and no send
+  credential, exposed no provider content/identifier, left the five selected
+  source files byte-identical and the complete credential tree at 15 files / 4
+  directories, and removed every temporary root.
+- The exact consumer phase gate
+  `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable`
+  exited zero. The general corpus was 1,327 pass / 47 expected environment
+  skips / 0 fail from 1,374 tests; the demo processed both fixtures; the frozen
+  v1 disposable harness was 156/156 across 28 summary runs; fresh-v2 was
+  113/113 (19 pristine + 94 remaining).
 
 ## N7 — The human console (inbox-pipeline)
 
