@@ -1221,6 +1221,102 @@ Dev-mode directive, applied with a blade:
 Evidence: both repos' full gates green after deletion; grep-zero for the
 deleted surfaces (the house deletion-gate pattern).
 
+### N10 implementation clarification (recorded 2026-08-29)
+
+**What does it mean for `durable-stage` to survive when N2 already promoted
+its semantics into the independent v2 turn executor?** The surviving contract
+is the retry taxonomy, attempt reservation and cached-completion reuse,
+idempotency identity, lease/fencing discipline, dead-letter behavior, and
+receipt/outbox evidence now implemented by `execute/turn.ts`,
+`execute/unit-runner.ts`, and their shared failure/evidence modules. The old
+`execute/durable-stage.ts` module still depends on v1 `CompiledNode` and
+`PipelineStore` types, so retaining that file or export would retain the very
+v1 execution API N10 deletes. N10 removes it with the v1 compiler/store/runner
+surface and adds no compatibility facade or shim; the complete v2 turn/store
+suite is the executable proof that its durable semantics survive.
+
+**Does N10 include the infra repository even though the source-deletion bullets
+name only the engine and consumer repositories?** Yes. The N9 Compose source
+deliberately retained an `engine` service whose command is the v1
+`substrate-run` lane and whose credentials exist only for that lane. Deleting
+the TypeScript entrypoint without deleting that service would leave a running
+orphan and make the deployed topology contradict the source. N10 therefore
+removes the exact service, its credential/route mounts and readiness
+requirements, adds a bounded deploy-time orphan-retirement mechanism, and
+requires source topology plus post-deploy container inventory to prove the
+legacy service is absent. No v2 service, fresh-v2 volume, frozen migration,
+dashboard/OIDC door, or historical evidence is retired by that operation.
+
+**Does the consumer's required `pnpm demo` preserve the older `pipeline run`
+traversal?** No. The phase gate requires an executable demonstration, not a
+compatibility command. N10 deletes the active `pipeline run`, `durable-run`,
+validation, and live-test execution entrypoints plus their in-process traversal
+runners, and replaces `pnpm demo` with a fixture journey through the v2 graph
+and unit store. Traversal-neutral contract schemas, stage registration,
+pipeline compilation used as immutable catalog data, campaign planning, and
+the stage bodies remain library inputs; they are not executable v1 fallbacks.
+
+### N10 pre-commit deletion evidence (2026-08-29; mandated pause)
+
+This is pre-commit evidence, not phase closure. The three source trees remain
+uncommitted and unpushed, the consumer still pins the pre-N10 engine SHA, and
+the live legacy container remains present until the operator explicitly
+authorizes the post-evidence commit/push/deploy sequence.
+
+- `mission-pipeline` is prepared as `1.0.0`. Its exact `npm run check` exited
+  zero: 202/202 source tests, zero skip/fail; 111 exact payload files; packed
+  runtime and TypeScript install smokes green. The release artifact SHA-256 is
+  `845c29c0d98b30b673c662224c9bcf88c02ac66b2592ce9bd34dc0932e8c6499`.
+  The executable deletion guard rejects all 25 retired paths and 11 retired
+  symbols and proves four independent mutation families bite. A separate raw
+  scan found 0/25 retired paths and no retired-symbol match in active source,
+  generated output, tests, or current public docs.
+- The exact local `1.0.0` tarball was installed into an isolated consumer copy.
+  All 32 engine-importing compiled test files passed (206 total: 196 pass and
+  ten expected PostgreSQL skips), and the v2 demo retained its exact
+  17-unit/164-turn/50-model/52-outbox/17-replay result. All 21 consumer engine
+  subpaths exist in `1.0.0`; retired subpath and root-symbol imports are zero.
+- `inbox-pipeline`'s uninterrupted Node 22.23.2 phase gate
+  `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable`
+  exited zero. The hermetic corpus was 1,118 total: 1,076 pass, 42 expected
+  environment skips, and zero fail. The demo produced the exact corpus counts
+  above. Disposable PostgreSQL passed 137/137 historical checks and 157/157
+  fresh-v2 checks, 294/294 total. The retained decision-evaluation fixture is
+  self-contained (4/4), and the normalized-learning fixture retains the real
+  role-denial, replay, append-only, threshold, cohort, baseline/candidate,
+  recall, and concurrency proofs without a deleted traversal import.
+- The consumer deletion guard is clean and proves all 13 independent mutation
+  families bite. Raw scans found 0/12 exact forbidden paths, zero D7 runtime
+  operation/script paths, and no retired engine import, traversal-support
+  import, CLI command, or lab entrypoint match. The required v2/demo/learning
+  proof files are all present.
+- Protected-history blob comparison found 39/39 frozen `sql/postgres/001`–`039`
+  files, 37/37 `deploy/contracts` files, and all five pinned D7/pilot artifacts
+  byte-identical to consumer HEAD, with zero protected paths in Git status.
+- Infra's four contract suites exited zero: container readiness,
+  observability, configured-image references, and the v2 topology suite with
+  29 hostile mutations. Compose renders exactly eight services: `ts-lab`,
+  `oauth2-proxy`, `dashboard`, `postgres-v2`, `v2-bootstrap`, `v2-migrate`,
+  `v2-engine`, and `v2-admitter`. Raw active-topology scans found no legacy
+  `engine` service, command, credential/route mount, keyring secret, ntfy
+  authority, or stale manual-deploy reference. The bounded retirement helper
+  resolves and validates every exact Compose-project container before any
+  removal, disables implicit orphan removal, retires only after aggregate
+  readiness and the configured HTTP witness, and leaves the legacy container
+  intact on every tested failure path.
+- All three repositories pass `git diff --check`. Mission Control remains
+  untouched. A read-only laptop inspection still observed
+  `inbox-lab-engine` (`9c699f2e94e6`) healthy beside the healthy v2 services;
+  no live deletion, deployment, commit, or push has occurred. Four unrelated
+  pre-existing untracked infra host-service paths remain untouched and must be
+  excluded with path-specific staging.
+- After explicit post-evidence authorization, the bounded order is: commit and
+  push engine `1.0.0`; repin the consumer package and lock to that exact commit
+  and rerun its full gate; commit/push and synchronize the infra retirement
+  source; commit/push the consumer; then use the authorized Conductor path to
+  obtain the aggregate health witness, retire the exact legacy immutable
+  container ID, and prove the forbidden-container inventory is zero.
+
 ---
 
 ## Sequencing and parallelism

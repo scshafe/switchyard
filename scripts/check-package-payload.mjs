@@ -27,8 +27,7 @@ async function run(command, args) {
 const rootRules = new Map([
   ["src", (path) => path.endsWith(".ts")],
   ["lib", (path) => path.endsWith(".js") || path.endsWith(".d.ts")],
-  ["schemas", (path) => path.endsWith(".json")],
-  ["sql", (path) => path.endsWith(".sql")]
+  ["schemas", (path) => path.endsWith(".json")]
 ]);
 
 async function expectedFilesIn(directory, accepts) {

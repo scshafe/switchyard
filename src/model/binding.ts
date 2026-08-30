@@ -1,19 +1,18 @@
 // model/binding.ts — ModelStageBinding: the digest-sealed record binding a
-// kind:"model" pipeline node to ONE model revision + ONE recorded inference
+// kind:"model" graph node to ONE model revision + ONE recorded inference
 // profile (+ optional persona/prompt-stack identity).
 //
 // PROMOTED from inbox-pipeline/src/runtime/contracts.ts ModelStageBinding
 // (the sealed {bindingId, version, kind:"model", refs…, bindingDigest} shape)
 // MERGED with the recorded half of src/catalog/contracts.ts InferenceProfile
 // (temperature/seed/thinking/timeoutMs/maxOutputTokens/maxOutputBytes/
-// maxConcurrency/toolPolicy/responseContract — the run-identity parameters).
-// CHANGES in the promotion (the reason this is …v2, mirroring the
-// pipeline-definition v1→v2 note):
+// maxConcurrency/toolPolicy/responseContract — the turn-identity parameters).
+// CHANGES in the promotion (the reason this is …v2):
 //   - the binding EMBEDS its inference profile (id/version/PARAMETERS/seal)
 //     instead of referencing a catalog row by digest alone: the recorded
 //     parameters travel inside the sealed payload, so ANY parameter change
-//     changes bindingDigest — and therefore the compiled node's
-//     bindingFingerprint and the B3 idempotency key;
+//     changes bindingDigest — and therefore the v2 node fingerprint and turn
+//     idempotency key;
 //   - `model` is renamed `modelRevisionRef` (the design vocabulary);
 //   - persona/promptStack flip to OPTIONAL (`personaRef?`/`promptStackRef?`) —
 //     the inbox required both while inferenceProfile was optional; here the
@@ -31,7 +30,7 @@
 
 import { digest } from "../contracts/digest.js";
 import { validateContractId, type ContractId } from "../contracts/artifact.js";
-import type { PipelineNodeBindingRef } from "../definition.js";
+import type { MissionPipelineNodeBindingRef } from "../graph/definition.js";
 import type { PersonaRef, PromptStackRef } from "../prompt/contracts.js";
 import {
   assertEnum,
@@ -70,7 +69,7 @@ export const MAX_INFERENCE_OUTPUT_BYTES = 1_073_741_824;
 export const MAX_INFERENCE_CONCURRENCY = 64;
 
 /**
- * The RECORDED inference parameters — the run-identity half of an inference
+ * The RECORDED inference parameters — the turn-identity half of an inference
  * profile. Every field is REQUIRED and the object is strict: an absent or
  * unknown recorded parameter FAILS CLOSED (no silent defaults, no silent
  * passthrough of un-modeled knobs).
@@ -257,7 +256,7 @@ function validateBindingBase(raw: Record<string, unknown>, label: string): Model
 /**
  * Seal a binding: validate LOUDLY (recorded parameters fail closed), stamp
  * `bindingDigest = digest(base)`. Any parameter/ref change produces a new
- * digest — and therefore a new compiled bindingFingerprint and idempotency key.
+ * digest — and therefore a new node fingerprint and idempotency key.
  */
 export function createModelStageBinding(input: unknown): ModelStageBinding {
   const label = "model stage binding";
@@ -286,12 +285,10 @@ export function validateModelStageBinding(value: unknown): ModelStageBinding {
 }
 
 /**
- * Project a sealed binding to the {@link PipelineNodeBindingRef} a definition
- * node carries (`{ kind:"model", bindingId, version, bindingDigest }`) — the
- * compiler stamps `bindingDigest` into the compiled node as
- * `bindingFingerprint`.
+ * Project a sealed binding to the content-addressed reference carried by a v2
+ * model node.
  */
-export function modelStageBindingRef(bindingRaw: unknown): PipelineNodeBindingRef {
+export function modelStageBindingRef(bindingRaw: unknown): MissionPipelineNodeBindingRef {
   const binding = validateModelStageBinding(bindingRaw);
   return { kind: "model", bindingId: binding.bindingId, version: binding.version, bindingDigest: binding.bindingDigest };
 }
@@ -301,7 +298,7 @@ export function modelStageBindingRef(bindingRaw: unknown): PipelineNodeBindingRe
  * every mismatch (kind, identity, and ABOVE ALL the digest: a ref must prove
  * it names THIS exact sealed payload).
  */
-export function resolveModelBindingRef(ref: PipelineNodeBindingRef, bindingRaw: unknown): ModelStageBinding {
+export function resolveModelBindingRef(ref: MissionPipelineNodeBindingRef, bindingRaw: unknown): ModelStageBinding {
   ref = deepFrozenClone(ref, "model binding resolution ref");
   const binding = validateModelStageBinding(bindingRaw);
   if (ref.kind !== "model") {

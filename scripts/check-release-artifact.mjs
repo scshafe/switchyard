@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const manifestPath = resolve(
   root,
-  "release/mission-pipeline-0.2.0.payload.sha256"
+  "release/mission-pipeline-1.0.0.payload.sha256"
 );
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-release-"));
 

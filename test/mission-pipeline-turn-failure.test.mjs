@@ -5,10 +5,6 @@ import {
   ExecutionFailureError,
   classifyExecutionFailure
 } from "mission-pipeline/execute/failure";
-import {
-  PipelineStageError,
-  classifyStageFailure
-} from "mission-pipeline/execute/durable-stage";
 
 test("shared failure taxonomy preserves the stable retryable/terminal code families", () => {
   assert.deepEqual(classifyExecutionFailure(new Error("compiled digest mismatch")), {
@@ -109,30 +105,4 @@ test("shared classification never invokes Error or typed-error accessors", () =>
     retryable: false
   });
   assert.equal(getterCalls, 0);
-});
-
-test("the durable-stage compatibility wrapper preserves exact v1 scopes", () => {
-  assert.deepEqual(
-    classifyStageFailure(new PipelineStageError("custom_terminal", false, undefined, "item")),
-    { code: "custom_terminal", retryable: false, scope: "item" }
-  );
-  assert.deepEqual(
-    classifyStageFailure(new PipelineStageError("custom_retry", true, undefined, "shard")),
-    { code: "custom_retry", retryable: true, scope: "shard" }
-  );
-  assert.deepEqual(classifyStageFailure(new Error("compiled digest mismatch")), {
-    code: "immutable_configuration_rejected",
-    retryable: false,
-    scope: "shard"
-  });
-  assert.deepEqual(classifyStageFailure(new Error("connect ECONNREFUSED")), {
-    code: "dependency_unavailable",
-    retryable: true,
-    scope: "item"
-  });
-  assert.deepEqual(classifyStageFailure(new Error("boom")), {
-    code: "stage_execution_failed",
-    retryable: true,
-    scope: "item"
-  });
 });

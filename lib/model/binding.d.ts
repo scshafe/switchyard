@@ -1,5 +1,5 @@
 import { type ContractId } from "../contracts/artifact.js";
-import type { PipelineNodeBindingRef } from "../definition.js";
+import type { MissionPipelineNodeBindingRef } from "../graph/definition.js";
 import type { PersonaRef, PromptStackRef } from "../prompt/contracts.js";
 import { type VersionedDigestRef } from "../internal/guards.js";
 export declare const MODEL_STAGE_BINDING_SCHEMA_VERSION = "model-stage-binding.v2";
@@ -23,7 +23,7 @@ export declare const MAX_INFERENCE_OUTPUT_TOKENS = 10000000;
 export declare const MAX_INFERENCE_OUTPUT_BYTES = 1073741824;
 export declare const MAX_INFERENCE_CONCURRENCY = 64;
 /**
- * The RECORDED inference parameters — the run-identity half of an inference
+ * The RECORDED inference parameters — the turn-identity half of an inference
  * profile. Every field is REQUIRED and the object is strict: an absent or
  * unknown recorded parameter FAILS CLOSED (no silent defaults, no silent
  * passthrough of un-modeled knobs).
@@ -73,21 +73,19 @@ export interface ModelStageBinding extends ModelStageBindingInput {
 /**
  * Seal a binding: validate LOUDLY (recorded parameters fail closed), stamp
  * `bindingDigest = digest(base)`. Any parameter/ref change produces a new
- * digest — and therefore a new compiled bindingFingerprint and idempotency key.
+ * digest — and therefore a new node fingerprint and idempotency key.
  */
 export declare function createModelStageBinding(input: unknown): ModelStageBinding;
 /** LOUD validator for a SEALED binding: full shape + digest recompute. */
 export declare function validateModelStageBinding(value: unknown): ModelStageBinding;
 /**
- * Project a sealed binding to the {@link PipelineNodeBindingRef} a definition
- * node carries (`{ kind:"model", bindingId, version, bindingDigest }`) — the
- * compiler stamps `bindingDigest` into the compiled node as
- * `bindingFingerprint`.
+ * Project a sealed binding to the content-addressed reference carried by a v2
+ * model node.
  */
-export declare function modelStageBindingRef(bindingRaw: unknown): PipelineNodeBindingRef;
+export declare function modelStageBindingRef(bindingRaw: unknown): MissionPipelineNodeBindingRef;
 /**
  * Resolve a node's binding REF against a published sealed binding — LOUD on
  * every mismatch (kind, identity, and ABOVE ALL the digest: a ref must prove
  * it names THIS exact sealed payload).
  */
-export declare function resolveModelBindingRef(ref: PipelineNodeBindingRef, bindingRaw: unknown): ModelStageBinding;
+export declare function resolveModelBindingRef(ref: MissionPipelineNodeBindingRef, bindingRaw: unknown): ModelStageBinding;

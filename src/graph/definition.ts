@@ -1,7 +1,7 @@
 // graph/definition.ts — the digest-sealed, data-only v2 node graph contract.
 //
-// This is additive beside the v1 PipelineDefinition until N10. It contains no
-// executable code, provider data, credentials, storage handles, or host paths.
+// It contains no executable code, provider data, credentials, storage handles,
+// or host paths.
 
 import { validateContractId, type ContractId } from "../contracts/artifact.js";
 import { digest } from "../contracts/digest.js";

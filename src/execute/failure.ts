@@ -1,7 +1,6 @@
 // execute/failure.ts — the traversal-neutral retryable-versus-terminal
-// execution-failure taxonomy shared by the v1 durable-stage compatibility
-// path and v2 node turns. It deliberately knows nothing about runs, shards,
-// graphs, queues, stores, providers, or credentials.
+// execution-failure taxonomy used by v2 node turns. It deliberately knows
+// nothing about graphs, queues, stores, providers, or credentials.
 
 import { types as nodeTypes } from "node:util";
 
@@ -102,8 +101,7 @@ function classifyTypedExecutionFailure(error: object): ExecutionFailure {
 
 /**
  * Map any thrown value to a stable code plus retry disposition. `retryable:
- * false` is terminal for one v2 unit turn. Legacy item/shard scope is an
- * adapter concern and intentionally absent from this shared contract.
+ * false` is terminal for one v2 unit turn.
  */
 export function classifyExecutionFailure(error: unknown): ExecutionFailure {
   try {
