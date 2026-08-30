@@ -1,13 +1,14 @@
 # PLAN — Building the node-graph engine (v2)
 
-**Status: ACTIVE; N0 ratified 2026-08-27; N1-N7, N8-dev, and N9 implemented
-2026-08-29.**
+**Status: COMPLETE; N0 ratified 2026-08-27; N1-N7, N8-dev, N9, and N10
+implemented through 2026-08-30. N8 production-substrate binding remains gated
+on Mission Control P4-02.**
 Executes `DESIGN-NODE-GRAPH-V2.md`.
 **Operating stance (operator directive): full development mode.** No
 uptime constraint, no data-preservation constraint, no compatibility
 obligation to the v1 engine or any data it produced. Legacy execution
-surfaces remain through N9 and are deleted only by the separately approved
-N10 deletion commit. What is never relaxed: the security/evidence invariants
+surfaces remained through N9 and were deleted by the separately approved N10
+commit. What is never relaxed: the security/evidence invariants
 listed in DESIGN §8.
 
 Phases are sized as arcs and decompose into turn-completable slices at
@@ -1317,6 +1318,104 @@ authorizes the post-evidence commit/push/deploy sequence.
   obtain the aggregate health witness, retire the exact legacy immutable
   container ID, and prove the forbidden-container inventory is zero.
 
+### N10 phase closure evidence (2026-08-30)
+
+#### Authorization and landed commits
+
+- The mandated pre-deletion pause above was honored. The operator then granted
+  full N10 approval and separately said `go`. Before the live deployment, the
+  Mission Control workspace's runtime-owner guard was surfaced: no callable
+  `buddha` Authority or reusable consultation verdict existed. The operator
+  explicitly waived that consultation and directed this deployment to proceed.
+  The waiver was bounded to invoking the existing `mc-autodeploy.service`,
+  observing its existing Conductor enrollment, and retiring the exact legacy
+  inbox container after aggregate health. No Mission Control source, service
+  unit, config, Gateway, plugin, LaunchDaemon, or enrollment definition was
+  changed.
+- Engine commit `d22fb89af059081bd8da7e824a7000e97dc49c60`
+  (`engine: delete v1 execution surfaces`) is on `origin/main` as package
+  `mission-pipeline@1.0.0`. Consumer commit
+  `dd87d6e21cf49235c205bb19921670c73f316a93`
+  (`runtime: delete v1 execution surfaces`) pins that exact engine commit in
+  both package metadata and the lockfile. Infra commit
+  `49e0bc085ce10791cc1ba6ed75a9fcd72dd5c50f`
+  (`stack: retire legacy inbox engine`) is on `origin/main` and on the laptop.
+- The engine and consumer worktrees are clean and equal their remotes. The
+  local infra worktree differs only by the three pre-existing, unrelated
+  untracked host-service paths recorded above. The laptop infra checkout is
+  clean apart from its pre-existing Bellwether backup; its SHA-256 remained
+  `4f43dabdf079118b535252de4e203554582dd24bb592cfb17008f5dfa63e7b79`
+  across synchronization. The Mission Control worktree remained clean at
+  `e95ed0f4f432d55043fe84fbc85a5ce6a8e71a04`.
+
+#### Final source and guard evidence
+
+- Engine `npm run check` exited zero after deletion: 202/202 tests, 111 exact
+  payload files, and both packed install smokes green. The release artifact
+  SHA-256 is
+  `845c29c0d98b30b673c662224c9bcf88c02ac66b2592ce9bd34dc0932e8c6499`.
+  A post-commit deletion-guard rerun again rejected all four mutation families
+  and passed with 25 retired paths and 11 retired symbols absent.
+- The exact consumer gate under Node 22.23.2 exited zero after the final engine
+  repin: build and check green; 1,118 hermetic tests with 1,076 pass, 42
+  expected skips, and zero fail; demo counts 17 units, 164 settled turns, 50
+  model turns, 52 outbox events, and 17 replay digests. Disposable PostgreSQL
+  passed 137/137 frozen-chain tests and 157/157 fresh-v2 tests (294/294 total).
+  A post-commit focused rerun reported `N10 deletion guard: clean` and rejected
+  all 13 independent mutation families.
+- Protected-history comparison remained 39/39 frozen `sql/postgres/001`–`039`
+  files, 37/37 `deploy/contracts` files, and five/five pinned D7/pilot
+  artifacts byte-identical, with no protected path in the deletion commit.
+  Infra's four checked-in suites passed both locally and on the laptop; the
+  topology suite retained all 29 hostile mutations. All repository phase
+  gates and Git whitespace checks exited zero.
+
+#### Immutable deployment and exact retirement
+
+- The existing enabled `inbox-lab` enrollment remained UUID
+  `be9897ad-5317-41ec-8480-c63bec4ff67a`, with its 300-second poll trigger and
+  loopback verify URL unchanged. Its immutable command
+  `b9626c75-4018-4592-8364-85273285926b` succeeded on attempt one. Run
+  `c7b944b2-80cc-4ced-a252-386dc8f0d4da` succeeded with empty failure detail,
+  source commit `dd87d6e21cf49235c205bb19921670c73f316a93`, and input fingerprint
+  `7daec0fba979a7f0a74f1a74c2ac648fa704023888c83d872269ef05f689294d`.
+  Its deploy stage built, pinned, and recreated the stack; its independent
+  verify stage received HTTP 200 from `http://127.0.0.1:18797/healthz`.
+- The laptop source checkout is clean with `HEAD = origin/main = dd87d6e…`.
+  Dashboard, v2 engine, v2 admitter, bootstrap, and migration use tag
+  `inbox-lab:dd87d6e`, immutable image
+  `sha256:fa5676fc1520189bc606c9e678d2a46d5ef4a2ae4028c82cbbdfba8141831bd5`.
+  Dashboard, PostgreSQL, v2 engine, and v2 admitter are healthy; bootstrap and
+  migration exited zero.
+- Compose renders exactly eight services: `ts-lab`, `oauth2-proxy`,
+  `dashboard`, `postgres-v2`, `v2-bootstrap`, `v2-migrate`, `v2-engine`, and
+  `v2-admitter`. `docker container inspect inbox-lab-engine` returned nonzero
+  while the Docker server remained responsive. The live
+  `tools/stack check inbox-lab` independently reported the forbidden container
+  absent, every required service healthy, all image pins exact, and `0 fail,
+  1 warn`; the sole non-failing advisory is restart policy on six of eight
+  services.
+- Operational health reported schema
+  `mission-pipeline-operational-health.v1`, `ready:true`, principal
+  `v2_worker`, graph `inbox.email-graph.v1` version 1 at digest
+  `b795469f86890a27ef88e60bac9577ab7915ad58345c55c403e714ee10b96f27`,
+  zero active queue and human depth, zero active/expired turn and capacity
+  leases, and fresh `v2_worker`/`v2_admitter` heartbeats. Seven retained
+  fail-closed dead letters all predate this deployment; N10 preserved their
+  append-only evidence and created no new one during rollout.
+- Volume `inbox-lab-postgres-v2-data` retained its N9 creation time
+  `2026-08-29T14:51:04-07:00`. The independent ledger contains exactly ten
+  rows, minimum 1, maximum 10, versions `{1,2,3,4,5,6,7,8,9,10}`. Public
+  relations contain only `mission_pipeline_v2_schema_migrations`; the frozen
+  `public.inbox_schema_migrations` ledger remains absent. No v1 database was
+  imported, no Gmail-send credential or authority was added, and no protected
+  historical evidence was removed.
+
+N10 is complete. Mission Pipeline v2 is the only deployed inbox execution
+engine. Formal production commissioning and the N8 production-substrate host
+remain separately gated on Mission Control P4-02; this development deployment
+does not claim either approval.
+
 ---
 
 ## Sequencing and parallelism
@@ -1341,7 +1440,7 @@ the first live-deployed loop both land at N9.
 | N6    | ✅ resolved 2026-08-28: `owner@example.com`; per-lane consent approved, readonly active, send inactive |
 | N8    | P4-02: substrate as the production model path |
 | N9    | When (if ever) to promote out of development → commissioning ceremony |
-| N10   | The deletion commit (explicitly irreversible-ish; dev-mode says go) |
+| N10   | ✅ approved and completed 2026-08-30: v1 surfaces deleted and live legacy container retired |
 
 ## Standing verification discipline
 
