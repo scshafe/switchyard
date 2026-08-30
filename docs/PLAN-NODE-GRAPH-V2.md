@@ -1,11 +1,14 @@
 # PLAN — Building the node-graph engine (v2)
 
-**Status: DRAFT, 2026-08-27.** Executes `DESIGN-NODE-GRAPH-V2.md`.
+**Status: ACTIVE; N0 ratified 2026-08-27; N1-N7, N8-dev, and N9 implemented
+2026-08-29.**
+Executes `DESIGN-NODE-GRAPH-V2.md`.
 **Operating stance (operator directive): full development mode.** No
 uptime constraint, no data-preservation constraint, no compatibility
 obligation to the v1 engine or any data it produced. Legacy execution
-surfaces are deleted the moment v2 carries their flows. What is never
-relaxed: the security/evidence invariants listed in DESIGN §8.
+surfaces remain through N9 and are deleted only by the separately approved
+N10 deletion commit. What is never relaxed: the security/evidence invariants
+listed in DESIGN §8.
 
 Phases are sized as arcs and decompose into turn-completable slices at
 build time. Each phase names its repo(s), its deliverables, its evidence,
@@ -980,6 +983,227 @@ Development mode means a fast loop, not a commissioning ceremony.
 Evidence: push → autodeploy → healthz green → a live email admitted,
 classified, routed, one human decision made from the console.
 
+### N9 implementation clarifications (recorded 2026-08-29)
+
+**What is the action-flow authority for a fresh-v2 admitted email when the
+frozen-v1 identity relations are deliberately absent?** The intake transaction
+authors it. For every newly admitted message-revision unit, the admitter also
+appends one immutable, digest-sealed v2-local authority record containing the
+processing-input, message-revision, and input-artifact UUIDs and their semantic
+digests, bound to the exact graph, unit, admission, and seed artifact. The
+identities are deterministic, domain-separated projections of that retained
+admission evidence; they are not ambient values invented by a worker. Exact
+page replay resolves the byte-identical retained record. A `v2_worker`-only
+definer routine resolves it for the exact claimed queue/unit/input coordinates,
+and independently verifies that the current routed email preserves the
+immutable seed source identity. Cross-unit, graph, queue, artifact, or content
+substitution fails closed. No frozen-v1 table, imported UUID, process-local
+cache, model output, or privileged-plane query participates.
+
+**How can the browser console trust the OIDC door when the pre-N9 compose
+placed the door and dashboard in one network namespace?** N9 separates their
+network namespaces and connects them through a dedicated internal bridge with
+boot-fixed addresses. The dashboard accepts forwarded reviewer identity only
+from the door's one exact non-loopback peer and accepts mutations only from the
+one exact HTTPS inbox origin; direct loopback retains only the already-declared
+fixed local-reviewer path. A loopback trusted-proxy exception is not added.
+The bridge address and Origin are deploy-time sealed configuration, and a
+topology/HTTP bite-proof must fail when either differs.
+
+**How does the host-loopback CLI remain reachable when this Docker release
+suppresses published ports for containers attached only to internal
+networks?** N9 gives only the dashboard a second, dedicated `/30` bridge with
+an explicit gateway and dashboard address, disabled IP masquerading, and no
+address left for another container peer. The dashboard binds that one exact
+address while the published host port remains bound to `127.0.0.1` only. The
+one exact bridge gateway is accepted as a direct transport peer for the
+loopback Host and JSON CLI path; it is not a trusted proxy, cannot assert
+forwarded identity, receives no ambient reviewer identity, and does not gain
+the browser form path. An adjacent address, an altered Host, or an attempted
+forwarded identity fails closed. Topology and disposable-runtime bite proofs
+cover the fixed addresses, one-member capacity, active loopback publication,
+and absence of external egress.
+
+**Which principal may serve operational health, and does heartbeat staleness
+create an engine timeout?** The `v2-engine` process serves the bounded health
+endpoint using its existing `v2_worker` connection and a worker-executable
+definer projection. The admitter and worker may update only their own service
+heartbeat through capability-checked routines. The projection exposes only
+bounded aggregate counts and sealed runtime identity: units by node, active
+queue depth by node, human depth, active/expired lease counts, dead letters,
+and daemon readiness. It exposes no email content, provider identifiers,
+credentials, or raw artifacts. Heartbeat age is deployment-readiness evidence
+only: it never expires a queue entry, settles a turn, emits an outcome, appends
+a journey event, or creates an engine-level timer.
+
+**Is N9 a replacement stack and database migration?** No. Until N10, the
+existing inbox-lab dashboard/door and legacy engine remain additive rollback
+surfaces while the same compose project gains fresh-v2 PostgreSQL, one-shot
+bootstrap/migration, `v2-engine`, and `v2-admitter`. The database begins on an
+empty dedicated volume with only `sql/postgres-v2/001…`; it never imports or
+extends frozen v1 migrations 1–39. Runtime services receive distinct
+owner-only URL files and least-authority mounts: the admitter gets only the
+approved Gmail readonly lane projection, the worker gets only its database
+principal and sealed direct-model route, the console gets only its console
+principal, and PostgreSQL has no host-published port. N9 publishes only
+`inbox.email-graph.v1`, keeping the fresh database single-graph for the v2.0
+worker dispatcher.
+
+**What proves autodeploy rather than merely proving that its timer is alive?**
+The first rollout is manual and rollback-capable. After it is healthy, the
+existing Mission Control enrollment is inspected and enabled or repaired only
+through Mission Control's authorized surface and runtime-owner consultation;
+it is never duplicated blindly. A subsequent pushed source commit must be
+observed as the clean deployment checkout's exact `HEAD`, image tag, conductor
+run, and real bounded `/healthz` success. Timer status alone is not phase
+evidence.
+
+Runtime-owner consultation was resolved before deployment. The `buddha`
+runtime owner was consulted before any live Mission Control mutation. The
+consultation and operator approval bounded the action to inspecting, repairing,
+and enabling the one existing `inbox-lab` enrollment through Mission Control's
+shared HTTP operator surface. No enrollment was created, no direct database
+mutation was used, and no Gateway, plugin, LaunchDaemon, or
+scheduler-substrate configuration was changed.
+
+### N9 phase evidence (2026-08-29)
+
+#### Source and manual rollout
+
+- The first operator-approved rollout used source `7d50a27` and image
+  `sha256:894c76d4ce7b6ab056fdee3173e109df33353aa3e5515a0fdadaa8b2c7a6aa7f`.
+  Two real failed candidates exercised automatic rollback; each
+  restored the exact prior image/config, removed only the declared fresh-v2
+  services and volume, and left the retained v1 surfaces healthy. The third
+  manual candidate passed the dashboard, application, bounded health, and
+  OIDC-door probes and discarded its armed rollback snapshot.
+- The first authentic enrolled poll observed pushed commit
+  `85f587b122d80b9a9b4242738b32d88b7c8ef1d7`. Conductor command
+  `280ad68e-e376-4a50-82bc-b7fcd69569d3` and run
+  `2c43dd99-7eaf-401f-ba06-1326d0a64716` succeeded in one attempt and
+  verified `/healthz` with HTTP 200 on immutable image
+  `sha256:736f32fd8c85047a1d2dcd760df0e3fdfad6f4b7700710ca5dbfe04e7f03dd83`.
+- The phase-closure documentation push produced the final witness at commit
+  `681dd399e800436ff4b4d4529f4141b2cdb236dd`. Conductor command
+  `3ac72a6d-ad9b-41bd-beb7-344a501a32fb`, payload SHA-256
+  `5bed7adbf54c374d0651b4effcfb4cc50d4d67b95a98e649d4fc2072605c270c`,
+  and run `c42e0c53-7caa-4261-aac0-70f5aa701aa7` succeeded in one attempt.
+  Its immutable source is
+  `git-worktree:sha256:40f22835ee85a612a0078789ca6e5b2a02a8468c262731ed9a9ec23a5992a8ba@681dd399e800436ff4b4d4529f4141b2cdb236dd`,
+  with source fingerprint
+  `b26722d5da88a305305b086567c804842ff59252c62af3f4965cd7c56bbad733`.
+  The clean laptop checkout had `HEAD = origin/main = 681dd399…`; all six
+  application containers used tag `inbox-lab:681dd39` and immutable image
+  `sha256:b59acd4c26d4841dafcd1a46525bf09abdd8d4f730579e6406c6fac77c15be15`.
+  The run's real verify stage received HTTP 200 from
+  `http://127.0.0.1:18797/healthz`; timer success is only supplementary.
+
+#### Compose topology and authority mounts
+
+- The additive project has exactly nine services: retained `ts-lab`,
+  `oauth2-proxy`, `dashboard`, and v1 `engine`; fresh `postgres-v2`; one-shot
+  `v2-bootstrap` and `v2-migrate`; and long-lived `v2-engine` and
+  `v2-admitter`. Final inspection found seven running and two one-shots exited
+  zero. Dashboard, retained engine, both one-shots, v2 engine, and v2 admitter
+  all resolved to the exact `b59acd4c…` application image.
+- The internal `10.99.79.0/29` door bridge has only the authored peers:
+  Tailscale `.2`, OIDC proxy `.3`, and dashboard `.4`. The dedicated
+  no-masquerade `10.99.79.8/30` host bridge has gateway `.9`, dashboard `.10`,
+  one container member, and no spare peer address. Only the dashboard publishes
+  `127.0.0.1:18796`; only the v2 engine publishes
+  `127.0.0.1:18797`. PostgreSQL reports target port 5432 with published port
+  zero. The dashboard is absent from `runtime-egress`.
+- Runtime database files are distinct owner-only mounts: bootstrap, migrator,
+  worker, admitter, and console each receive only their declared URL boundary.
+  The admitter receives the five-file readonly Gmail projection for
+  `owner@example.com`; Gmail send credential mounts and send authority count
+  are zero. The 26-hostile-mutation topology suite proves fixed peers, exact
+  networks, the one-member `/30`, loopback-only publications, readonly mounts,
+  and zero successful dashboard external-egress attempts.
+
+#### Fresh-v2 database and graph
+
+- Docker volume `inbox-lab-postgres-v2-data` was created fresh at
+  `2026-08-29T14:51:04-07:00`, after the immutable live-admission cutoff. The
+  runtime ledger contains only the independent versions and checksums:
+  `001:00994a175a97746c9aefb8156ab612153709128c178e59835ed58040d6276eaf`,
+  `002:150a8b011e627ba372da049b48678257802feccc8b85baf7beb82d9fe9d41217`,
+  `003:faa0eed2b9c4271572423e01f7688ec6801c3a1f4ce0b6d012286c8df04f405d`,
+  `004:2d931724bbb32b87ae432419a68c16d0898ac96684f22ee1a513157f56a6dbfb`,
+  `005:17547ef213bfa4a47866759f5d23888d9f323653e1509969dd14638c58f9f1e5`,
+  `006:0e61fd57924f8e448175a1d406f4d8a4e47ac9d13ea9e1239de79a28655ebe80`,
+  `007:2d5ecd182ae23c939045afb19120f3b5fd19b279d762223beaadfca4921b52da`,
+  `008:754a7133bfed6b65344908f804d2f2a22c70ed72436436457e46d9f567d01522`,
+  `009:01391afcb77756eeaffa19be9af2b464b069bac0b2960d492b998bbe2aa85975`,
+  and `010:24d47f8d4ca3cac38456992584cf523abe4fed6c16370f2f505804a4c06fa45a`.
+  `to_regclass('public.inbox_schema_migrations')` returned absent: imported
+  frozen-v1 migration rows and tables are zero.
+- The database has exactly one published graph:
+  `inbox.email-graph.v1` version 1, digest
+  `b795469f86890a27ef88e60bac9577ab7915ad58345c55c403e714ee10b96f27`.
+
+#### Admission authority and replay
+
+The live approved-message page has transition digest `8ef6f03dedb617376e474785bffefbdb468355d4a7325f24505f2cd8799c441d`.
+
+Its page digest is `fcc4697129135ed3f881f93f4d33b8d6222797017eb400ce32ed9e70de0e1129`
+and its manifest digest is `ab6febbc057700bbfcb3a6f5c612f1bdba0112ca33cefd829b10162cd0bbc68f`.
+The retained cardinality is exactly one unit and one authority row. The
+redacted unit is `email-unit:cb328209…56a356a0`. Admission digest is
+`3e41ff788b201212c8792c9c720d166382d03ee77676c9480f8c9c4444f129b7`.
+Seed contract is `ingested-email.v2`; seed digest is
+`fcd10989fd39f8a2be228603a268945debe517c111b2ea674053c470eb17e017`;
+entry queue is `1aa5efc6-d262-46a9-a4df-1b44fd123065`.
+
+The authority row seals account digest `125a9a798253ab7efdbc1d3a18870efa5aae7fcf2eafc71be874a70c92df0a89` and provider-message digest `d0ab9fb7193cca7f97f9e8456a8986987aaf679faf4bc49d12862a587f9deb14`.
+Processing input is `b9e74083-c95b-8f74-86b9-63c1c6768a8e` / `24c0e82eec83580cf7c748c9bf843e8c61518e577fe2a34d2d44c71fc444bbdf`; message revision is `93963cc0-2a43-800a-bf08-d242faa143ba` / `b87b068db9db0da9ecddd3c1ed04723224be9b599e00375184eb36fd80445409`.
+Input artifact is `e611097f-7cbe-879a-99c8-e94fe4b83085`; authority digest is `0af6af5648021f75cb6d634feb2773ffa2d5dab5a670ca9e6c2d838dce1186f2`. The live database contains five units and five authority rows overall, with no repeated unit or authority key.
+
+Exact replay of the live page preserved the retained row byte-for-byte and
+created zero additional units, artifacts, authorities, queues, or journeys.
+Separately, the disposable PostgreSQL fixture suite proves post-COMMIT
+reply-loss recovery preserves that exact-once state.
+The executable guard corpus independently changes nine turn coordinates, three retained source-identity coordinates, graph, unit, seed, artifact, and valid-content category; every substitution fails before provider I/O or mutation. The admitted-time/XID guard returns SQLSTATE `23514` with page-derived residue all zero; moving the otherwise identical unit to the prior transaction proves the precise guard admits exactly one complete row set.
+
+#### Bounded health and readiness
+
+`GET http://127.0.0.1:18797/healthz` returned HTTP 200 and schema `mission-pipeline-operational-health.v1` with `ready:true`, principal `v2_worker`, at `2026-08-30T04:02:54.454Z`. Every active queue depth was zero. Unit counts across all 16 nodes were: action-arbiter 1; action-compare 3; action-context-review 1; action-context-reviewed 1; action-evidence 5; action-precision 3; action-recall 4; action-validate 3; action-validation-review 0; action-validation-reviewed 0; classification 5; filter 5; jobtrack-proposal 0; notifications 5; route 5; security 5.
+Human depth was zero. Active/expired turn leases were `0/0`; active/expired model-capacity leases were `0/0`. The admitter heartbeat was fresh under `v2_admitter` at age 2,532 ms, and the engine heartbeat was fresh under `v2_worker` at age 4,470 ms. The one retained dead letter is the previously recorded fail-closed provider-policy sentinel; it has no successor and was not hidden or deleted.
+The projection contains no message content, provider identity, artifact bytes, credential, or raw evidence. The three-test actual-principal health suite proves a stale heartbeat changes readiness only: it does not settle a turn, expire a human queue, emit an outcome, append a journey event, or create an engine-level timeout.
+
+#### Mission Control enrollment and push autodeploy
+
+- The one existing enrollment remained UUID `be9897ad-5317-41ec-8480-c63bec4ff67a`, name `inbox-lab`. Before repair it was disabled and verified the stale dashboard `/login`; afterward it was enabled and verified `http://127.0.0.1:18797/healthz` with retries 20, timeout 5,000 ms, interval 2,000 ms. Repository, empty build/test command lists, disabled test gate, stack-deploy recipe, poll/300 trigger, and empty artifact list were preserved. Enrollment count for this name remained one.
+- After the required `buddha` consultation and Cole's deployment approval, `mission-control conductor update` and `enable` ran remotely through the deployed HTTP API. These two enrollment effects are intentionally `portal-direct`, so no second scheduler command ID exists or is claimed; the server committed the validated manifest/enabled mutations and reported enrollment `updatedAt=2026-08-30T03:17:32.970Z`. No direct-PostgreSQL enrollment mutation, duplicate enrollment, Gateway mutation, or service-unit edit occurred.
+- The pushed source was observed through immutable `conductor.run` command/source rows, not inferred from `mc-autodeploy.timer`: both the initial command/run and the final `3ac72a6d…` / `c42e0c53…` command/run reached terminal `succeeded` in one attempt, and the final scheduler claim owner was the isolated Conductor lane. The laptop Mission Control release remained exact commit `e95ed0f4f432d55043fe84fbc85a5ce6a8e71a04`, release artifact `sha256:33b1b5d11c55761a2f1dcb15623a042af66081f45320bad3f6976671b1236e54`.
+
+#### Live email and human decision witness
+
+- The redacted live unit `email-unit:cb328209…56a356a0` traversed the sealed graph as: `filter:unit_admitted → filter:clean → security:hostile → route:unknown → classification:unknown → action-evidence:security_review → notifications:planned → action-context-review:approved → action-context-reviewed:recorded`. Journey sequences are exactly 1–9.
+- The unit made one classification provider call, retained one provider-reported usage receipt, and made zero action-model calls. It retained the exact graph, admission, authority, input/output artifact, journey, settlement, and provider-attempt digests without copying email or provider content into the operational health surface.
+- The OIDC actor `owner@example.com` submitted declared outcome `approved` at queue `14add310-d5e5-4779-9f01-aa253337dea1` and received HTTP 303. The row is attributed to principal `v2_console`, record digest `646e8095e0ce522cd0d6a3afbbd59a5a5416f678763fd03d5bf1282763fa27e2`, completion digest `0d1ee005f8439bd9fb0f952c7062abfad2b0893a5a7daf21fd4e5348ec47a13a`, settlement digest `a0c2182428f47c924fb984bd0be821f8d32d1190cf6ca04278f9d8ad020880fd`, and output artifact digest `fd9fbbea6bce4cc181734e3489e60450790644f947c68c33d23a75404453c079`.
+- Human depth changed `0 → 1 → 0`; declared edge `action-context-review-approved` enqueued successor `action-context-reviewed` at queue `3fbf0ae0-becc-4eef-8c22-daa0e54daff3`, whose depth changed `0 → 1`. Exact controller replay returned `reused:true` and the same completion digest, with no second settlement or route. Gmail send credential, send authority, and send attempts were all zero.
+
+#### Guard bites, role denials, and crash invariants
+
+- The live door rejected a direct tailnet bypass with HTTP 421. The first Safari submission proved the exact-Origin guard bites with HTTP 403 / `origin_rejected`; changing only the response Referrer-Policy from `no-referrer` to `strict-origin` made the same native form succeed while retaining the Host/Origin check. Executable HTTP guards also return 403 for a direct-peer browser form, 421 for an adjacent `/30` peer, 421 for a rebound Host, and ignore forged forwarded identity on the direct lane.
+- Focused actual-principal bodies contain 46 explicit SQLSTATE `42501` assertions: intake 18, action authority 5, human console 2, operational health 21. On the live database, an actual `v2_worker` connection received `42501` from both console listing and a substituted human settlement; the denied settlement left no journey residue. Owner append-only mutations fail separately.
+- The shared UnitStore suite kills PostgreSQL at all eight settle checkpoints: `journey_append`, `artifact_retain`, `edge_evaluation`, `join_progress`, `successor_enqueue`, `outbox_append`, `lease_release`, and `post_commit_reply`. Pre-COMMIT kills expose no partial journey/successor/outbox/artifact; post-COMMIT reply loss exposes the complete settlement. Recovery always ends with one body call, settlement, direct queue, join queue, outbox, artifact, and queued join. Real backend termination reports SQLSTATE `57P01`.
+- Intake adds two live-window checkpoints (`before_commit`, `post_commit_reply`) and eight current two-unit page scenarios: before admissions; after unit 0/1; after page append; after authority 0/1; before COMMIT; after-COMMIT reply loss. Across the complete current matrix there are 18 crash executions: 15 pre-COMMIT and three post-COMMIT reply-loss cases. Every pre-COMMIT page crash leaves all page-derived counts zero; every post-COMMIT case recovers the complete state exactly once.
+
+#### Full gates and deferred work
+
+- In `mission-pipeline`, `npm run check` exited zero: build green; 351/351 source tests; exact 150-file payload; packed runtime and TypeScript install smokes green. The dependency/import guards still prove production source imports only `node:` builtins and package-relative modules.
+- In `inbox-pipeline`, the exact uninterrupted command `pnpm build && pnpm check && pnpm test && pnpm demo && pnpm test:postgres:disposable` exited zero. The general corpus was 1,491 total: 1,440 pass, 51 expected environment skips, zero fail. Demo processed both fixtures. Frozen-v1 disposable PostgreSQL remained 156/156 across 28 summary runs. Fresh-v2 passed the sealed email corpus 23/23, capacity 13/13, operational health 3/3, and stateful/migration corpus 118/118: 157/157 total.
+- Mission Control landed and deployed commit `e95ed0f4f432d55043fe84fbc85a5ce6a8e71a04`. Its full suite was 4,247 total: 4,244 pass, three expected skips, zero fail; all eight packages built; root and web typechecks exited zero; the Redux-only Conductor Web suite was 23/23. A deliberately wrong generic-command classification first produced six reported failures/four failing leaves; the corrected route-principal matrix was 139/139. Deterministic bundle SHA-256 was `f7cffd52ce223b01e335b302d1abd91f7373d2035a125b399c368daaa39c8289`; the deployed release artifact is `33b1b5d11c55761a2f1dcb15623a042af66081f45320bad3f6976671b1236e54`.
+- Infra source gates exited zero: `docker compose config -q` plus 4/4 checked-in shell suites, including 26 explicit hostile topology guards. Before sync, the live doctor alone failed on Docker's shortened displayed digest, proving commit `7c553f3 stack: compare configured image references` bites. After the seven tested commits were pushed and the laptop fast-forwarded to `HEAD = origin/main = 7c553f3d9fc5bb627e4ed82c2ea5240b2fb5df10`, the live `tools/stack check inbox-lab` returned `0 fail, 1 warn`; the warning is the pre-existing 7/9 restart-policy advisory. The exact Postgres digest pin and all required container health/image checks passed.
+- `inbox-pipeline/docs/NODE_GRAPH_V2_PRODUCTION_COMMISSIONING.md` records the
+  required deferred-commissioning placeholder: successor contracts, principal
+  ceremony, service inventory, rollback, and evidence obligations. It is not a
+  commissioning record or authorization; production substrate binding remains
+  gated on P4-02, and removal of retained v1 surfaces remains gated on N10.
+- The terminal Codex session exposed no controllable Browser instance, so no Mission Control Web click-through is fabricated: the deployed remote CLI and Redux Web surface use the same HTTP endpoints, the Web suite is green, and the actual inbox OIDC decision was performed in the operator's browser and corroborated by HTTP and PostgreSQL evidence above. Gateway PID 47395 and its plist/index hashes and the laptop portal/scheduler/deploy unit, timer, and script hashes remained at their pre-N9 baselines. Current hashes and ownership/modes were captured for all five protected LaunchDaemons, but prior exact hashes were unavailable, so historical byte equality is not claimed for those five. P4-02 production-substrate binding remains gated, formal commissioning remains deferred, retained v1 rollback surfaces remain additive, and N10 deletion has not started.
+
 ## N10 — Delete the v1 execution surfaces
 
 Dev-mode directive, applied with a blade:
@@ -1009,16 +1233,16 @@ N0 ─► N1 ─► N2 ─► N3 ─► N4 ─► N5 ─► N6 ─► N9 ─► 
 ```
 
 N1–N3 are one repo, hermetic, and fully parallelizable with the MC P4
-work already in flight. The first end-to-end email through a human
-decision (the model's proof moment) lands at N7; the first live-deployed
-loop at N9.
+work already in flight. N7 proves the provider-neutral human console against
+its dedicated draft fixture. The first live email through a human decision and
+the first live-deployed loop both land at N9.
 
 ## Operator decision points (collected)
 
 | Where | Decision |
 |-------|----------|
 | N0    | ✅ ratified 2026-08-27 (names, joins, fan-out, TTL, evolution, fairness) |
-| N6    | Dev account choice + per-lane token consents |
+| N6    | ✅ resolved 2026-08-28: `owner@example.com`; per-lane consent approved, readonly active, send inactive |
 | N8    | P4-02: substrate as the production model path |
 | N9    | When (if ever) to promote out of development → commissioning ceremony |
 | N10   | The deletion commit (explicitly irreversible-ish; dev-mode says go) |
