@@ -110,9 +110,9 @@ test("graph display: merges arrows, preserves fan-out evidence, and recognizes g
   assert.equal(display.nodes[0].marks, true);
   assert.deepEqual(plain(display.arrows), [
     { from: "mark", to: "right", outcomes: ["yes", "no"], edgeIds: ["yes-both", "no-right"], conditional: false,
-      fanOut: [{ edgeId: "yes-both", coTargets: ["left"] }] },
+      fanOut: [{ edgeId: "yes-both", coTargets: ["left"], outcomes: ["yes"] }] },
     { from: "mark", to: "left", outcomes: ["yes", "no"], edgeIds: ["yes-both", "no-left", "conditional-duplicate"], conditional: true,
-      fanOut: [{ edgeId: "yes-both", coTargets: ["right"] }] }
+      fanOut: [{ edgeId: "yes-both", coTargets: ["right"], outcomes: ["yes"] }] }
   ]);
   assert.equal(display.nodes[1].marks, false);
 });
@@ -133,6 +133,19 @@ test("graph display: conditional extra targets and terminal outcomes are never g
   terminal.nodes[0].outcomes.outcomes.push("stop");
   terminal.terminals.push({ nodeId: "mark", outcome: "stop" });
   assert.equal(displayOf(terminal).nodes[0].marks, false);
+});
+
+test("graph display: merged fan-outs retain each edge's own outcome provenance", () => {
+  const draft = markingDraft();
+  draft.edges.push({ edgeId: "no-both", from: "mark", when: { anyOf: ["no", "yes"] }, to: ["left", "right"] });
+  const display = displayOf(draft);
+  for (const arrow of display.arrows) {
+    assert.deepEqual(arrow.outcomes, ["yes", "no"]);
+    assert.deepEqual(arrow.fanOut.map((fork) => [fork.edgeId, fork.outcomes]), [
+      ["yes-both", ["yes"]], ["no-both", ["no", "yes"]]
+    ]);
+    assert.equal(Object.isFrozen(arrow.fanOut[1].outcomes), true);
+  }
 });
 
 function assertFrozenRecords(value) {

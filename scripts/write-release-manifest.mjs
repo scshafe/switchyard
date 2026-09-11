@@ -3,12 +3,13 @@
 // digests are taken from the packed bytes exactly as check-release-artifact.mjs
 // reads them back, so the manifest and the check cannot disagree about what a
 // release contains. Run after `build` and before committing a payload change;
-// the check then pins it. Ported from the 1.1.0 branch, single package only.
+// the check then pins it. The separately packaged static SDK gets its own
+// manifest from `npm pack`, which scripts/check-graphpaper-sdk.mjs reads back.
 
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -43,15 +44,7 @@ async function run(command, args, options = {}) {
   return stdout;
 }
 
-try {
-  const identity = await readReleaseIdentity(root);
-  const report = singlePackReport(
-    await run("pnpm", [...PNPM_PACK_ARGS, "--pack-destination", scratch])
-  );
-  if (report.name !== identity.name || report.version !== identity.version) {
-    throw new Error("packed identity does not match package.json");
-  }
-  const tarball = join(scratch, report.basename);
+async function manifestLines(tarball) {
   const entries = (await run("tar", ["-tzf", tarball]))
     .trim()
     .split(/\r?\n/)
@@ -74,8 +67,42 @@ try {
     const content = await run("tar", ["-xOzf", tarball, `package/${path}`]);
     lines.push(`${createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex")}  ${path}`);
   }
+  return lines;
+}
+
+async function writeSdkManifest(packageRoot) {
+  const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
+  const { name, version } = packageJson;
+  if (name !== "mission-pipeline-graphpaper") {
+    throw new Error(`unexpected SDK package name: ${String(name)}`);
+  }
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`SDK package.json version must be a release version (got ${String(version)})`);
+  }
+  const report = JSON.parse(
+    await run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", scratch], { cwd: packageRoot })
+  );
+  if (report.length !== 1 || typeof report[0].filename !== "string") {
+    throw new Error("npm pack did not produce exactly one SDK artifact");
+  }
+  const lines = await manifestLines(join(scratch, report[0].filename));
+  const manifest = `release/${name}-${version}.payload.sha256`;
+  await writeFile(resolve(root, manifest), `${lines.join("\n")}\n`, "utf8");
+  console.log(JSON.stringify({ result: "written", manifest, fileCount: lines.length }));
+}
+
+try {
+  const identity = await readReleaseIdentity(root);
+  const report = singlePackReport(
+    await run("pnpm", [...PNPM_PACK_ARGS, "--pack-destination", scratch])
+  );
+  if (report.name !== identity.name || report.version !== identity.version) {
+    throw new Error("packed identity does not match package.json");
+  }
+  const lines = await manifestLines(join(scratch, report.basename));
   await writeFile(resolve(root, identity.manifest), `${lines.join("\n")}\n`, "utf8");
-  console.log(JSON.stringify({ result: "written", manifest: identity.manifest, fileCount: entries.length }));
+  console.log(JSON.stringify({ result: "written", manifest: identity.manifest, fileCount: lines.length }));
+  await writeSdkManifest(resolve(root, "packages/mission-pipeline-graphpaper"));
 } finally {
   await rm(scratch, { force: true, recursive: true });
 }

@@ -42,6 +42,12 @@ The package imports Node.js built-ins and its own files only. It never imports
 database clients, provider SDKs, credential loaders, or host frameworks.
 Consumers implement the exported store and node-kind ports.
 
+The repository also contains the separately packaged, unreleased
+[`mission-pipeline-graphpaper` static SDK](packages/mission-pipeline-graphpaper/README.md).
+It builds graphpaper diagram data from engine projections and consumer
+presentation. It is excluded from this engine's npm payload; graphpaper is
+only a root development dependency, not an engine runtime dependency.
+
 Supported runtimes:
 
 - Node.js `>=22.22.0 <23`
@@ -208,7 +214,9 @@ pnpm run verify
 The gate builds from a clean output directory, runs the v1-deletion guard and
 the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
-JavaScript plus TypeScript import smokes.
+JavaScript plus TypeScript import smokes. It also builds the separately
+packaged static SDK, checks its independent payload/manifest, and runs its
+golden, hostile-input, packed-install, and graphpaper layout/SVG checks.
 
 `pnpm run test:fresh-clone` repeats the install, build and verify in a fresh
 clone of the committed `HEAD` (it requires a clean working tree). `lib/` is

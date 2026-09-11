@@ -1,0 +1,538 @@
+{
+  "id": "example.support-triage",
+  "title": "Support triage · example.support-triage v1",
+  "kind": "process",
+  "description": " Each arrow carries the decision that takes a unit down it; dashed exits are where its journey ends.",
+  "nodes": [
+    {
+      "id": "normalize",
+      "type": "code",
+      "title": "Normalizer (1)",
+      "description": "Trims and bounds the ticket text and pins the exact seed digest. Malformed input stops here.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "1"
+        },
+        {
+          "label": "outcomes",
+          "value": "ready | malformed"
+        },
+        {
+          "label": "ref",
+          "value": "triage.normalize@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "normalize",
+        "role": "code",
+        "kind": "code",
+        "rank": 1
+      }
+    },
+    {
+      "id": "outage-signal",
+      "type": "model",
+      "title": "Outage signal (2)",
+      "description": "One focused yes/no/uncertain judgment with quoted evidence.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "2"
+        },
+        {
+          "label": "outcomes",
+          "value": "yes | no | uncertain"
+        },
+        {
+          "label": "binding",
+          "value": "triage.outage-signal@1"
+        },
+        {
+          "label": "question",
+          "value": "Does this ticket report a service outage or data loss affecting the customer now?"
+        },
+        {
+          "label": "ref",
+          "value": "triage.outage-signal@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "outage-signal",
+        "role": "model",
+        "kind": "model",
+        "rank": 2
+      }
+    },
+    {
+      "id": "ground-evidence",
+      "type": "code",
+      "title": "Evidence grounding (3)",
+      "description": "Deterministic: every quoted span must be a literal substring of the normalized text.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "3"
+        },
+        {
+          "label": "outcomes",
+          "value": "grounded | ungrounded"
+        },
+        {
+          "label": "ref",
+          "value": "triage.ground-evidence@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "ground-evidence",
+        "role": "code",
+        "kind": "code",
+        "rank": 3
+      }
+    },
+    {
+      "id": "outage-verify",
+      "type": "model",
+      "title": "Outage verifier (4)",
+      "description": "A second focused call that sees only grounded evidence.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "4"
+        },
+        {
+          "label": "outcomes",
+          "value": "confirmed | unsupported | uncertain"
+        },
+        {
+          "label": "binding",
+          "value": "triage.outage-verify@1"
+        },
+        {
+          "label": "question",
+          "value": "Do the quoted spans literally support an active outage, not a past, hypothetical, or feature request?"
+        },
+        {
+          "label": "ref",
+          "value": "triage.outage-verify@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "outage-verify",
+        "role": "model",
+        "kind": "model",
+        "rank": 4
+      }
+    },
+    {
+      "id": "blast-radius",
+      "type": "model",
+      "title": "Blast radius (5)",
+      "visibleRows": 1,
+      "description": "Asked only after a confirmed outage; an uncertain answer is carried forward as an explicit fact.",
+      "rows": [
+        {
+          "label": "marks",
+          "value": "many | single | uncertain"
+        },
+        {
+          "label": "depth",
+          "value": "5"
+        },
+        {
+          "label": "binding",
+          "value": "triage.blast-radius@1"
+        },
+        {
+          "label": "question",
+          "value": "Are more than one user or account affected?"
+        },
+        {
+          "label": "ref",
+          "value": "triage.blast-radius@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "blast-radius",
+        "role": "model",
+        "kind": "model",
+        "rank": 5,
+        "marks": [
+          "many",
+          "single",
+          "uncertain"
+        ]
+      }
+    },
+    {
+      "id": "assemble",
+      "type": "code",
+      "title": "Proposal assembler (6)",
+      "description": "Deterministic validation of the whole chain, the priority policy, and the escalation proposal with its provenance.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "6"
+        },
+        {
+          "label": "outcomes",
+          "value": "proposed | invalid"
+        },
+        {
+          "label": "ref",
+          "value": "triage.assemble@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "assemble",
+        "role": "code",
+        "kind": "code",
+        "rank": 6
+      }
+    },
+    {
+      "id": "summarize",
+      "type": "model",
+      "title": "Dispatch summary (7)",
+      "visibleRows": 1,
+      "description": "Optional prose; an unusable answer falls back to the deterministic line and never changes routing.",
+      "rows": [
+        {
+          "label": "marks",
+          "value": "summarized | unusable"
+        },
+        {
+          "label": "depth",
+          "value": "7"
+        },
+        {
+          "label": "binding",
+          "value": "triage.dispatch-summary@1"
+        },
+        {
+          "label": "question",
+          "value": "Write one line for the dispatcher."
+        },
+        {
+          "label": "ref",
+          "value": "triage.summarize@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "summarize",
+        "role": "model",
+        "kind": "model",
+        "rank": 7,
+        "marks": [
+          "summarized",
+          "unusable"
+        ]
+      }
+    },
+    {
+      "id": "dispatch-review",
+      "type": "human",
+      "title": "Dispatcher review (8)",
+      "description": "A person approves or rejects the escalation.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "8"
+        },
+        {
+          "label": "outcomes",
+          "value": "approved | rejected"
+        },
+        {
+          "label": "question",
+          "value": "Page on-call with this proposal?"
+        },
+        {
+          "label": "ref",
+          "value": "triage.dispatch-review@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "dispatch-review",
+        "role": "human",
+        "kind": "human",
+        "rank": 8
+      }
+    },
+    {
+      "id": "triage-review",
+      "type": "human",
+      "title": "Triage review (7)",
+      "description": "Every uncertainty and validator refusal lands here with the exact context it came from.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "7"
+        },
+        {
+          "label": "outcomes",
+          "value": "escalate | standard"
+        },
+        {
+          "label": "question",
+          "value": "The automatic path could not decide. Escalate, or send to the standard queue?"
+        },
+        {
+          "label": "ref",
+          "value": "triage.triage-review@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "triage-review",
+        "role": "human",
+        "kind": "human",
+        "rank": 7
+      }
+    },
+    {
+      "id": "endpoint:on-call",
+      "type": "endpoint",
+      "title": "On-call page",
+      "rows": [
+        {
+          "label": "fed by",
+          "value": "Dispatcher review, Triage review"
+        }
+      ],
+      "metadata": {
+        "endpointId": "on-call",
+        "sink": "endpoint"
+      }
+    },
+    {
+      "id": "terminal:standard-queue",
+      "type": "terminal",
+      "title": "Standard queue",
+      "subtitle": "ends here",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Outage signal: no, Outage verifier: unsupported, Dispatcher review: rejected, Triage review: standard"
+        }
+      ],
+      "metadata": {
+        "terminalId": "standard-queue",
+        "sink": "terminal",
+        "ends": [
+          "outage-signal:no",
+          "outage-verify:unsupported",
+          "dispatch-review:rejected",
+          "triage-review:standard"
+        ]
+      }
+    },
+    {
+      "id": "terminal:rejected-input",
+      "type": "terminal",
+      "title": "Rejected input",
+      "subtitle": "ends here",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Normalizer: malformed"
+        }
+      ],
+      "metadata": {
+        "terminalId": "rejected-input",
+        "sink": "terminal",
+        "ends": [
+          "normalize:malformed"
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "normalize->outage-signal",
+      "from": "normalize",
+      "to": "outage-signal",
+      "type": "outcome",
+      "label": "ready",
+      "description": "Normalizer settles ready → Outage signal"
+    },
+    {
+      "id": "outage-signal->ground-evidence",
+      "from": "outage-signal",
+      "to": "ground-evidence",
+      "type": "outcome",
+      "label": "yes",
+      "description": "Outage signal settles yes → Evidence grounding"
+    },
+    {
+      "id": "outage-signal->triage-review",
+      "from": "outage-signal",
+      "to": "triage-review",
+      "type": "outcome",
+      "label": "uncertain",
+      "description": "Outage signal settles uncertain → Triage review"
+    },
+    {
+      "id": "ground-evidence->outage-verify",
+      "from": "ground-evidence",
+      "to": "outage-verify",
+      "type": "outcome",
+      "label": "grounded",
+      "description": "Evidence grounding settles grounded → Outage verifier"
+    },
+    {
+      "id": "ground-evidence->triage-review",
+      "from": "ground-evidence",
+      "to": "triage-review",
+      "type": "outcome",
+      "label": "ungrounded",
+      "description": "Evidence grounding settles ungrounded → Triage review"
+    },
+    {
+      "id": "outage-verify->blast-radius",
+      "from": "outage-verify",
+      "to": "blast-radius",
+      "type": "outcome",
+      "label": "confirmed",
+      "description": "Outage verifier settles confirmed → Blast radius"
+    },
+    {
+      "id": "outage-verify->triage-review",
+      "from": "outage-verify",
+      "to": "triage-review",
+      "type": "outcome",
+      "label": "uncertain",
+      "description": "Outage verifier settles uncertain → Triage review"
+    },
+    {
+      "id": "blast-radius->assemble:many",
+      "from": "blast-radius",
+      "to": "assemble",
+      "type": "outcome",
+      "label": "many",
+      "description": "Blast radius settles many → Proposal assembler; the mark rides along in the unit record"
+    },
+    {
+      "id": "blast-radius->assemble:single",
+      "from": "blast-radius",
+      "to": "assemble",
+      "type": "outcome",
+      "label": "single",
+      "description": "Blast radius settles single → Proposal assembler; the mark rides along in the unit record"
+    },
+    {
+      "id": "blast-radius->assemble:uncertain",
+      "from": "blast-radius",
+      "to": "assemble",
+      "type": "outcome",
+      "label": "uncertain",
+      "description": "Blast radius settles uncertain → Proposal assembler; the mark rides along in the unit record"
+    },
+    {
+      "id": "assemble->summarize",
+      "from": "assemble",
+      "to": "summarize",
+      "type": "outcome",
+      "label": "proposed",
+      "description": "Proposal assembler settles proposed → Dispatch summary"
+    },
+    {
+      "id": "assemble->triage-review",
+      "from": "assemble",
+      "to": "triage-review",
+      "type": "outcome",
+      "label": "invalid",
+      "description": "Proposal assembler settles invalid → Triage review"
+    },
+    {
+      "id": "summarize->dispatch-review:summarized",
+      "from": "summarize",
+      "to": "dispatch-review",
+      "type": "outcome",
+      "label": "summarized",
+      "description": "Dispatch summary settles summarized → Dispatcher review; the mark rides along in the unit record"
+    },
+    {
+      "id": "summarize->dispatch-review:unusable",
+      "from": "summarize",
+      "to": "dispatch-review",
+      "type": "outcome",
+      "label": "unusable",
+      "description": "Dispatch summary settles unusable → Dispatcher review; the mark rides along in the unit record"
+    },
+    {
+      "id": "dispatch-review->endpoint:on-call",
+      "from": "dispatch-review",
+      "to": "endpoint:on-call",
+      "type": "exit",
+      "label": "approved",
+      "description": "Dispatcher review settles approved → On-call page"
+    },
+    {
+      "id": "triage-review->endpoint:on-call",
+      "from": "triage-review",
+      "to": "endpoint:on-call",
+      "type": "exit",
+      "label": "escalate",
+      "description": "Triage review settles escalate → On-call page"
+    },
+    {
+      "id": "outage-signal->terminal:standard-queue",
+      "from": "outage-signal",
+      "to": "terminal:standard-queue",
+      "type": "exit",
+      "label": "no",
+      "description": "Outage signal settles no → Standard queue"
+    },
+    {
+      "id": "outage-verify->terminal:standard-queue",
+      "from": "outage-verify",
+      "to": "terminal:standard-queue",
+      "type": "exit",
+      "label": "unsupported",
+      "description": "Outage verifier settles unsupported → Standard queue"
+    },
+    {
+      "id": "dispatch-review->terminal:standard-queue",
+      "from": "dispatch-review",
+      "to": "terminal:standard-queue",
+      "type": "exit",
+      "label": "rejected",
+      "description": "Dispatcher review settles rejected → Standard queue"
+    },
+    {
+      "id": "triage-review->terminal:standard-queue",
+      "from": "triage-review",
+      "to": "terminal:standard-queue",
+      "type": "exit",
+      "label": "standard",
+      "description": "Triage review settles standard → Standard queue"
+    },
+    {
+      "id": "normalize->terminal:rejected-input",
+      "from": "normalize",
+      "to": "terminal:rejected-input",
+      "type": "exit",
+      "label": "malformed",
+      "description": "Normalizer settles malformed → Rejected input"
+    }
+  ],
+  "metadata": {
+    "graphId": "example.support-triage",
+    "graphVersion": 1,
+    "graphDigest": "7f06a0fa6ec1fa1ddb1a156bc1ec647fb63dca17634e7608dfb5680675aad8c3",
+    "publication": "source",
+    "highlighted": false,
+    "unclaimedTerminals": [],
+    "pipeline": {
+      "schemaVersion": "mission-pipeline-diagram.v1",
+      "graph": {
+        "id": "example.support-triage",
+        "version": 1,
+        "digest": "7f06a0fa6ec1fa1ddb1a156bc1ec647fb63dca17634e7608dfb5680675aad8c3"
+      },
+      "mode": "static",
+      "presentationDigest": "d07d555a3690fe00019458dbb5def1e8a890ef5b2c0280e03a66e4076264b8cb",
+      "unclaimedTerminals": []
+    }
+  }
+}

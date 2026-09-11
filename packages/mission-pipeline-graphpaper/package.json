@@ -1,0 +1,22 @@
+{
+  "name": "mission-pipeline-graphpaper",
+  "version": "0.1.0",
+  "description": "Pure graphpaper diagram models from mission-pipeline projections and consumer presentation.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.22.0 <23 || >=24.18.0 <25" },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["src", "lib", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "peerDependencies": { "@scshafe/switchyard": "^1.1.0", "graphpaper": "^0.5.0" },
+  "peerDependenciesMeta": { "graphpaper": { "optional": true } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm --prefix ../.. run check"
+  }
+}
