@@ -196,6 +196,11 @@ the manifest script packs without rebuilding and writes
 `release/mission-pipeline-<version>.payload.sha256` and
 `release/mission-pipeline-graphpaper-<version>.payload.sha256`, which the gates pin.
 
+`npm run test:fresh-clone` requires a clean committed candidate. Dependency
+installation may fetch the exact Git-pinned renderer and requires repository
+read access; lifecycle scripts are disabled. The subsequent `npm run verify`
+and all packed-consumer checks run with npm offline.
+
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and
 [`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md). Application

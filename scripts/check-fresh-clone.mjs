@@ -14,7 +14,7 @@ async function run(command, args, options = {}) {
     cwd: options.cwd ?? root,
     env: {
       ...process.env,
-      npm_config_offline: "true",
+      npm_config_offline: options.allowDependencyFetch ? "false" : "true",
       npm_config_audit: "false",
       npm_config_fund: "false"
     },
@@ -50,8 +50,12 @@ try {
   await run("git", ["checkout", "--detach", commit], { cwd: clone });
   await run(
     "npm",
-    ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"],
-    { cwd: clone }
+    ["ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+    // The separately packaged SDK adds an exact Git-pinned renderer dev
+    // dependency. npm does not cache private Git checkouts as an anonymous
+    // codeload response, and --offline prevents its normal Git fallback.
+    // Permit dependency fetching here only; all verification below is offline.
+    { cwd: clone, allowDependencyFetch: true }
   );
   await run("npm", ["run", "verify"], { cwd: clone });
   const cloneStatus = await run("git", ["status", "--porcelain=v1"], {
@@ -60,7 +64,9 @@ try {
   if (cloneStatus.length !== 0) {
     throw new Error(`fresh clone became dirty after verify:\n${cloneStatus}`);
   }
-  console.log(JSON.stringify({ result: "pass", commit, tree }));
+  console.log(JSON.stringify({ result: "pass", commit, tree,
+    dependencyBootstrap: "npm ci with fetching enabled and lifecycle scripts disabled",
+    verification: "offline npm run verify" }));
 } finally {
   await rm(scratch, { force: true, recursive: true });
 }
