@@ -36,16 +36,18 @@ digest, fails until it is re-sealed and the new outcome is classified.
 
 Every consumer should run these for every sealed graph it draws. The frontend
 SDK in [`ADR-GRAPHPAPER-FRONTEND-SDK.md`](ADR-GRAPHPAPER-FRONTEND-SDK.md)
-proposes to ship them as `validatePresentation` and the SDK contract tests; the
-rules stand on their own until then.
+ships static coverage as `validatePresentation` and static contract tests in
+the separately packaged, unreleased 0.1.0 core. Runtime-state, proposal, and
+browser rules below remain consumer expectations and proposed SDK work.
 
 **Complete node, edge, outcome, and terminal coverage**
 
 - Every node in the definition is named in the presentation; every named node
   exists in the definition.
 - Every model, human, agent, and callback node states its question.
-- Every sealed edge appears in exactly one drawn arrow; every outcome an
-  arrow group names is one the sealed arrow carries; the groups of one arrow
+- Every sealed `(edgeId, target)` contributes to its pair's drawn arrows;
+  fan-out may put one edge on several target pairs. Every outcome an
+  arrow group names is one the sealed arrow carries; the groups of one pair
   partition it exactly.
 - Every declared terminal is claimed by exactly one endpoint exit or quiet
   end; no sink claims a (node, outcome) the graph does not declare terminal.
@@ -104,8 +106,8 @@ rules stand on their own until then.
   consumer already has.
 - `validatePresentation` returns the exact list of problems, so a failing
   change names what to add.
-- The execution-state projection turns "truthful state" into a fixed mapping
-  the SDK tests once, instead of a derivation every consumer repeats.
+- Proposed runtime-mode work will turn the engine's execution-state
+  projection into a fixed, tested mapping; static SDK 0.1.0 does not render it.
 - Golden `DiagramModel` fixtures make a rendering change a reviewable diff.
 - Browser checks (hydrate, keyboard pick, deep link, narrow viewport, reduced
   motion, mismatched identity refusal) run only when rendering or interaction

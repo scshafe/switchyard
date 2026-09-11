@@ -314,6 +314,9 @@
             "edgeId": "triage-escalate",
             "coTargets": [
               "tier-1-timer"
+            ],
+            "outcomes": [
+              "escalate"
             ]
           }
         ]
@@ -333,6 +336,9 @@
             "edgeId": "triage-escalate",
             "coTargets": [
               "review-tier-1"
+            ],
+            "outcomes": [
+              "escalate"
             ]
           }
         ]
@@ -599,6 +605,9 @@
             "edgeId": "fan-out",
             "coTargets": [
               "branch-b"
+            ],
+            "outcomes": [
+              "ready"
             ]
           }
         ]
@@ -618,6 +627,9 @@
             "edgeId": "fan-out",
             "coTargets": [
               "branch-a"
+            ],
+            "outcomes": [
+              "ready"
             ]
           }
         ]

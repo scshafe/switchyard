@@ -31,6 +31,8 @@ export interface GraphDisplayArrow {
     readonly fanOut: readonly {
         readonly edgeId: string;
         readonly coTargets: readonly string[];
+        /** Outcomes belonging to this edge, before merging; absent in older v1 projections. */
+        readonly outcomes?: readonly string[];
     }[];
 }
 export interface GraphDisplayJoin {

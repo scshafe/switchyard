@@ -1,11 +1,16 @@
 # ADR: a standard graphpaper frontend SDK for mission-pipeline graphs
 
-**Status: SDK proposed; engine extraction complete (2026-09-10).** The SDK
-package does not exist. All engine exports it relies on are implemented in
+**Status: static SDK core implemented; engine extraction complete (2026-09-10).**
+The separately packaged SDK lives at
+[`packages/mission-pipeline-graphpaper`](../packages/mission-pipeline-graphpaper/README.md),
+version 0.1.0 unreleased, outside the engine payload. All engine exports it relies on are implemented in
 unreleased 1.1.0: `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
 `projectGoalClosures`, and `graphDefinitionDiff`; see
 [`REVIEW-INTERFACE-FRICTION.md`](REVIEW-INTERFACE-FRICTION.md). The SDK and
 consumer interfaces below remain proposals unless explicitly marked otherwise.
+Static building, presentation validation, static legend/render options, and
+historical model metadata exist today. Server/browser adapters, run overlays,
+metrics, proposal rendering, details, CSS, and Inbox adoption remain proposed.
 
 ## Context
 
@@ -45,7 +50,7 @@ reduced-motion fallbacks).
 ## Decision
 
 Introduce a framework-independent SDK package between the engine and
-graphpaper. The engine now provides the pure projections the proposed SDK
+graphpaper. The engine now provides the pure projections the SDK
 would consume.
 
 ```
@@ -58,9 +63,10 @@ mission-pipeline (engine, dependency-free)
           │
           ▼
 mission-pipeline-graphpaper (SDK, peer-depends on both; no DOM in core)
-  core:    buildPipelineDiagram, validatePresentation, buildProposalDiagram, legends
-  server:  renderPipelineFigure (SSR with an injected ELK), viewerAssets
-  browser: mountPipelineViewer (hydrate, select, deep link, details seam)
+  core:    buildPipelineDiagram, validatePresentation, static legend/options [implemented, 0.1.0]
+           buildProposalDiagram, overlays and metrics [proposed]
+  server:  renderPipelineFigure (SSR with an injected ELK), viewerAssets [proposed]
+  browser: mountPipelineViewer (hydrate, select, deep link, details seam) [proposed]
           │
           ▼
 graphpaper (unchanged: layout, SVG, popovers, selection, pan/zoom, a11y)
@@ -110,7 +116,7 @@ interface GraphDisplayProjection {
     readonly from: string; readonly to: string;
     readonly outcomes: readonly string[]; readonly edgeIds: readonly string[];
     readonly conditional: boolean;                           // any contributing edge has a where arm
-    readonly fanOut: readonly { readonly edgeId: string; readonly coTargets: readonly string[] }[];
+    readonly fanOut: readonly { readonly edgeId: string; readonly coTargets: readonly string[]; readonly outcomes?: readonly string[] }[];
   }[];
   readonly terminals: readonly TerminalOutcome[];
   readonly joins: readonly { readonly nodeId: string; readonly require: JoinRequirement; readonly inbound: readonly string[] }[];
@@ -128,7 +134,9 @@ detached and can itself round-trip through JSON.
 Nodes and terminals retain authored order; arrows are merged by `(from, to)`
 in first-seen edge/target order, with distinct outcomes and contributing edge
 IDs. `conditional` is true if any contributing edge has a `where` arm.
-`fanOut` lists each contributing multi-target edge and its other targets;
+`fanOut` lists each contributing multi-target edge, its other targets, and
+its own predicate outcomes before merging. `outcomes` is an additive optional
+v1 key: current projections emit it, older v1 projections may omit it;
 separate edges are not treated as one fan-out. In an acyclic graph, `depth`
 is the longest path from the entry. If any cycle exists, every node uses its
 shortest breadth-first distance from the entry instead.
@@ -170,8 +178,16 @@ so a structurally valid sealed proposal can be inspected before it is runnable.
 
 ### From the consumer
 
+The presentation subset below is implemented in SDK 0.1.0. Its full exported
+type also includes optional consumer model-name/binding-digest pairs, unit
+noun, diagram ID/description/publication, and endpoint wording/metadata;
+see [`types.ts`](../packages/mission-pipeline-graphpaper/src/types.ts).
+Goal labels require a validated manifest and original sealed definition;
+membership is checked but goal scopes are not rendered. The remaining
+overlay, metrics, and details contracts in this block are proposed.
+
 ```ts
-interface PipelinePresentation {                            // proposed
+interface PipelinePresentation {                            // implemented static subset, 0.1.0
   readonly schemaVersion: "mission-pipeline-presentation.v1";
   readonly title: string; readonly subtitle?: string;
   readonly nodes: Readonly<Record<string, { name: string; summary?: string; question?: string; rows?: readonly { label: string; value: string }[] }>>;
@@ -217,14 +233,45 @@ interface NodeDetails {                                     // proposed; returne
 }
 ```
 
-The model the SDK emits carries `metadata.pipeline`:
+The static model carries `metadata.pipeline` with mode `static`, the exact
+graph reference, a canonical presentation digest, and structured
+`unclaimedTerminals`. The expanded metadata contract below remains proposed:
 
 ```ts
 { schemaVersion: "mission-pipeline-diagram.v1", graph: GraphDefinitionRef,
   mode: "static" | "run" | "metrics" | "proposal", unitId?: string, presentationDigest: string }
 ```
 
-## Public API (proposed names)
+## Public API today (unreleased SDK 0.1.0)
+
+```ts
+buildPipelineDiagram(input: {
+  projection: GraphDisplayProjection; presentation: PipelinePresentation;
+  definition?: GraphDefinition; goalManifest?: GoalManifest; historical?: boolean;
+}): DiagramModel;
+validatePresentation(projection: GraphDisplayProjection, presentation: PipelinePresentation,
+  options?: { definition?: GraphDefinition; goalManifest?: GoalManifest }): readonly string[];
+pipelineLegend(mode?: "static"): readonly DiagramLegendEntry[];
+PIPELINE_RENDER_OPTIONS: DiagramRenderOptions;
+```
+
+The core runs on the engine's supported Node versions, without DOM, fetch,
+timers, providers, stores, or a runtime graphpaper import. It accepts copied
+JSON projections after descriptor-safe shape/coverage checks; a carried graph
+digest does not authenticate that projection's payload. Optional `definition`
+recompiles the sealed source and demands exact projection equality. Optional
+`goalManifest` requires `definition` and uses the engine's full manifest check.
+Malformed input throws; coverage diagnostics are frozen strings. Building
+refuses coverage errors except unclaimed terminals, which are drawn explicitly.
+Outputs are detached, deeply frozen, prototype-free records.
+
+The renderer is `scshafe/graphpaper`, pinned for development at commit
+`89240f15c171a26009430ad7eb45eb85ac2567aa` (0.5.0), not the unrelated registry
+package named `graphpaper`. The SDK's renderer peer is optional to avoid
+auto-installing that unrelated package; consumers install the intended source
+explicitly. Both packages have separate exact-payload manifests and gates.
+
+## Extended public API (proposed; not shipped)
 
 ```ts
 // mission-pipeline-graphpaper  (core: no DOM, no fetch, no timers)
@@ -295,20 +342,25 @@ derivation, and every word in the presentation.
 
 ## Rendering rules
 
-**Static graph.** Every node from the projection, typed `code`, `model`,
+**Static graph — implemented.** Every node from the projection, typed `code`, `model`,
 `human`, `agent`, or `callback`; title from the presentation with the depth
-beside it; rows for outcomes (or `marks` when the node marks), model binding
-id when present, ref. One arrow per (from, to) pair labelled `always`, the
+beside it (one-based engine depth, not layout layers); rows for outcomes (or
+`marks` when the node marks), model binding ID or an exact-binding consumer
+name when present, ref. One arrow per (from, to) pair labelled `always`, the
 outcomes, `otherwise`, or a count, with the full list in the popover; the
 consumer's arrow groups split a pair into several labelled arrows, and the SDK
-throws when a group names an outcome the sealed arrow does not carry. Fan-out
+throws unless the groups partition the sealed arrow's outcomes exactly once.
+For an ungrouped single successor and at most three declared outcomes, the
+builder preserves Inbox's one-arrow-per-outcome convention. Fan-out
 is stated in the arrow description ("the same unit also goes to …"). Joins
 render a badge (`join · all` or `join · 2 of 3`) and their inbound arrows wear
 `edge-kind-join`. Every declared terminal becomes a dashed exit to a presented
 sink; an unpresented terminal is drawn on its own and listed in
-`metadata.pipeline.unclaimedTerminals` so it can never disappear.
+`metadata.pipeline.unclaimedTerminals` so it can never disappear. Older
+projections without per-edge fan-out outcomes get edge-only wording, not
+guessed outcome provenance. Conditional arrows always state their condition.
 
-**Run overlay.** Node status from `UnitPathProjection` only: `settled`,
+**Run overlay — proposed.** Node status from `UnitPathProjection` only: `settled`,
 `pending`, `failed`, `dead`, and `idle` for a node the projection does not
 list; subtitle `settled · <outcome>`. An arrow is `flow` when the projection
 counts its edge id as taken, which the engine records at settlement, so the
@@ -317,25 +369,31 @@ state, or the terminal's source settled that outcome. `awaiting_person` and
 `decided` come from the overlay; the SDK never infers them from a human node's
 existence.
 
-**Metrics.** Counts appear as rows and badges, scoped to the model's graph
+**Metrics — proposed.** Counts appear as rows and badges, scoped to the model's graph
 version. A node with `available: false` shows "unavailable: <reason>"; a node
 with `allTime === 0` shows "never observed since <firstAdmittedAt>" and its
 arrows take the `unobserved` flavor. Zero and unavailable are never the same
 word. Family-wide history is not shown on a version-scoped picture.
 
-**Proposal.** `buildProposalDiagram` draws the union of both projections, one
+**Proposal — proposed.** `buildProposalDiagram` draws the union of both projections, one
 edge per declared edge, every element marked `added`, `removed`, `changed`, or
 `unchanged` from the diff. A candidate-only node takes its role from the
 candidate projection's kind, so a proposed model node is never drawn as code.
 Removed nodes take their words from the current presentation, added ones from
 the candidate presentation.
 
-**Historical.** A model whose graph is not the currently published version is
+**Historical metadata — implemented; details provider proposed.** A model the
+consumer explicitly marks `historical: true` is
 marked with graphpaper's lifecycle badge and watermark (`historical`), and the
 consumer's details provider is expected to answer from a frozen snapshot or
 return "unavailable", never from the current catalog.
 
 ## Identity rules
+
+Exact static metadata and optional sealed-source verification exist today.
+The following overlay, metrics, browser-details, and deep-link rules remain
+requirements for their proposed adapters; current static input rejects all
+overlay and metrics fields.
 
 - Every model carries the exact graph id, version, and digest in
   `metadata.pipeline.graph`.
@@ -351,7 +409,7 @@ return "unavailable", never from the current catalog.
 - A unit's picture is drawn on the unit's pinned graph, never on the graph a
   URL parameter names. That resolution is the consumer's, as Inbox does it.
 
-## Selection, details, and deep links
+## Selection, details, and deep links (proposed SDK wiring)
 
 Selection is graphpaper's: click, Enter, or Space picks one node; Escape or a
 background click clears; re-picking is a no-op. The SDK mirrors the pick into
@@ -361,7 +419,7 @@ figure is replaced on every hydrate), built with DOM calls, never markup
 strings, and rendered from `NodeDetails` fields only. Consumers may replace the
 panel entirely by passing `details` and handling `onSelect` themselves.
 
-## Accessibility, responsiveness, large graphs
+## Accessibility, responsiveness, large graphs (proposed SDK wiring)
 
 - Keyboard: graphpaper's `tabindex="0"` on nodes and edges, Enter and Space to
   pick, Escape to clear; the SDK adds a visible focus ring for the selected
@@ -394,6 +452,10 @@ panel entirely by passing `details` and handling `onSelect` themselves.
 
 ## Extension points
 
+Only presentation rows/groups/notes and legend data exist in the static core.
+Renderer pass-through, classification, details, and deep-link hooks below are
+proposed adapter extension points.
+
 - `presentation.arrows` groups and notes; `presentation.nodes[*].rows`.
 - `nodeRenderers` pass-through to graphpaper for custom node markup.
 - A `classify` hook `(node) => { type?: string; visualGroup?: string }` for
@@ -411,13 +473,15 @@ panel entirely by passing `details` and handling `onSelect` themselves.
   fixtures for the support-triage example and for Inbox's frozen graph8
   snapshot must be checked in and compared byte for byte, so a rendering
   change is a visible diff.
-- CSS class tokens the SDK adds (`node-type-endpoint`, `node-type-terminal`,
+- Future CSS class tokens (`node-type-endpoint`, `node-type-terminal`,
   `component-status-settled|pending|failed|dead|reached|idle|added|removed|changed`,
   `edge-kind-outcome|exit|join`, `edge-flavor-unobserved|removed|changed`) are a
   public contract that must ship in `pipeline.css` and be listed in the SDK's
-  README.
-- Engine changes that alter `GraphDisplayProjection` or `UnitPathProjection`
-  bump their `schemaVersion`; the SDK supports one major of each at a time.
+  README. Static node/edge types exist today through graphpaper; no SDK CSS
+  asset or runtime-status styling ships in 0.1.0.
+- Breaking engine projection changes bump `schemaVersion`. Additive optional
+  keys may remain v1 with an explicit compatibility policy: the SDK currently
+  accepts `fanOut.outcomes` either present or absent and rejects unknown keys.
 
 ## Test strategy
 
@@ -430,13 +494,23 @@ hostile-input cases. The example's existing presentation coverage, Mermaid
 diagram, and goal-manifest seals remain checked against the same unchanged
 graph definitions.
 
-The following SDK checks remain proposed with the SDK implementation.
+Static SDK checks run today under
+[`packages/mission-pipeline-graphpaper/test`](../packages/mission-pipeline-graphpaper/test/diagram.test.mjs)
+through an offline installed-tarball consumer. They cover the independent
+Inbox graph8 golden (only `metadata.pipeline` excluded), a support-triage
+static golden, shape/coverage, hostile inputs, deterministic frozen records,
+source/goal identity checks, and fallback sinks. The gate also checks the
+exact SDK payload, manifest, import boundaries, strict TypeScript consumption,
+and real graphpaper built-in layout/SVG compatibility.
+
+The remaining modes and browser checks below remain proposed.
 
 Contract tests (Node, no browser):
 
-- Coverage: every projection node is drawn with its kind; every sealed edge
-  appears in exactly one arrow; every declared outcome is on exactly one arrow
-  label or one exit; every terminal lands on exactly one sink; the union of
+- Coverage (static implemented): every projection node is drawn with its kind;
+  every `(edgeId, target)` contributes to its pair's arrows (fan-out is not a
+  single-arrow invariant); outcomes partition within each merged pair, not
+  globally across targets; every terminal lands on exactly one sink; the union of
   arrow groups equals the sealed arrow; unpresented terminals are drawn and
   listed.
 - Roles: candidate-only nodes take the candidate kind; removed nodes keep the
@@ -465,12 +539,13 @@ deployed witness remains the consumer's release gate, as Inbox's plan states.
    `projectGoalClosures`, and `graphDefinitionDiff`, with golden tests over
    the fixture graphs and the support-triage example. Additive exports; no
    store migration or graph-definition change.
-2. **SDK core**: port `buildPipelineDiagram` from Inbox's `pipeline-diagram.ts`
+2. **SDK core — implemented in unreleased 0.1.0**: port `buildPipelineDiagram` from Inbox's `pipeline-diagram.ts`
    onto the projection, keeping its arrow merging, marking detection, partition
    guard, and unclaimed-terminal rules; add `validatePresentation` (the
    example's `presentationCoverage` is the seed). Prove behaviour preservation
    with a golden test: the SDK's model for Inbox's frozen graph8 snapshot
-   equals Inbox's current model modulo the new metadata block.
+   equals Inbox's current model modulo the new metadata block. Separate package
+   at `packages/mission-pipeline-graphpaper`, not part of the engine payload.
 3. **Server and browser adapters**: `renderPipelineFigure`, `viewerAssets`,
    `mountPipelineViewer` with the panel shell and deep links, ported from
    Inbox's figure, hydration script, and panel module.
@@ -480,7 +555,7 @@ deployed witness remains the consumer's release gate, as Inbox's plan states.
    test holds.
 5. **Proposal and metrics modes**: `buildProposalDiagram` on the promoted
    diff; `VersionMetrics` from Inbox's version-scoped projection.
-6. **Second consumer**: draw the support-triage example graph from this
+6. **Second consumer — static fixture witness implemented with step 2**: draw the support-triage example graph from this
    repository's fixtures as the SDK's own smoke, proving no Inbox assumption
    leaked into the package.
 
@@ -502,11 +577,13 @@ Steps 1 and 2 can land without any change to a running consumer.
   changing the core, and should be added only when a consumer using React
   exists.
 
-## Open questions to settle before SDK implementation
+## Decisions settled for static SDK implementation
 
-- Package location: a separate repository following graphpaper's packaging is
-  recommended, because this repository's release gate pins an exact payload of
-  `src`, `lib`, and `schemas` only.
-- Whether the SDK should display the engine's structural depth or ELK's layer
-  assignment; the projection carries longest-path depth for acyclic graphs
-  and breadth-first depth for cyclic graphs, stable across renderers.
+- Package location: the user selected a separate package in this repository.
+  Root `npm pack` still excludes `packages/`; each package has its own exact
+  payload manifest, and the root build/check gates verify both.
+- Display engine structural depth plus one, retaining Inbox's one-based rank
+  convention. Longest-path depth for acyclic graphs and breadth-first depth
+  for cyclic graphs remain stable across renderers.
+- Keep runtime modes and adapters out of the static extraction. P8 receipt
+  policy and P7 join-envelope work remain deferred independently of this SDK.

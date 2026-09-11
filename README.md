@@ -15,6 +15,12 @@ The package imports Node.js built-ins and its own files only. It never imports
 database clients, provider SDKs, credential loaders, or host frameworks.
 Consumers implement the exported store and node-kind ports.
 
+The repository also contains the separately packaged, unreleased
+[`mission-pipeline-graphpaper` static SDK](packages/mission-pipeline-graphpaper/README.md).
+It builds graphpaper diagram data from engine projections and consumer
+presentation. It is excluded from this engine's npm payload; graphpaper is
+only a root development dependency, not an engine runtime dependency.
+
 Supported runtimes:
 
 - Node.js `>=22.22.0 <23`
@@ -180,12 +186,15 @@ npm run check
 The gate builds from a clean output directory, runs the v1-deletion guard and
 the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
-JavaScript plus TypeScript import smokes.
+JavaScript plus TypeScript import smokes. It also builds the separately
+packaged static SDK, checks its independent payload/manifest, and runs its
+golden, hostile-input, packed-install, and graphpaper layout/SVG checks.
 
 A payload change ships with a regenerated release manifest. Run
 `npm run build && npm run release:manifest && npm run check` in that order:
 the manifest script packs without rebuilding and writes
-`release/mission-pipeline-<version>.payload.sha256`, which the gate pins.
+`release/mission-pipeline-<version>.payload.sha256` and
+`release/mission-pipeline-graphpaper-<version>.payload.sha256`, which the gates pin.
 
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and

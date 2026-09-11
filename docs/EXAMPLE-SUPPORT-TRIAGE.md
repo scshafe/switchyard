@@ -153,7 +153,9 @@ assert.deepEqual({ ...display.graph }, { ...SUPPORT_TRIAGE_GOAL_MANIFEST.graph }
 same package instance; a transported sealed definition must be compiled again.
 Its result carries structural depth, merged arrows, marking nodes, fan-outs,
 joins, and terminals. The names and diagram above remain consumer-owned
-presentation; the graphpaper SDK in the ADR is still proposed. Golden tests
+presentation. The [separate static graphpaper SDK](../packages/mission-pipeline-graphpaper/README.md)
+now builds this example's frozen `DiagramModel` in unreleased 0.1.0; browser
+adapters and runtime modes in the ADR remain proposed. Golden tests
 also compare `graphDefinitionDiff` for the focused and overloaded graphs,
 including both exact graph digests.
 

@@ -60,8 +60,10 @@ recommended pattern, and what is only proposed.
   framework-independent viewer package between this engine and graphpaper,
   with ownership boundaries, contracts, a consumer integration sketch, and an
   extraction plan. Engine extraction is complete in unreleased 1.1.0,
-  including `projectGraphDisplay` and `graphDefinitionDiff`; the SDK remains
-  proposed.
+  including `projectGraphDisplay` and `graphDefinitionDiff`. The
+  [static SDK core](../packages/mission-pipeline-graphpaper/README.md) is
+  implemented as a separate in-repository package, version 0.1.0 unreleased;
+  server/browser adapters and runtime modes remain proposed.
 - [Workflow: a graph change includes its picture](WORKFLOW-GRAPH-CHANGES.md)
   states the expectation that presentation, examples, and verification land
   with every definition change, and the checks that prove it.

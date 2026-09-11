@@ -48,6 +48,8 @@ export interface GraphDisplayArrow {
   readonly fanOut: readonly {
     readonly edgeId: string;
     readonly coTargets: readonly string[];
+    /** Outcomes belonging to this edge, before merging; absent in older v1 projections. */
+    readonly outcomes?: readonly string[];
   }[];
 }
 
@@ -162,7 +164,7 @@ export function projectGraphDisplay(compiled: CompiledGraph): GraphDisplayProjec
     outcomes: string[];
     edgeIds: string[];
     conditional: boolean;
-    fanOut: { edgeId: string; coTargets: string[] }[];
+    fanOut: { edgeId: string; coTargets: string[]; outcomes: string[] }[];
   }
   const arrows = new Map<string, Arrow>();
   for (const edge of compiled.edges) {
@@ -179,7 +181,11 @@ export function projectGraphDisplay(compiled: CompiledGraph): GraphDisplayProjec
       arrow.edgeIds.push(edge.edgeId);
       arrow.conditional ||= !isUnconditionalOutcomePredicate(edge.when);
       if (edge.to.length > 1) {
-        arrow.fanOut.push({ edgeId: edge.edgeId, coTargets: edge.to.filter((target) => target !== to) });
+        arrow.fanOut.push({
+          edgeId: edge.edgeId,
+          coTargets: edge.to.filter((target) => target !== to),
+          outcomes: [...predicateOutcomes(edge.when)]
+        });
       }
     }
   }

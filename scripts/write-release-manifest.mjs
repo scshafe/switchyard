@@ -1,4 +1,4 @@
-// Write release/mission-pipeline-<version>.payload.sha256 from a fresh
+// Write release/<package-name>-<version>.payload.sha256 for the engine and SDK from fresh
 // `npm pack`: one line per packed entry, `<sha256>  <path>`, in code-unit
 // path order. The digests are taken from the packed bytes exactly as
 // check-release-artifact.mjs reads them back, so the manifest and the check
@@ -39,14 +39,18 @@ async function run(command, args, options = {}) {
   return stdout;
 }
 
-try {
-  const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+async function writeManifest(packageRoot) {
+  const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
+  const name = packageJson.name;
+  if (name !== "mission-pipeline" && name !== "mission-pipeline-graphpaper") {
+    throw new Error(`unexpected release package name: ${String(name)}`);
+  }
   const version = packageJson.version;
   if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
     throw new Error(`package.json version must be a release version (got ${String(version)})`);
   }
   const report = JSON.parse(
-    await run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", scratch])
+    await run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", scratch], { cwd: packageRoot })
   );
   if (report.length !== 1 || typeof report[0].filename !== "string") {
     throw new Error("npm pack did not produce exactly one artifact");
@@ -74,9 +78,14 @@ try {
     const content = await run("tar", ["-xOzf", tarball, `package/${path}`]);
     lines.push(`${createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex")}  ${path}`);
   }
-  const manifestPath = resolve(root, "release", `mission-pipeline-${version}.payload.sha256`);
+  const manifestPath = resolve(root, "release", `${name}-${version}.payload.sha256`);
   await writeFile(manifestPath, `${lines.join("\n")}\n`, "utf8");
-  console.log(JSON.stringify({ result: "written", manifest: `release/mission-pipeline-${version}.payload.sha256`, fileCount: entries.length }));
+  console.log(JSON.stringify({ result: "written", manifest: `release/${name}-${version}.payload.sha256`, fileCount: entries.length }));
+}
+
+try {
+  await writeManifest(root);
+  await writeManifest(resolve(root, "packages/mission-pipeline-graphpaper"));
 } finally {
   await rm(scratch, { force: true, recursive: true });
 }

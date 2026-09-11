@@ -581,7 +581,17 @@ graphs and the support-triage example. The graph definitions, example
 presentation, Mermaid diagram, and goal-manifest seals remain unchanged and
 verified, and the package payload manifest is regenerated for the new modules.
 
-The viewer SDK remains proposed; its core is the next extraction step. P8 has
+The [separately packaged static SDK core](../packages/mission-pipeline-graphpaper/README.md)
+is implemented in unreleased 0.1.0 under `packages/mission-pipeline-graphpaper`,
+outside the engine payload. Extraction step 2 adds `buildPipelineDiagram`,
+`validatePresentation`, static legend/render options, exact graph/presentation
+metadata, and explicit unclaimed-terminal fallbacks. Golden models cover the
+support-triage example and Inbox's independently captured graph8 model (only
+the new metadata block is excluded). Engine fan-outs now optionally carry
+per-edge outcomes to preserve their wording without guessing. Graph
+definitions and goal seals did not change. Server/browser adapters are the
+next extraction slice; run overlays, metrics, proposals, details, and live
+consumer adoption still do not exist in the SDK. P8 has
 been assessed and stays proposed: two-consumer agreement is not established,
 and the sketch leaves invocation evidence, receipt retention, and agent
 uncertainty unresolved. Its assessment above records the evidence and the

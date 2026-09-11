@@ -42,22 +42,24 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json && tsc -p packages/mission-pipeline-graphpaper/tsconfig.json",
     "clean": "node scripts/clean.mjs",
     "test": "node --test test/*.test.mjs",
     "test:v1-deletion": "node scripts/check-v1-deletion.mjs",
     "test:payload": "node scripts/check-package-payload.mjs",
     "test:release-artifact": "node scripts/check-release-artifact.mjs",
     "test:install": "node scripts/check-pack-install.mjs",
+    "test:graphpaper-sdk": "node scripts/check-graphpaper-sdk.mjs",
     "release:manifest": "node scripts/write-release-manifest.mjs",
     "test:fresh-clone": "node scripts/check-fresh-clone.mjs",
-    "check": "npm run test:v1-deletion && npm run build && npm run test && npm run test:payload && npm run test:release-artifact && npm run test:install",
-    "verify": "npm run clean && npm run check && git diff --exit-code -- lib",
+    "check": "npm run test:v1-deletion && npm run build && npm run test && npm run test:payload && npm run test:release-artifact && npm run test:install && npm run test:graphpaper-sdk",
+    "verify": "npm run clean && npm run check && git diff --exit-code -- lib packages/mission-pipeline-graphpaper/lib",
     "prepack": "npm run build",
     "prepublishOnly": "npm run verify"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "graphpaper": "git+https://github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa",
     "typescript": "^5.8.3"
   }
 }

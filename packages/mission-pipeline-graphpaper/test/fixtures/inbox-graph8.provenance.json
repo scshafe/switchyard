@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "mission-pipeline-graphpaper-inbox-witness.v1",
+  "sourceRepository": "inbox-pipeline",
+  "sourceCommit": "cb082c21bb844fc82a351c3e8a3645a653219c47",
+  "sourceFiles": {
+    "src/node-graph-v2/pipeline-diagram.ts": "1760efed41bcff6373765e0440407533fdd58169358e0ddc1c3aadc9052bf412",
+    "src/node-graph-v2/email-graph-v8-console-history.ts": "ea5ce823fe5fcb675b2b1871d62e2119c6d703b69ca2ea1669c9d7319801ec16",
+    "src/node-graph-v2/email-graph-presentation.ts": "de01d18938bdbc5715f87419cb943005496992c703ebe18c3d7ae1c961e01206",
+    "src/node-graph-v2/graph-console.ts": "2eb5395ccdef11d4f7d15ae46908212129d5fe07c13488eb7c3b55df5806f5c8"
+  },
+  "capture": {
+    "builder": "buildPipelineDiagram({}, snapshot.definition, undefined, historicalEntry)",
+    "historicalEntry": "Frozen graph8 presentation with historical: true and promptView reading its retained snapshot; only model names enter the diagram.",
+    "compiledSourcesVerified": true,
+    "consumerModified": false,
+    "consumerBuilt": false,
+    "renderingInvoked": false,
+    "credentialsUsed": false,
+    "networkUsed": false
+  },
+  "graph": {
+    "graphId": "inbox.email-graph.v1",
+    "version": 8,
+    "digest": "c62ee5300cd62f4aedd09276b9aeec196e7d34732734423271b2055895c64a57"
+  },
+  "counts": {
+    "graphNodes": 21,
+    "graphEdges": 28,
+    "graphTerminals": 15,
+    "diagramNodes": 33,
+    "diagramEdges": 47
+  },
+  "files": {
+    "inbox-graph8.source.json": {
+      "sha256": "2fe8e53525ef0124f2817e63dde82c9f4ed8051c15b141de4b89b0f299a29792"
+    },
+    "inbox-graph8.static.golden.json": {
+      "sha256": "5b0a2554dbbfd89ace08b542d3560d86e751041fe63e63c92bca2032b1e1c184"
+    }
+  },
+  "comparison": "SDK static diagram equals the independent Inbox model after removing only SDK metadata.pipeline. The golden uses frozen model labels with SDK historical omitted; historical lifecycle rendering is tested separately.",
+  "exclusions": [
+    "prompt contents",
+    "implementation details",
+    "raw unit or email data",
+    "provider receipts",
+    "credentials"
+  ]
+}

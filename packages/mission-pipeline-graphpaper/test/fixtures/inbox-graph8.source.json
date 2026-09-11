@@ -1,0 +1,1566 @@
+{
+  "definition": {
+    "graphId": "inbox.email-graph.v1",
+    "version": 8,
+    "description": "Provider-neutral email filter, security scan, deterministic outcome router, exact model classification, proposal branches, and hierarchical action escalation — including provider-failure escalation — with human review.",
+    "entry": "filter",
+    "nodes": [
+      {
+        "nodeId": "filter",
+        "ref": {
+          "id": "normalize.email",
+          "version": 2
+        },
+        "kind": "code",
+        "input": "ingested-email.v2",
+        "outcomes": {
+          "version": 2,
+          "outcomes": [
+            "spam",
+            "clean"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "security",
+        "ref": {
+          "id": "security.scan",
+          "version": 2
+        },
+        "kind": "code",
+        "input": "normalized-email.v2",
+        "outcomes": {
+          "version": 2,
+          "outcomes": [
+            "ok",
+            "hostile"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "route",
+        "ref": {
+          "id": "route.deterministic",
+          "version": 2
+        },
+        "kind": "code",
+        "input": "secured-email.v2",
+        "outcomes": {
+          "version": 2,
+          "outcomes": [
+            "jobs",
+            "finance",
+            "travel",
+            "friends_family",
+            "newsletter",
+            "unknown"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "classification",
+        "ref": {
+          "id": "classify.model",
+          "version": 3
+        },
+        "kind": "model",
+        "input": "routed-email.v2",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "jobs",
+            "finance",
+            "travel",
+            "friends_family",
+            "newsletter",
+            "informational",
+            "unknown"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "classification.v3:882d423564830043c26cc2d6",
+          "version": 3,
+          "bindingDigest": "258b8022724ede6cb0e4fa4f0c1eecd03c49a640e7903fca6fdd6f711fe9dd60"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "notifications",
+        "ref": {
+          "id": "notifications.plan",
+          "version": 2
+        },
+        "kind": "code",
+        "input": "classified-email.v2",
+        "outcomes": {
+          "version": 2,
+          "outcomes": [
+            "planned"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "unsubscribe",
+        "ref": {
+          "id": "mail.unsubscribe",
+          "version": 2
+        },
+        "kind": "code",
+        "input": "classified-email.v2",
+        "outcomes": {
+          "version": 2,
+          "outcomes": [
+            "candidate",
+            "skipped"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "unsubscribe-review",
+        "ref": {
+          "id": "mail.unsubscribe.review",
+          "version": 2
+        },
+        "kind": "human",
+        "input": "unsubscribe-candidate.v1",
+        "outcomes": {
+          "version": 2,
+          "outcomes": [
+            "approved",
+            "rejected",
+            "needs_help"
+          ]
+        },
+        "principal": {
+          "id": "v2_console"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 86400000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "mailbox-writer",
+        "ref": {
+          "id": "mail.mailbox-write",
+          "version": 1
+        },
+        "kind": "code",
+        "input": "classified-email.v2",
+        "outcomes": {
+          "version": 1,
+          "outcomes": [
+            "requested",
+            "skipped"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "mention-gate",
+        "ref": {
+          "id": "email.mentions.gate",
+          "version": 1
+        },
+        "kind": "code",
+        "input": "classified-email.v2",
+        "outcomes": {
+          "version": 1,
+          "outcomes": [
+            "disabled",
+            "extract"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "mention-extraction",
+        "ref": {
+          "id": "email.mentions.model",
+          "version": 1
+        },
+        "kind": "model",
+        "input": "email-mention-extraction-context.v1",
+        "outcomes": {
+          "version": 1,
+          "outcomes": [
+            "extracted",
+            "fallback"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "email-mentions.v1:7eba02629e337782ad6548bd",
+          "version": 1,
+          "bindingDigest": "106f47c472d122d706b86e239e76fb7bc1bf7a87da86922bbdfc430e5b97c4db"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "jobtrack-proposal",
+        "ref": {
+          "id": "jobtrack.proposal",
+          "version": 3
+        },
+        "kind": "code",
+        "input": "email-mention-extraction-context.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "proposed",
+            "not_applicable"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 3,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-evidence",
+        "ref": {
+          "id": "decision.action.evidence-gate",
+          "version": 3
+        },
+        "kind": "code",
+        "input": "routed-email.v2",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "eligible",
+            "security_review",
+            "evidence_incomplete"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-recall",
+        "ref": {
+          "id": "decision.action.recall-sentinel",
+          "version": 5
+        },
+        "kind": "model",
+        "input": "action-decision-graph-state.v1",
+        "outcomes": {
+          "version": 5,
+          "outcomes": [
+            "candidate",
+            "low_confidence",
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "classification:0ff985d3f34fedc796dafa17",
+          "version": 1,
+          "bindingDigest": "07c508d0c7a2bdf02abe109537690b4b574b3cc3e3ac222a5c20812e0689708d"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 2,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-precision",
+        "ref": {
+          "id": "decision.action.precision-gatekeeper",
+          "version": 5
+        },
+        "kind": "model",
+        "input": "action-decision-graph-state.v1",
+        "outcomes": {
+          "version": 5,
+          "outcomes": [
+            "candidate",
+            "low_confidence",
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "classification:56c60fbc9bd412c7a92773b2",
+          "version": 1,
+          "bindingDigest": "536facd4417e361379a759f26866af98c0bd9735bf0ddaa62e4ab41550f36cea"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 2,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-compare",
+        "ref": {
+          "id": "decision.action.compare",
+          "version": 3
+        },
+        "kind": "code",
+        "input": "action-decision-graph-state.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "agree",
+            "disagree",
+            "invalid"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-arbiter",
+        "ref": {
+          "id": "decision.action.skeptical-arbiter",
+          "version": 5
+        },
+        "kind": "model",
+        "input": "action-decision-graph-state.v1",
+        "outcomes": {
+          "version": 5,
+          "outcomes": [
+            "candidate",
+            "low_confidence",
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "classification:c68729895d6c219b0d14e88d",
+          "version": 1,
+          "bindingDigest": "4036409062c3570fa9bd60d547218fb76f88d04e51ee786665079a6f3deb6ded"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-validate",
+        "ref": {
+          "id": "decision.action.validator",
+          "version": 3
+        },
+        "kind": "code",
+        "input": "action-decision-graph-state.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "valid",
+            "invalid"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-context-review",
+        "ref": {
+          "id": "decision.action.context-review",
+          "version": 3
+        },
+        "kind": "human",
+        "input": "action-decision-graph-state.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "principal": {
+          "id": "v2_console"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 86400000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-validation-review",
+        "ref": {
+          "id": "decision.action.validation-review",
+          "version": 3
+        },
+        "kind": "human",
+        "input": "action-decision-human-escalation.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "principal": {
+          "id": "v2_console"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 86400000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-context-reviewed",
+        "ref": {
+          "id": "decision.action.context-reviewed",
+          "version": 3
+        },
+        "kind": "code",
+        "input": "action-decision.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "recorded"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      },
+      {
+        "nodeId": "action-validation-reviewed",
+        "ref": {
+          "id": "decision.action.validation-reviewed",
+          "version": 3
+        },
+        "kind": "code",
+        "input": "action-decision.v1",
+        "outcomes": {
+          "version": 3,
+          "outcomes": [
+            "recorded"
+          ]
+        },
+        "principal": {
+          "id": "v2_worker"
+        },
+        "turn": {
+          "idempotency": "per (unitId, nodeId, attemptNumber)",
+          "leaseMs": 900000,
+          "maxAttempts": 1,
+          "retryTaxonomy": "retryable vs terminal, as v1 durable-stage"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edgeId": "filter-clean-security",
+        "from": "filter",
+        "when": {
+          "outcome": "clean"
+        },
+        "to": [
+          "security"
+        ]
+      },
+      {
+        "edgeId": "security-route",
+        "from": "security",
+        "when": {
+          "anyOf": [
+            "ok",
+            "hostile"
+          ]
+        },
+        "to": [
+          "route"
+        ]
+      },
+      {
+        "edgeId": "route-processing-fanout",
+        "from": "route",
+        "when": {
+          "anyOf": [
+            "jobs",
+            "finance",
+            "travel",
+            "friends_family",
+            "newsletter",
+            "unknown"
+          ]
+        },
+        "to": [
+          "classification",
+          "action-evidence"
+        ]
+      },
+      {
+        "edgeId": "classification-jobs-branches",
+        "from": "classification",
+        "when": {
+          "outcome": "jobs"
+        },
+        "to": [
+          "notifications",
+          "mention-gate"
+        ]
+      },
+      {
+        "edgeId": "classification-newsletter-branches",
+        "from": "classification",
+        "when": {
+          "outcome": "newsletter"
+        },
+        "to": [
+          "notifications",
+          "unsubscribe"
+        ]
+      },
+      {
+        "edgeId": "classification-mailbox-write-fanout",
+        "from": "classification",
+        "when": {
+          "anyOf": [
+            "jobs",
+            "finance",
+            "travel",
+            "friends_family",
+            "newsletter",
+            "informational",
+            "unknown"
+          ]
+        },
+        "to": [
+          "mailbox-writer"
+        ]
+      },
+      {
+        "edgeId": "classification-finance-notifications",
+        "from": "classification",
+        "when": {
+          "outcome": "finance"
+        },
+        "to": [
+          "notifications"
+        ]
+      },
+      {
+        "edgeId": "classification-travel-notifications",
+        "from": "classification",
+        "when": {
+          "outcome": "travel"
+        },
+        "to": [
+          "notifications"
+        ]
+      },
+      {
+        "edgeId": "classification-friends_family-notifications",
+        "from": "classification",
+        "when": {
+          "outcome": "friends_family"
+        },
+        "to": [
+          "notifications"
+        ]
+      },
+      {
+        "edgeId": "classification-informational-notifications",
+        "from": "classification",
+        "when": {
+          "outcome": "informational"
+        },
+        "to": [
+          "notifications"
+        ]
+      },
+      {
+        "edgeId": "classification-unknown-notifications",
+        "from": "classification",
+        "when": {
+          "outcome": "unknown"
+        },
+        "to": [
+          "notifications"
+        ]
+      },
+      {
+        "edgeId": "mention-gate-disabled-jobtrack",
+        "from": "mention-gate",
+        "when": {
+          "outcome": "disabled"
+        },
+        "to": [
+          "jobtrack-proposal"
+        ]
+      },
+      {
+        "edgeId": "mention-gate-extract-model",
+        "from": "mention-gate",
+        "when": {
+          "outcome": "extract"
+        },
+        "to": [
+          "mention-extraction"
+        ]
+      },
+      {
+        "edgeId": "mention-model-jobtrack",
+        "from": "mention-extraction",
+        "when": {
+          "anyOf": [
+            "extracted",
+            "fallback"
+          ]
+        },
+        "to": [
+          "jobtrack-proposal"
+        ]
+      },
+      {
+        "edgeId": "action-evidence-recall",
+        "from": "action-evidence",
+        "when": {
+          "outcome": "eligible"
+        },
+        "to": [
+          "action-recall"
+        ]
+      },
+      {
+        "edgeId": "action-evidence-context-review",
+        "from": "action-evidence",
+        "when": {
+          "anyOf": [
+            "security_review",
+            "evidence_incomplete"
+          ]
+        },
+        "to": [
+          "action-context-review"
+        ]
+      },
+      {
+        "edgeId": "action-recall-precision",
+        "from": "action-recall",
+        "when": {
+          "outcome": "candidate"
+        },
+        "to": [
+          "action-precision"
+        ]
+      },
+      {
+        "edgeId": "action-recall-arbiter",
+        "from": "action-recall",
+        "when": {
+          "anyOf": [
+            "low_confidence",
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ]
+        },
+        "to": [
+          "action-arbiter"
+        ]
+      },
+      {
+        "edgeId": "action-precision-compare",
+        "from": "action-precision",
+        "when": {
+          "outcome": "candidate"
+        },
+        "to": [
+          "action-compare"
+        ]
+      },
+      {
+        "edgeId": "action-precision-arbiter",
+        "from": "action-precision",
+        "when": {
+          "anyOf": [
+            "low_confidence",
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ]
+        },
+        "to": [
+          "action-arbiter"
+        ]
+      },
+      {
+        "edgeId": "action-compare-validate",
+        "from": "action-compare",
+        "when": {
+          "outcome": "agree"
+        },
+        "to": [
+          "action-validate"
+        ]
+      },
+      {
+        "edgeId": "action-compare-arbiter",
+        "from": "action-compare",
+        "when": {
+          "anyOf": [
+            "disagree",
+            "invalid"
+          ]
+        },
+        "to": [
+          "action-arbiter"
+        ]
+      },
+      {
+        "edgeId": "action-arbiter-validate",
+        "from": "action-arbiter",
+        "when": {
+          "outcome": "candidate"
+        },
+        "to": [
+          "action-validate"
+        ]
+      },
+      {
+        "edgeId": "action-arbiter-context-review",
+        "from": "action-arbiter",
+        "when": {
+          "anyOf": [
+            "low_confidence",
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ]
+        },
+        "to": [
+          "action-context-review"
+        ]
+      },
+      {
+        "edgeId": "action-validation-review",
+        "from": "action-validate",
+        "when": {
+          "outcome": "invalid"
+        },
+        "to": [
+          "action-validation-review"
+        ]
+      },
+      {
+        "edgeId": "unsubscribe-candidate-review",
+        "from": "unsubscribe",
+        "when": {
+          "outcome": "candidate"
+        },
+        "to": [
+          "unsubscribe-review"
+        ]
+      },
+      {
+        "edgeId": "action-context-review-approved",
+        "from": "action-context-review",
+        "when": {
+          "outcome": "approved"
+        },
+        "to": [
+          "action-context-reviewed"
+        ]
+      },
+      {
+        "edgeId": "action-validation-review-approved",
+        "from": "action-validation-review",
+        "when": {
+          "outcome": "approved"
+        },
+        "to": [
+          "action-validation-reviewed"
+        ]
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "filter",
+        "outcome": "spam"
+      },
+      {
+        "nodeId": "notifications",
+        "outcome": "planned"
+      },
+      {
+        "nodeId": "jobtrack-proposal",
+        "outcome": "proposed"
+      },
+      {
+        "nodeId": "jobtrack-proposal",
+        "outcome": "not_applicable"
+      },
+      {
+        "nodeId": "unsubscribe-review",
+        "outcome": "approved"
+      },
+      {
+        "nodeId": "unsubscribe-review",
+        "outcome": "rejected"
+      },
+      {
+        "nodeId": "unsubscribe-review",
+        "outcome": "needs_help"
+      },
+      {
+        "nodeId": "unsubscribe",
+        "outcome": "skipped"
+      },
+      {
+        "nodeId": "mailbox-writer",
+        "outcome": "requested"
+      },
+      {
+        "nodeId": "mailbox-writer",
+        "outcome": "skipped"
+      },
+      {
+        "nodeId": "action-validate",
+        "outcome": "valid"
+      },
+      {
+        "nodeId": "action-context-review",
+        "outcome": "rejected"
+      },
+      {
+        "nodeId": "action-validation-review",
+        "outcome": "rejected"
+      },
+      {
+        "nodeId": "action-context-reviewed",
+        "outcome": "recorded"
+      },
+      {
+        "nodeId": "action-validation-reviewed",
+        "outcome": "recorded"
+      }
+    ],
+    "graphDigest": "c62ee5300cd62f4aedd09276b9aeec196e7d34732734423271b2055895c64a57"
+  },
+  "presentation": {
+    "diagramTitle": "Email pipeline",
+    "subtitle": "Every email admitted from a mail account walks this graph top to bottom.",
+    "nodePresentation": {
+      "filter": {
+        "name": "Normalizer",
+        "role": "code",
+        "summary": "Mints the normalized email every later agent reads — sender name, address and domain; a 16k text projection of subject, body and quarantined attachment metadata; links; a bulk-label flag. Spam is the provider's own label, never a judgement made here.",
+        "rows": [
+          {
+            "label": "later agents read",
+            "value": "sender domain (router) · text ≤16k (security scan, models) · links (mentions, JobTrack) · bulk-label flag (newsletter fallback)"
+          }
+        ]
+      },
+      "security": {
+        "name": "Security scan",
+        "role": "code",
+        "summary": "Marks the risk: high when a severe pattern fires (that is the hostile mark, and it forces review), medium when the only flag is an external link, low when nothing fires. Both outcomes go to the Router."
+      },
+      "route": {
+        "name": "Router",
+        "role": "code",
+        "summary": "Keyword and domain patterns over the sender domain and the message text tag one lane, first match wins; unmatched bulk-labelled mail falls to newsletter, the rest to unknown. The lane never branches — it rides along as evidence for the classifier and the action models.",
+        "rows": [
+          {
+            "label": "how",
+            "value": "first rule that matches sender domain + message text; else the bulk label makes it newsletter; else unknown"
+          },
+          {
+            "label": "also marks",
+            "value": "confidence 0.82 rule · 0.72 bulk label · 0.2 no match; the reason it used; review-recommended — always true today, because the router's highest confidence (0.82) never clears the 0.9 bar"
+          }
+        ]
+      },
+      "classification": {
+        "name": "Classifier",
+        "role": "model",
+        "summary": "Local model: settles the mail's category itself — the router's lane is only prompt evidence — and sets the urgency, human-action flag, summary and confidence later agents read."
+      },
+      "notifications": {
+        "name": "Notification planner",
+        "role": "code",
+        "summary": "Runs on every classified email and always settles planned. The plan names a push topic only when the classifier said the mail needs a person's action or set urgency high or time_sensitive; otherwise it carries no target and no action, and nothing is written to the outbox."
+      },
+      "mention-gate": {
+        "name": "Mention gate",
+        "role": "code",
+        "summary": "Jobs mail only. Skips the local extractor whenever its own deterministic scan of the message and sender already found an exact reference, a posting URL, or company + role — and whenever INBOX_EMAIL_MODEL_MENTIONS is off, which is the default and is fixed at boot.",
+        "rows": [
+          {
+            "label": "gate",
+            "value": "INBOX_EMAIL_MODEL_MENTIONS · read once at engine start; default off"
+          },
+          {
+            "label": "skips the model when",
+            "value": "its own deterministic scan already has a reference code, a posting URL, or a role title with a company"
+          }
+        ]
+      },
+      "mention-extraction": {
+        "name": "Mention extractor",
+        "role": "model",
+        "summary": "Local model proposes mentions; deterministic source grounding admits only literal email text. One attempt, no retry — anything that does not come back usable falls back to the deterministic mentions."
+      },
+      "unsubscribe": {
+        "name": "Unsubscribe offer",
+        "role": "code",
+        "summary": "Newsletter mail filed under Promotions with an unsubscribe header and a sender outside the keep-list becomes a proposal for dedicated human review. No target is contacted and no request is emitted by this node.",
+        "rows": [
+          {
+            "label": "proposes when",
+            "value": "classifier newsletter · Gmail CATEGORY_PROMOTIONS · unsubscribe header · sender not kept"
+          },
+          {
+            "label": "unsupported methods",
+            "value": "mailto-only and malformed targets still reach review for needs-help, never a mail send"
+          }
+        ]
+      },
+      "unsubscribe-review": {
+        "name": "Unsubscribe review",
+        "role": "human",
+        "summary": "A person authorizes contact with the exact target and bounded preference-page projection to GPT-6 Astra, keeps the subscription, or records needs-help. The frontier reviewer cannot decide this node. Only approval emits an external request; it does not claim unsubscribe success."
+      },
+      "mailbox-writer": {
+        "name": "Mailbox writer",
+        "role": "code",
+        "summary": "Runs on every classified email and asks that the mailbox it arrived in be given the pipeline's own label for what the classifier decided — one Pipeline/<category> label, added, nothing removed and nothing archived. Only a mailbox the operator put on the write allowlist is ever asked for; every other mailbox is skipped with the rule named. The label is written here, never read out of the mail.",
+        "rows": [
+          {
+            "label": "asks when",
+            "value": "the mailbox is on the write allowlist (INBOX_MAILBOX_WRITE_ACCOUNTS, read once at engine start; absent means only owner@example.com, empty means no mailbox at all)"
+          },
+          {
+            "label": "leaves alone",
+            "value": "every mailbox not on the allowlist — account_not_enabled, the only rule it has today"
+          },
+          {
+            "label": "the label",
+            "value": "Pipeline/jobs · Pipeline/finance · Pipeline/travel · Pipeline/friends_family · Pipeline/newsletter · Pipeline/informational · Pipeline/unknown"
+          },
+          {
+            "label": "the act",
+            "value": "one Gmail modify call by the mailbox write relay, once per mailbox per message per operation; dry-run until the relay is armed"
+          }
+        ]
+      },
+      "jobtrack-proposal": {
+        "name": "JobTrack proposer",
+        "role": "code",
+        "summary": "Turns a jobs classification into a JobTrack proposal on the outbox, or settles not_applicable when the mail carries no application signal.",
+        "rows": [
+          {
+            "label": "signal",
+            "value": "application_status_signal | interview_signal | recruiter_communication | application_information_request | application_acknowledged | rejection_signal | offer_signal | unknown_job_mail"
+          }
+        ]
+      },
+      "action-evidence": {
+        "name": "Evidence gatherer",
+        "role": "code",
+        "summary": "Opens the action decision: pins the exact stored message revision and the content digests every later action turn re-checks, then hands the mail to a person whenever the security scan raised a flag — one link counts — and on to the models only when it raised none."
+      },
+      "action-recall": {
+        "name": "Recall analyst",
+        "role": "model",
+        "summary": "Local model, recall-first: does this email oblige a person to act? An answer at 0.70 confidence or better goes on to the Precision analyst; a less confident answer is still recorded and goes to the arbiter.",
+        "rows": [
+          {
+            "label": "records",
+            "value": "on an answer: its yes/no, confidence, category and urgency, for the comparer, arbiter and validator"
+          }
+        ]
+      },
+      "action-precision": {
+        "name": "Precision analyst",
+        "role": "model",
+        "summary": "The same local model as the recall analyst, prompted the opposite way: call an email actionable only when the supplied evidence shows a concrete obligation. It is shown recall's answer, not asked blind.",
+        "rows": [
+          {
+            "label": "records",
+            "value": "on an answer: its yes/no, confidence, category and urgency, for the comparer, arbiter and validator"
+          }
+        ]
+      },
+      "action-compare": {
+        "name": "Comparer",
+        "role": "code",
+        "summary": "Do the two analysts' yes/no answers match? Only that is compared — not confidence, category or urgency. Agreement goes to the Validator; a disagreement, or a record missing one of the two answers, goes to the arbiter."
+      },
+      "action-arbiter": {
+        "name": "Skeptical arbiter",
+        "role": "model",
+        "summary": "Reached when a specialist escalates or the two disagree. A bigger local model, skeptically prompted, answers the action question itself — the specialists' verdicts are evidence in its prompt, not votes it counts — and its answer becomes the decision if it clears 0.75 confidence, on a single attempt. Below that bar, or when the local provider returns nothing usable, a person decides."
+      },
+      "action-validate": {
+        "name": "Validator",
+        "role": "code",
+        "summary": "Picks the winning candidate — the arbiter's, else the less confident of the two agreeing specialists — re-checks security, model binding and the confidence floors, then mints the decision record: needs action, or no action."
+      },
+      "action-context-review": {
+        "name": "Context review",
+        "role": "human",
+        "summary": "A person decides mail the automatic ladder would not settle. Approving records 'needs action' on their own authority; rejecting ends the branch with no action decision.",
+        "rows": [
+          {
+            "label": "waits",
+            "value": "in the /human queue until a person answers - no expiry, no reminder"
+          }
+        ]
+      },
+      "action-validation-review": {
+        "name": "Validation review",
+        "role": "human",
+        "summary": "A person decides after the validator refused to certify a decision — what is queued is that escalation, not a decision. Approving records 'needs action' on their own authority; rejecting ends the branch.",
+        "rows": [
+          {
+            "label": "waits",
+            "value": "in the /human queue until a person answers - no expiry, no reminder"
+          }
+        ]
+      },
+      "action-context-reviewed": {
+        "name": "Context recorder",
+        "role": "code",
+        "summary": "Re-checks the approval a person gave against the sealed action-decision contract, then the journey ends. It stores no new record and sends nothing: the approval itself was written one step back, when Human context review settled."
+      },
+      "action-validation-reviewed": {
+        "name": "Validation recorder",
+        "role": "code",
+        "summary": "Re-checks the approval a person gave against the sealed action-decision contract, then the journey ends. It stores no new record and sends nothing: the approval itself was written one step back, when Human validation review settled."
+      }
+    },
+    "arrowPresentation": {
+      "security->route": [
+        {
+          "outcomes": [
+            "ok"
+          ],
+          "note": "risk low or medium — none of the four high-risk patterns matched. An http or https link anywhere in the subject or body makes it medium, and the Evidence gatherer treats anything above low as risky, so a medium email still leaves the action ladder there."
+        },
+        {
+          "outcomes": [
+            "hostile"
+          ],
+          "note": "risk high — injection phrasing, code or script text, a javascript:/data:/file: string, or a base64, private-key or eval marker matched, so requiresReview is set. Same path either way: the Router runs next and reads the flag, and the Evidence gatherer sends this email to human context review."
+        }
+      ],
+      "mention-gate->mention-extraction": [
+        {
+          "outcomes": [
+            "extract"
+          ],
+          "label": "run the extractor",
+          "note": "The boot flag INBOX_EMAIL_MODEL_MENTIONS is on and the deterministic scan found no exact reference, no posting URL and no company + role pair, so the local model is asked for the mentions."
+        }
+      ],
+      "mention-gate->jobtrack-proposal": [
+        {
+          "outcomes": [
+            "disabled"
+          ],
+          "label": "skip the extractor",
+          "note": "Either the boot flag INBOX_EMAIL_MODEL_MENTIONS is off — the default — or the deterministic scan already found an exact reference, a posting URL, or company + role. The proposer runs on the deterministic mentions alone; only this model lane is skipped, never the action ladder."
+        }
+      ],
+      "classification->mailbox-writer": [
+        {
+          "outcomes": [
+            "jobs",
+            "finance",
+            "travel",
+            "friends_family",
+            "newsletter",
+            "informational",
+            "unknown"
+          ],
+          "label": "every category",
+          "note": "Whatever the classifier settled, the Mailbox writer is offered the same email beside the Notification planner: the category IS the label it would ask for. Only a mailbox on the write allowlist becomes a request; everything else is skipped with the rule named."
+        }
+      ],
+      "classification->unsubscribe": [
+        {
+          "outcomes": [
+            "newsletter"
+          ],
+          "label": "newsletter",
+          "note": "The candidate stage runs beside notifications. Eligible header offers always wait for separate human permission."
+        }
+      ],
+      "unsubscribe->unsubscribe-review": [
+        {
+          "outcomes": [
+            "candidate"
+          ],
+          "note": "A header-derived candidate is not an authorization. Every candidate waits for a person."
+        }
+      ],
+      "action-evidence->action-recall": [
+        {
+          "outcomes": [
+            "eligible"
+          ],
+          "note": "The security scan raised no flag at all — one external link is enough to lose eligibility — and the stored body text came back matching its digest. Stricter than the scan's own ok mark, which only means not-high risk."
+        }
+      ],
+      "action-evidence->action-context-review": [
+        {
+          "outcomes": [
+            "security_review",
+            "evidence_incomplete"
+          ],
+          "note": "security_review: the mail scored above low risk, or the scan flagged it outright. evidence_incomplete: the email's content hydration is not complete, or the sanitized body does not match the digest the evidence pins."
+        }
+      ],
+      "action-recall->action-precision": [
+        {
+          "outcomes": [
+            "candidate"
+          ],
+          "label": "confident answer",
+          "note": "An answer of either kind — requires_action or no_action — at the model's own confidence of 0.70 or better. The Precision analyst then judges the same email with the recall answer in front of it, and the Comparer checks the two decisions match."
+        }
+      ],
+      "action-recall->action-arbiter": [
+        {
+          "outcomes": [
+            "low_confidence"
+          ],
+          "label": "not confident",
+          "note": "The analyst answered, but under the 0.70 bar. The answer is still recorded and travels with the email: the arbiter re-decides with it in view."
+        },
+        {
+          "outcomes": [
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ],
+          "label": "no usable answer",
+          "note": "The model's answer could not be read, was rejected by host policy (wrong model, bad finish, over the token ceiling, contract-breaking JSON), the journaled call never came back with a determinate result, or the answer was accepted but the graph-state record built from it failed the sealed contract. No answer is recorded, so the next step decides with no prior candidate in view."
+        }
+      ],
+      "action-precision->action-compare": [
+        {
+          "outcomes": [
+            "candidate"
+          ],
+          "label": "confident answer",
+          "note": "A second answer at 0.70 confidence or better. The Comparer checks only whether the two analysts' yes/no answers match."
+        }
+      ],
+      "action-precision->action-arbiter": [
+        {
+          "outcomes": [
+            "low_confidence"
+          ],
+          "label": "not confident",
+          "note": "The analyst answered, but under the 0.70 bar. The answer is still recorded and travels with the email: the arbiter re-decides with it in view."
+        },
+        {
+          "outcomes": [
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ],
+          "label": "no usable answer",
+          "note": "The model's answer could not be read, was rejected by host policy (wrong model, bad finish, over the token ceiling, contract-breaking JSON), the journaled call never came back with a determinate result, or the answer was accepted but the graph-state record built from it failed the sealed contract. No answer is recorded, so the next step decides with no prior candidate in view. The Comparer never runs."
+        }
+      ],
+      "action-arbiter->action-validate": [
+        {
+          "outcomes": [
+            "candidate"
+          ],
+          "label": "confident answer",
+          "note": "The arbiter's own answer, at 0.75 confidence or better, becomes the decision; the Validator re-checks it before the record is minted."
+        }
+      ],
+      "action-arbiter->action-context-review": [
+        {
+          "outcomes": [
+            "low_confidence"
+          ],
+          "label": "not confident",
+          "note": "The arbiter answered, but under the 0.75 bar. Its answer is still recorded and is shown to the reviewer."
+        },
+        {
+          "outcomes": [
+            "invalid",
+            "action_provider_policy_violation",
+            "action_provider_outcome_indeterminate",
+            "action_output_contract_rejected"
+          ],
+          "label": "no usable answer",
+          "note": "The model's answer could not be read, was rejected by host policy (wrong model, bad finish, over the token ceiling, contract-breaking JSON), the journaled call never came back with a determinate result, or the answer was accepted but the graph-state record built from it failed the sealed contract. No answer is recorded, so the next step decides with no prior candidate in view."
+        }
+      ]
+    },
+    "endpoints": [
+      {
+        "id": "jobtrack",
+        "name": "JobTrack",
+        "system": "applicant tracker",
+        "summary": "A proposal about an application email — acknowledgement, invite, offer — becomes JobTrack facts, correlated to the application and reviewed by the applicant's agent.",
+        "fromNodeIds": [
+          "jobtrack-proposal"
+        ],
+        "via": "outbox → NOTIFY inbox_jobtrack_outbox → listening relay on the JobTrack host → jobtrack CLI (import-facts, correlate, record-correlation)",
+        "outboxEventTypes": [
+          "inbox.email-graph.jobtrack-proposal.v1"
+        ],
+        "kind": "extension · relay to the tracker",
+        "handoffNoun": "proposals",
+        "relayed": true
+      },
+      {
+        "id": "notifications",
+        "name": "Push notifications",
+        "system": "ntfy · not wired",
+        "summary": "Mail that needs action or is urgent commits a plan to the outbox in the same transaction as the node settles. Nothing in this pipeline reads it: unlike JobTrack there is no NOTIFY trigger and no relay, so the plan waits in the outbox and this endpoint can only ever read 'planned'.",
+        "fromNodeIds": [
+          "notifications"
+        ],
+        "via": "outbox row inbox.email-graph.notification-plan.v1 — no reader in this pipeline",
+        "outboxEventTypes": [
+          "inbox.email-graph.notification-plan.v1"
+        ],
+        "kind": "push plan · awaiting a transport",
+        "handoffNoun": "push plans",
+        "relayed": false
+      },
+      {
+        "id": "unsubscribe",
+        "name": "Unsubscribe jobs",
+        "system": "external executor · operator-approved requests only",
+        "summary": "Dedicated human approval emits a request bound to the exact source, target and candidate. One-click first; bounded headless Astra fallback only when safe. Needs-help and uncertain outcomes never claim success or permit blind replay. The old ungated relay is retired.",
+        "fromNodeIds": [
+          "unsubscribe-review"
+        ],
+        "via": "human approval → transactional approved-request outbox → external executor → evidence-backed result",
+        "outboxEventTypes": [
+          "inbox.email-graph.unsubscribe-approved-request.v1"
+        ],
+        "kind": "extension · approved target only",
+        "handoffNoun": "unsubscribe requests",
+        "relayed": true
+      },
+      {
+        "id": "mailbox",
+        "name": "Mailbox write relay",
+        "system": "this stack · dry-run until armed",
+        "summary": "A decision to file an email in the mailbox it arrived in becomes one Gmail modify call, made by the relay from the outbox — one operation per message, once, and only for an account on the write allowlist. The request names the account, the provider message id and the operation the pipeline authored (today, a Pipeline/… label named for the classifier's category); no subject, body, sender or link travels with it. In dry-run the relay lists what it would do, reads no credential and spawns nothing.",
+        "fromNodeIds": [
+          "mailbox-writer"
+        ],
+        "via": "outbox → relay poll (INBOX_MAILBOX_RELAY_MODE=live) → gog gmail messages modify → write ledger",
+        "outboxEventTypes": [
+          "inbox.email-graph.mailbox-write-request.v1"
+        ],
+        "kind": "extension · one operation per message",
+        "handoffNoun": "write requests",
+        "relayed": true
+      },
+      {
+        "id": "human-review",
+        "name": "Human review console",
+        "system": "this dashboard (/human)",
+        "summary": "Human nodes queue a bounded decision for a person; the approval flows back into the graph.",
+        "fromNodeIds": [
+          "action-context-review",
+          "action-validation-review"
+        ],
+        "via": "unit queue → /human → decision routine",
+        "outboxEventTypes": [],
+        "kind": "flag for a person",
+        "handoffNoun": "flags",
+        "relayed": false
+      }
+    ],
+    "endpointExits": [
+      {
+        "nodeId": "jobtrack-proposal",
+        "outcome": "proposed",
+        "endpointId": "jobtrack"
+      },
+      {
+        "nodeId": "notifications",
+        "outcome": "planned",
+        "endpointId": "notifications"
+      },
+      {
+        "nodeId": "unsubscribe-review",
+        "outcome": "approved",
+        "endpointId": "unsubscribe"
+      },
+      {
+        "nodeId": "mailbox-writer",
+        "outcome": "requested",
+        "endpointId": "mailbox"
+      }
+    ],
+    "terminals": [
+      {
+        "id": "spam",
+        "name": "Provider-labelled spam",
+        "summary": "The mail provider had already labelled the message spam, so the journey stops at step 1 — nothing leaves the graph, nothing is proposed, and nobody is told.",
+        "ends": [
+          {
+            "nodeId": "filter",
+            "outcome": "spam"
+          }
+        ]
+      },
+      {
+        "id": "no-application-signal",
+        "name": "No application signal",
+        "summary": "The proposer's declared quiet end: mail it decides not to propose about. Nothing is proposed and nothing leaves the graph from here.",
+        "ends": [
+          {
+            "nodeId": "jobtrack-proposal",
+            "outcome": "not_applicable"
+          }
+        ]
+      },
+      {
+        "id": "action-decided",
+        "name": "Action decided",
+        "summary": "The decision stood: the validator accepted it, or a person approved a flagged one. The verdict — needs action, or no action — is stored with the email's record; nothing is sent and no other system is told.",
+        "ends": [
+          {
+            "nodeId": "action-validate",
+            "outcome": "valid"
+          },
+          {
+            "nodeId": "action-context-reviewed",
+            "outcome": "recorded"
+          },
+          {
+            "nodeId": "action-validation-reviewed",
+            "outcome": "recorded"
+          }
+        ]
+      },
+      {
+        "id": "left-subscribed",
+        "name": "Left subscribed",
+        "summary": "The candidate stage skipped by a named rule, or a person kept the subscription. Nothing leaves this branch.",
+        "ends": [
+          {
+            "nodeId": "unsubscribe",
+            "outcome": "skipped"
+          },
+          {
+            "nodeId": "unsubscribe-review",
+            "outcome": "rejected"
+          }
+        ]
+      },
+      {
+        "id": "unsubscribe-needs-help",
+        "name": "Unsubscribe needs help",
+        "summary": "A person recorded that manual help is required. No request was emitted and no unsubscribe success is claimed.",
+        "ends": [
+          {
+            "nodeId": "unsubscribe-review",
+            "outcome": "needs_help"
+          }
+        ]
+      },
+      {
+        "id": "not-filed",
+        "name": "Left unfiled",
+        "summary": "The Mailbox writer looked and asked for nothing: this mailbox is not on the write allowlist, so no label is proposed for it. The plan names the rule; nothing leaves the graph from here.",
+        "ends": [
+          {
+            "nodeId": "mailbox-writer",
+            "outcome": "skipped"
+          }
+        ]
+      },
+      {
+        "id": "dismissed",
+        "name": "Dismissed by reviewer",
+        "summary": "A person ended the review, so no action decision is recorded for this email; the rejection itself is settled and attributed to them. Nothing leaves the graph from here.",
+        "ends": [
+          {
+            "nodeId": "action-context-review",
+            "outcome": "rejected"
+          },
+          {
+            "nodeId": "action-validation-review",
+            "outcome": "rejected"
+          }
+        ]
+      }
+    ],
+    "humanNodeQuestions": {
+      "unsubscribe-review": "May the external executor contact this exact unsubscribe target and, only when safe, send a bounded preference-page projection to GPT-6 Astra? Approve unsubscribe, keep subscribed, or mark needs help. Header offers are not authenticated sender claims.",
+      "action-context-review": "The action context for this email — its route, security posture and the specialists' candidates — needs a human eye before the action ladder continues. Approve if the context is sound; reject to stop here.",
+      "action-validation-review": "The validator could not seal an action decision for this email — a check failed, so what is queued here is that escalation, not a decision. Approve to record a needs-action decision on your own authority; reject to end this branch with no action decision recorded — your rejection is still settled and attributed to you."
+    }
+  },
+  "models": {
+    "classification": {
+      "bindingDigest": "258b8022724ede6cb0e4fa4f0c1eecd03c49a640e7903fca6fdd6f711fe9dd60",
+      "name": "qwen2.5-14b"
+    },
+    "mention-extraction": {
+      "bindingDigest": "106f47c472d122d706b86e239e76fb7bc1bf7a87da86922bbdfc430e5b97c4db",
+      "name": "qwen2.5-14b"
+    },
+    "action-recall": {
+      "bindingDigest": "07c508d0c7a2bdf02abe109537690b4b574b3cc3e3ac222a5c20812e0689708d",
+      "name": "qwen2.5-14b"
+    },
+    "action-precision": {
+      "bindingDigest": "536facd4417e361379a759f26866af98c0bd9735bf0ddaa62e4ab41550f36cea",
+      "name": "qwen2.5-14b"
+    },
+    "action-arbiter": {
+      "bindingDigest": "4036409062c3570fa9bd60d547218fb76f88d04e51ee786665079a6f3deb6ded",
+      "name": "mistral-large-123b"
+    }
+  }
+}

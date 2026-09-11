@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "paths": {
+      "mission-pipeline": ["../../lib/index.d.ts"],
+      "mission-pipeline/*": ["../../lib/*.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
