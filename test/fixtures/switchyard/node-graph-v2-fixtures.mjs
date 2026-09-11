@@ -33,7 +33,9 @@ function node(nodeId, outcomes, options = {}) {
                 ? "v2_model"
             : "v2_worker")
     },
+    ...(options.outputs ? { outputs: options.outputs } : {}),
     ...(options.binding ? { binding: options.binding } : {}),
+    ...(options.configuration ? { configuration: options.configuration } : {}),
     turn: { ...TURN, ...(options.turn ?? {}) },
     ...(options.join ? { join: options.join } : {})
   };

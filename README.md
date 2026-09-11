@@ -115,6 +115,15 @@ join inbound declarations, join satisfiability outcomes, and bounded hostile
 input shapes. A node outcome vocabulary changes only by publishing a new node
 version.
 
+A node may declare `outputs`, the contract its body emits per outcome.
+`compileGraph` then proves that every edge carrying that outcome lands on a
+node whose input accepts it, and a completion carrying any other contract is
+refused before it is cached. Declared outputs are definition data: they move
+the graph digest and the node definition signature. A node may also pin a
+`configuration` ref (`{ id, version, digest }`) naming the host-side policy
+it runs under; the digest enters the graph digest and the node execution
+fingerprint, and the worker context hands the ref to the body.
+
 The closed edge-predicate language is:
 
 - `{ outcome }`
@@ -153,11 +162,30 @@ behavior are authored as nodes and edges.
 
 ## Host-facing helpers
 
+- `graph/budget` provides `graphTurnBudget`: the back edges of a sealed graph
+  and, for an acyclic graph, the worst-case queue occurrences and turns per
+  node, per kind, and in total.
+- `store/unit-path` provides `projectUnitPath`: a pure, fail-closed projection
+  of one unit journey into per-node state, outcomes, open queues, join
+  progress, edges taken, and usage totals. Delivery state is the host's.
+- `graph/goals` provides `createGoalManifest` and `validateGoalManifest`: a
+  non-executable goal manifest sealed against the exact graph digest, proving
+  that a unit entering a goal closes it exactly once through a declared
+  `resolved` or `escalated` resolution.
+- `store/goal-closures` provides `projectGoalClosures`: per unit and per goal,
+  unentered, open, dead, or closed with the closing resolution, plus the turns
+  and receipts charged inside the goal.
+- `execute/code-port` provides `codeNodePortByNode`: one code body per node
+  behind the kind-keyed worker port; an unregistered node fails terminally
+  before any body runs.
 - `contracts/` provides canonical-JSON SHA-256 digests, artifact envelopes,
   artifact refs, and usage receipts.
 - `model/binding` and `prompt/` provide sealed model/prompt identities.
 - `model/invoker` provides the exact resolver boundary and prompt-identity
-  verification used inside a host's model node port.
+  verification used inside a host's model node port, and
+  `modelTurnInvocationRequest`, which builds the provider request from the
+  port's own arguments so the provider boundary receives the journey's
+  attempt identity.
 - `agent/step` and `agent/executor-port` provide the frozen one-agent-turn
   request/result contract and executor seam.
 - `gate/contracts`, `gate/compiler`, and `gate/certificate` remain
@@ -200,4 +228,7 @@ build output and is not committed.
 
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and
-[`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md).
+[`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md). Application
+guidance for building pipelines from focused objectives, a runnable example,
+the interface review, and the frontend SDK design are indexed in
+[`docs/README.md`](docs/README.md).

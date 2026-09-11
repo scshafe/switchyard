@@ -65,6 +65,8 @@ test("v2 graph core transitively depends only on contracts and validation primit
     "src/graph/edge.ts",
     "src/graph/definition.ts",
     "src/graph/compile.ts",
+    "src/graph/budget.ts",
+    "src/graph/goals.ts",
     "src/contracts/artifact.ts",
     "src/contracts/digest.ts",
     "src/internal/guards.ts",
