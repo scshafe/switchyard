@@ -1,6 +1,6 @@
 # ADR: a standard graphpaper frontend SDK for mission-pipeline graphs
 
-**Status: static SDK core implemented; engine extraction complete (2026-09-10).**
+**Status: static SDK core and adapters implemented; browser witness pending (2026-09-10).**
 The separately packaged SDK lives at
 [`packages/mission-pipeline-graphpaper`](../packages/mission-pipeline-graphpaper/README.md),
 version 0.1.0 unreleased, outside the engine payload. All engine exports it relies on are implemented in
@@ -8,9 +8,13 @@ unreleased 1.1.0: `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
 `projectGoalClosures`, and `graphDefinitionDiff`; see
 [`REVIEW-INTERFACE-FRICTION.md`](REVIEW-INTERFACE-FRICTION.md). The SDK and
 consumer interfaces below remain proposals unless explicitly marked otherwise.
-Static building, presentation validation, static legend/render options, and
-historical model metadata exist today. Server/browser adapters, run overlays,
-metrics, proposal rendering, details, CSS, and Inbox adoption remain proposed.
+Static building, presentation validation, static legend/render options,
+historical model metadata, server figures/assets, browser selection/deep links,
+the authorized details seam, and static CSS exist today. Automated checks cover
+these adapters; a real-browser witness remains pending because this session's
+browser runtime list is empty. This is not a merge-readiness or Inbox-adoption
+claim. Run overlays, metrics, proposal rendering, viewer updates, and goal
+scopes remain proposed.
 
 ## Context
 
@@ -50,8 +54,8 @@ reduced-motion fallbacks).
 ## Decision
 
 Introduce a framework-independent SDK package between the engine and
-graphpaper. The engine now provides the pure projections the SDK
-would consume.
+graphpaper. The engine provides the pure projections the static SDK consumes
+and its proposed runtime modes would use.
 
 ```
 mission-pipeline (engine, dependency-free)
@@ -65,8 +69,8 @@ mission-pipeline (engine, dependency-free)
 mission-pipeline-graphpaper (SDK, peer-depends on both; no DOM in core)
   core:    buildPipelineDiagram, validatePresentation, static legend/options [implemented, 0.1.0]
            buildProposalDiagram, overlays and metrics [proposed]
-  server:  renderPipelineFigure (SSR with an injected ELK), viewerAssets [proposed]
-  browser: mountPipelineViewer (hydrate, select, deep link, details seam) [proposed]
+  server:  renderPipelineFigure (SSR, optional injected ELK), viewerAssets [implemented, 0.1.0]
+  browser: mountPipelineViewer (static hydrate, select, deep link, details seam) [implemented, 0.1.0; browser witness pending]
           │
           ▼
 graphpaper (unchanged: layout, SVG, popovers, selection, pan/zoom, a11y)
@@ -183,8 +187,10 @@ type also includes optional consumer model-name/binding-digest pairs, unit
 noun, diagram ID/description/publication, and endpoint wording/metadata;
 see [`types.ts`](../packages/mission-pipeline-graphpaper/src/types.ts).
 Goal labels require a validated manifest and original sealed definition;
-membership is checked but goal scopes are not rendered. The remaining
-overlay, metrics, and details contracts in this block are proposed.
+membership is checked but goal scopes are not rendered. `NodeDetails` is the
+implemented authorized-provider subset in
+[`viewer-types.ts`](../packages/mission-pipeline-graphpaper/src/viewer-types.ts).
+The overlay and metrics contracts in this block remain proposed.
 
 ```ts
 interface PipelinePresentation {                            // implemented static subset, 0.1.0
@@ -222,9 +228,9 @@ interface NodeMetrics {
   readonly waiting: { count: number; oldestQueuedAt: string | null };
 }
 
-interface NodeDetails {                                     // proposed; returned by an authorized provider
+interface NodeDetails {                                     // implemented static details seam, 0.1.0
   readonly graph: GraphDefinitionRef; readonly nodeId: string;
-  readonly sealed: { ref: MissionPipelineNodeRef; kind: string; input: ContractId; outcomes: readonly string[]; maxAttempts: number; leaseMs: number; binding?: MissionPipelineNodeBindingRef };
+  readonly sealed: { ref: MissionPipelineNodeRef; kind: "code" | "model" | "human" | "agent" | "callback"; input: ContractId; outcomes: readonly string[]; maxAttempts: number; leaseMs: number; binding?: MissionPipelineNodeBindingRef };
   readonly outputs?: readonly { outcome: string; contractId: ContractId }[];
   readonly model?: { name: string; id: string; version: number; providerId?: string; parameters: Readonly<Record<string, string | number>>;
     prompt: { digest: string; systemPrompt: string } | { withheld: string } };
@@ -253,6 +259,22 @@ validatePresentation(projection: GraphDisplayProjection, presentation: PipelineP
   options?: { definition?: GraphDefinition; goalManifest?: GoalManifest }): readonly string[];
 pipelineLegend(mode?: "static"): readonly DiagramLegendEntry[];
 PIPELINE_RENDER_OPTIONS: DiagramRenderOptions;
+
+// mission-pipeline-graphpaper/server (Node only)
+renderPipelineFigure(model: DiagramModel, options?: {
+  layoutEngine?: DiagramLayoutEngine; figureId?: string; modelElementId?: string;
+}): Promise<string>;
+viewerAssets(): Readonly<Record<string, { contentType: string; body: string; etag: string }>>;
+
+// mission-pipeline-graphpaper/browser (ES module, no framework)
+mountPipelineViewer(container: Element, options?: {
+  model?: DiagramModel | string;                            // default: embedded inert model JSON
+  onSelect?: (pick: { nodeId: string | null; node: DiagramNode | null; source: string }) => void;
+  details?: (nodeId: string) => Promise<NodeDetails | string | undefined>;
+  deepLink?: { param?: string } | false;                    // default "#node=<id>", replaceState
+  legendVisible?: boolean;
+  layoutEngine?: DiagramLayoutEngine;
+}): Promise<{ select(nodeId: string | null): boolean; destroy(): void }>;
 ```
 
 The core runs on the engine's supported Node versions, without DOM, fetch,
@@ -264,6 +286,33 @@ recompiles the sealed source and demands exact projection equality. Optional
 Malformed input throws; coverage diagnostics are frozen strings. Building
 refuses coverage errors except unclaimed terminals, which are drawn explicitly.
 Outputs are detached, deeply frozen, prototype-free records.
+
+The adapters accept the SDK's bounded static model schema, including its
+exact graph aliases and static metadata. They reject unsupported execution
+status, stage/scope/flow metadata, arbitrary renderer hooks, and future modes.
+The Node server captures capabilities and snapshots model/layout data with
+the engine's existing hostile-input helpers before calling graphpaper. Without
+an injected layout engine it uses graphpaper's built-in layout; an engine
+failure or invalid result also permits that fallback. The figure contains SVG
+and escaped inert JSON, with no executable script or stylesheet loader.
+
+The browser entry has no runtime engine or Node imports. Untrusted model and
+details payloads must arrive as JSON strings, parsed and bounded inside the
+viewer. Live objects, callbacks, DOM elements, and injected ELK capabilities
+are trusted host inputs: ordinary accessors are refused, but browsers provide
+no Proxy detector, so reflection can run Proxy traps. Both accepted data forms
+become detached, frozen, prototype-free records. Matching graph/node identity
+and kind prevents a stale details response from being shown for another pick;
+it does not prove that provider-supplied contents match a sealed definition.
+The provider still owns authorization and historical content resolution.
+
+`viewerAssets()` reads a fixed installed asset set: `viewer.js`,
+`viewer-data.js`, `viewer-defaults.js`, `types.js`, `graphpaper.js`,
+`diagram.css`, `pipeline.css`, and `elk.js`. Each value carries its content
+type and a quoted SHA-256 ETag for the exact served bytes. The helper requires
+the installed graphpaper and ELK peers for the complete set; the consumer
+serves the files together under its own routes, cache headers, and CSP.
+The browser entry re-exports nothing from graphpaper.
 
 The renderer is `scshafe/graphpaper`, pinned for development at commit
 `89240f15c171a26009430ad7eb45eb85ac2567aa` (0.5.0), not the unrelated registry
@@ -285,60 +334,49 @@ buildProposalDiagram(input: { current: GraphDisplayProjection; candidate: GraphD
 pipelineLegend(mode: "static" | "run" | "metrics" | "proposal"): readonly DiagramLegendEntry[];
 PIPELINE_RENDER_OPTIONS: DiagramRenderOptions;              // direction DOWN, compact, tail labels, node width
 
-// mission-pipeline-graphpaper/server  (Node only)
-renderPipelineFigure(model: DiagramModel, options: { layoutEngine: DiagramLayoutEngine; figureId?: string; modelElementId?: string }): Promise<string>;
-viewerAssets(): Readonly<Record<string, { contentType: string; body: string; etag: string }>>;   // graphpaper.js, diagram.css, pipeline.css, elk.js, viewer.js
-
-// mission-pipeline-graphpaper/browser  (ES module, no framework)
-mountPipelineViewer(container: Element, options: {
-  model?: DiagramModel;                                     // default: read the embedded <script type="application/json">
-  onSelect?: (pick: { nodeId: string | null; node: DiagramNode | null; source: string }) => void;
-  details?: (nodeId: string) => Promise<NodeDetails | undefined>;   // consumer-authorized; the SDK renders what it gets
-  deepLink?: { param?: string } | false;                    // default "#node=<id>", replaceState
-  legendVisible?: boolean;
-}): Promise<{ select(nodeId: string | null): boolean; update(overlay: ExecutionOverlay): Promise<void>; destroy(): void }>;
+// Proposed addition to the browser handle; no update method exists today.
+interface ProposedPipelineViewerHandle {
+  select(nodeId: string | null): boolean;
+  update(overlay: ExecutionOverlay): Promise<void>;
+  destroy(): void;
+}
 ```
 
-The browser entry re-exports nothing from graphpaper; a consumer that wants
-raw graphpaper calls imports graphpaper.
-
-## Illustrative consumer integration (proposed API)
+## Illustrative static consumer integration (implemented APIs)
 
 Server side, one request:
 
 ```ts
-import { compileGraph, projectGraphDisplay, projectUnitPath } from "mission-pipeline";   // implemented engine exports
+import { compileGraph, projectGraphDisplay } from "mission-pipeline";
 import { buildPipelineDiagram, validatePresentation } from "mission-pipeline-graphpaper";
 import { renderPipelineFigure } from "mission-pipeline-graphpaper/server";
 import { TRIAGE_PRESENTATION } from "./triage-presentation.js";                          // consumer words
 
-const projection = projectGraphDisplay(compileGraph(graph));                            // exact graph the unit pinned
-const problems = validatePresentation(projection, TRIAGE_PRESENTATION);
+const projection = projectGraphDisplay(compileGraph(graph));                            // consumer-resolved sealed graph
+const problems = validatePresentation(projection, TRIAGE_PRESENTATION, { definition: graph });
 if (problems.length > 0) throw new Error(problems.join("; "));                          // a test also asserts this
 
-const overlay = unit === undefined ? undefined : {
-  unit: { unitId: unit.unitId, graph: unit.graph },
-  path: projectUnitPath(await store.readJourney({ unitId: unit.unitId })),
-  endpointStates: endpointStatesFromOutbox(unit)                                        // consumer: outbox + relay rows
-};
-const model = buildPipelineDiagram({ projection, presentation: TRIAGE_PRESENTATION, overlay });
-const html = await renderPipelineFigure(model, { layoutEngine: new ELK() });          // SVG + inert model JSON
+const model = buildPipelineDiagram({ projection, presentation: TRIAGE_PRESENTATION, definition: graph });
+const html = await renderPipelineFigure(model, { figureId: "pipeline-diagram" });       // SVG + inert JSON; built-in layout
 ```
 
 Browser side, one module the consumer serves under its own CSP:
 
 ```js
 import { mountPipelineViewer } from "/pipeline/assets/viewer.js";
+import { readAuthorizedNodeDetailsJson } from "./consumer-details.js";            // consumer callback, returns JSON text
 const viewer = await mountPipelineViewer(document.getElementById("pipeline-diagram"), {
-  details: (nodeId) => fetch(`/api/pipeline/nodes/${encodeURIComponent(nodeId)}?graph=…&version=…&digest=…`)
-    .then((response) => (response.ok ? response.json() : undefined)),               // the consumer decides who may read this
-  onSelect: ({ nodeId }) => analytics.picked(nodeId)
+  details: readAuthorizedNodeDetailsJson
 });
+// When removing the view:
+// viewer.destroy();
 ```
 
 The consumer still owns: the route, the authorization on the details
-endpoint, the asset paths and CSP, the metrics query, the delivery-state
-derivation, and every word in the presentation.
+endpoint, the asset paths and CSP, and every word in the presentation. This
+integration is static; the consumer binds its details callback to the exact
+graph identity used for this page. Runtime metrics and delivery-state overlays
+remain proposed. It has not been installed into Inbox.
 
 ## Rendering rules
 
@@ -382,56 +420,65 @@ candidate projection's kind, so a proposed model node is never drawn as code.
 Removed nodes take their words from the current presentation, added ones from
 the candidate presentation.
 
-**Historical metadata — implemented; details provider proposed.** A model the
+**Historical metadata and details seam — implemented.** A model the
 consumer explicitly marks `historical: true` is
 marked with graphpaper's lifecycle badge and watermark (`historical`), and the
-consumer's details provider is expected to answer from a frozen snapshot or
-return "unavailable", never from the current catalog.
+consumer's details provider must answer from the intended historical snapshot
+or return unavailable. The viewer checks identity and kind; it cannot prove
+which catalog the provider read.
 
 ## Identity rules
 
-Exact static metadata and optional sealed-source verification exist today.
-The following overlay, metrics, browser-details, and deep-link rules remain
-requirements for their proposed adapters; current static input rejects all
-overlay and metrics fields.
+Exact static metadata, optional sealed-source verification, details identity,
+and deep links exist today. Current static input rejects all overlay and
+metrics fields; identity matching for those future modes remains proposed.
 
 - Every model carries the exact graph id, version, and digest in
   `metadata.pipeline.graph`.
-- `buildPipelineDiagram` refuses an overlay or metrics object whose graph
-  identity differs from the projection's, with the two identities in the
-  error.
-- `mountPipelineViewer` refuses a `NodeDetails` whose `graph` differs from the
-  model's and shows "details for this version are unavailable"; a slower
-  earlier response never paints over a newer pick.
+- Proposed: `buildPipelineDiagram` refuses an overlay or metrics object whose
+  graph identity differs from the projection's, with both identities in the error.
+- `mountPipelineViewer` refuses details whose graph, node ID, or sealed kind
+  differs from the selected node and shows "Details for this version are
+  unavailable." A slower earlier response never paints over a newer pick,
+  and responses after `destroy()` are ignored.
 - Deep links carry the node id; the page that serves the model carries the
   identity. A link to a node the model does not draw selects nothing and
   leaves the URL alone.
-- A unit's picture is drawn on the unit's pinned graph, never on the graph a
-  URL parameter names. That resolution is the consumer's, as Inbox does it.
+- Consumer rule for a future run view: a unit's picture is drawn on its pinned
+  graph, never on the graph a URL parameter names. That resolution is the
+  consumer's, as Inbox does it.
 
-## Selection, details, and deep links (proposed SDK wiring)
+## Selection, details, and deep links (implemented static wiring)
 
 Selection is graphpaper's: click, Enter, or Space picks one node; Escape or a
 background click clears; re-picking is a no-op. The SDK mirrors the pick into
 the URL hash with `replaceState`, opens the details seam if a provider was
-given, and calls `onSelect`. The details panel is a sibling of the figure (the
-figure is replaced on every hydrate), built with DOM calls, never markup
-strings, and rendered from `NodeDetails` fields only. Consumers may replace the
-panel entirely by passing `details` and handling `onSelect` themselves.
+given, and calls `onSelect`. The details panel is a sibling of the figure,
+outside the canvas graphpaper replaces. It uses DOM text operations and
+renders only validated `NodeDetails` fields. Endpoint and terminal picks show
+their supplied model words without invoking the node-details provider.
+Consumers implementing their own panel omit `details` and handle `onSelect`.
+`destroy()` removes owned listeners and panel state, tears down graphpaper
+interactions, and restores the original server-rendered children. Failed
+hydration also restores those children. A second mount on the same container
+is refused until the first is destroyed.
 
-## Accessibility, responsiveness, large graphs (proposed SDK wiring)
+## Accessibility, responsiveness, large graphs
+
+Static adapter wiring and CSS are implemented with automated coverage.
+Keyboard behavior, narrow-screen layout, and reduced-motion rendering still
+need the real-browser witness described below.
 
 - Keyboard: graphpaper's `tabindex="0"` on nodes and edges, Enter and Space to
   pick, Escape to clear; the SDK adds a visible focus ring for the selected
   node and keeps the panel focusable and closable by keyboard.
-- Reduced motion: graphpaper stops the flow-edge march and animated
-  transitions under `prefers-reduced-motion`; the SDK's panel transition
-  follows the same query.
+- Reduced motion: the SDK CSS disables panel/node animation and transitions
+  under `prefers-reduced-motion`. Runtime flow styling remains proposed.
 - Responsive: the figure carries its natural width and height as CSS
   variables so the page scales it down only on narrow screens; the panel
   becomes a bottom sheet under 680px (Inbox's rule, made default).
-- Large graphs: compact nodes, tail-placed edge labels, and one arrow per pair
-  keep a dozen-deep graph on one screen. For more, `goals` may optionally
+- Large graphs: compact nodes and tail-placed labels are current defaults;
+  viewport fit still needs visual verification. Proposed: `goals` may
   render as drill-down scopes using graphpaper's `scope` feature, but the flat
   view remains the default and the scope node's badge states the exact number
   of model invocations inside, so grouping never hides a call.
@@ -452,17 +499,20 @@ panel entirely by passing `details` and handling `onSelect` themselves.
 
 ## Extension points
 
-Only presentation rows/groups/notes and legend data exist in the static core.
-Renderer pass-through, classification, details, and deep-link hooks below are
-proposed adapter extension points.
+Presentation rows/groups/notes and legend data exist in the static core.
+Static adapters also expose injected layout engines, selection callbacks,
+authorized details providers, configurable/disabled deep links, and initial
+legend visibility. They do not accept arbitrary renderer options.
 
 - `presentation.arrows` groups and notes; `presentation.nodes[*].rows`.
-- `nodeRenderers` pass-through to graphpaper for custom node markup.
-- A `classify` hook `(node) => { type?: string; visualGroup?: string }` for
+- Proposed: `nodeRenderers` pass-through to graphpaper for custom node markup.
+- Proposed: a `classify` hook `(node) => { type?: string; visualGroup?: string }` for
   consumers that want an extra visual class (for instance, `endpoint` versus
   `terminal` sub-kinds), constrained to class tokens.
-- The details panel is replaceable; the deep-link scheme is configurable.
-- Legends are data; consumers may append entries.
+- The details panel can be replaced by omitting `details` and handling
+  `onSelect`; the deep-link parameter is configurable.
+- Legends are data; consumers calling graphpaper directly may append entries.
+  Custom adapter legends remain proposed.
 
 ## Compatibility and versioning
 
@@ -473,12 +523,11 @@ proposed adapter extension points.
   fixtures for the support-triage example and for Inbox's frozen graph8
   snapshot must be checked in and compared byte for byte, so a rendering
   change is a visible diff.
-- Future CSS class tokens (`node-type-endpoint`, `node-type-terminal`,
-  `component-status-settled|pending|failed|dead|reached|idle|added|removed|changed`,
-  `edge-kind-outcome|exit|join`, `edge-flavor-unobserved|removed|changed`) are a
-  public contract that must ship in `pipeline.css` and be listed in the SDK's
-  README. Static node/edge types exist today through graphpaper; no SDK CSS
-  asset or runtime-status styling ships in 0.1.0.
+- `pipeline.css` ships the static node kinds, `edge-kind-outcome|exit|join`,
+  selected-node/focus styling, the details panel, and responsive/reduced-motion
+  rules, listed in the SDK README. Runtime/proposal tokens
+  (`component-status-settled|pending|failed|dead|reached|idle|added|removed|changed`
+  and `edge-flavor-unobserved|removed|changed`) remain proposed.
 - Breaking engine projection changes bump `schemaVersion`. Additive optional
   keys may remain v1 with an explicit compatibility policy: the SDK currently
   accepts `fanOut.outcomes` either present or absent and rejects unknown keys.
@@ -501,9 +550,21 @@ Inbox graph8 golden (only `metadata.pipeline` excluded), a support-triage
 static golden, shape/coverage, hostile inputs, deterministic frozen records,
 source/goal identity checks, and fallback sinks. The gate also checks the
 exact SDK payload, manifest, import boundaries, strict TypeScript consumption,
-and real graphpaper built-in layout/SVG compatibility.
+and real graphpaper built-in layout/SVG compatibility. The existing Inbox and
+support-triage core model goldens are unchanged by the adapter work.
 
-The remaining modes and browser checks below remain proposed.
+Static adapter suites in
+[`server.test.mjs`](../packages/mission-pipeline-graphpaper/test/server.test.mjs),
+[`viewer-data.test.mjs`](../packages/mission-pipeline-graphpaper/test/viewer-data.test.mjs),
+and [`browser.test.mjs`](../packages/mission-pipeline-graphpaper/test/browser.test.mjs)
+cover escaped SSR/inert JSON, real ELK and fallback layout, fixed asset
+bytes/ETags, strict model/details validation, exact selection identity, stale
+asynchronous responses, deep links, keyboard panel wiring, and teardown/failed
+hydration restoration. Browser adapter tests use a fake DOM and renderer seam;
+those checks do not establish visual behavior in a real browser.
+
+The contract cases below distinguish existing static behavior from proposed
+runtime modes.
 
 Contract tests (Node, no browser):
 
@@ -513,24 +574,27 @@ Contract tests (Node, no browser):
   globally across targets; every terminal lands on exactly one sink; the union of
   arrow groups equals the sealed arrow; unpresented terminals are drawn and
   listed.
-- Roles: candidate-only nodes take the candidate kind; removed nodes keep the
+- Proposed roles: candidate-only nodes take the candidate kind; removed nodes keep the
   current kind.
-- Identity: overlay, metrics, and details with a different graph identity are
-  refused; the model's metadata equals the projection's identity.
-- State truthfulness: a settled node without a supplied endpoint state is not
+- Identity: static model/details checks are implemented; overlay/metrics
+  identity checks remain proposed.
+- Proposed state truthfulness: a settled node without a supplied endpoint state is not
   "reached"; a pending human node is `pending`, not `decided`; a terminal
   failure is `dead`; `available: false` renders "unavailable" and `allTime: 0`
   renders "never observed".
 - Determinism: the same inputs produce the same model; the model round-trips
   through JSON.
-- Golden models for the example graph in every mode.
+- Proposed: golden models for the example graph in every runtime mode.
 
-Browser checks (only when rendering or interaction changes): hydrate the
+Real-browser witness (pending for these adapter changes): hydrate the
 server figure with elkjs, pick a node by keyboard, follow a deep link, resize
 to a narrow viewport, verify the reduced-motion query, and confirm the details
-panel refuses a mismatched identity. graphpaper's own fake-DOM tests cover
-selection gestures; the SDK's fake-DOM tests must cover the wiring. A signed-in
-deployed witness remains the consumer's release gate, as Inbox's plan states.
+panel refuses a mismatched identity. On 2026-09-10 the available browser
+runtime list was empty, so this witness was not run; passing automated tests
+does not close it. graphpaper's own fake-DOM tests cover selection gestures;
+the SDK's fake-DOM tests cover the wiring. A signed-in deployed witness
+remains the consumer's release gate, as Inbox's plan states. No Inbox
+adoption or deployed verification is claimed here.
 
 ## Extraction and adoption plan
 
@@ -546,9 +610,12 @@ deployed witness remains the consumer's release gate, as Inbox's plan states.
    with a golden test: the SDK's model for Inbox's frozen graph8 snapshot
    equals Inbox's current model modulo the new metadata block. Separate package
    at `packages/mission-pipeline-graphpaper`, not part of the engine payload.
-3. **Server and browser adapters**: `renderPipelineFigure`, `viewerAssets`,
-   `mountPipelineViewer` with the panel shell and deep links, ported from
-   Inbox's figure, hydration script, and panel module.
+3. **Static server and browser adapters — implementation and automated checks
+   added in unreleased 0.1.0; real-browser witness pending**:
+   `renderPipelineFigure`, `viewerAssets`, and `mountPipelineViewer` provide
+   static SSR, assets/CSS, selection, the authorized details panel, deep links,
+   and teardown. Models and graph/goal seals are unchanged. Complete the
+   browser witness above before declaring this extraction step fully verified.
 4. **Inbox adoption**: `pipeline-diagram.ts` becomes a thin call into the SDK
    with Inbox's presentation, endpoint-state derivation, metrics query, and
    details endpoint unchanged; delete the duplicated builder once the golden
@@ -559,7 +626,8 @@ deployed witness remains the consumer's release gate, as Inbox's plan states.
    repository's fixtures as the SDK's own smoke, proving no Inbox assumption
    leaked into the package.
 
-Steps 1 and 2 can land without any change to a running consumer.
+Steps 1–3 make no change to a running consumer. Step 3's outstanding browser
+witness is the next verification slice; Inbox adoption remains future work.
 
 ## Alternatives considered
 
@@ -585,5 +653,6 @@ Steps 1 and 2 can land without any change to a running consumer.
 - Display engine structural depth plus one, retaining Inbox's one-based rank
   convention. Longest-path depth for acyclic graphs and breadth-first depth
   for cyclic graphs remain stable across renderers.
-- Keep runtime modes and adapters out of the static extraction. P8 receipt
-  policy and P7 join-envelope work remain deferred independently of this SDK.
+- Keep runtime modes outside the static adapters: overlays, metrics, proposal
+  rendering, `update`, and goal scopes remain proposed. P8 receipt policy and
+  P7 join-envelope work remain deferred independently of this SDK.

@@ -589,10 +589,22 @@ metadata, and explicit unclaimed-terminal fallbacks. Golden models cover the
 support-triage example and Inbox's independently captured graph8 model (only
 the new metadata block is excluded). Engine fan-outs now optionally carry
 per-edge outcomes to preserve their wording without guessing. Graph
-definitions and goal seals did not change. Server/browser adapters are the
-next extraction slice; run overlays, metrics, proposals, details, and live
-consumer adoption still do not exist in the SDK. P8 has
-been assessed and stays proposed: two-consumer agreement is not established,
+definitions and goal seals did not change.
+
+Extraction step 3 now has static server/browser implementation and automated
+checks: `renderPipelineFigure` emits SVG and escaped inert model JSON;
+`viewerAssets` provides the fixed installed files and exact ETags; and
+`mountPipelineViewer` adds selection, deep links, an authorized details panel,
+and teardown. The browser accepts untrusted model/details JSON text and treats
+live objects, callbacks, DOM, and ELK as trusted host inputs. Node adapters
+use the existing engine hostile-input helpers. A real-browser witness remains
+pending because the available browser runtime list was empty on 2026-09-10;
+the next slice is to complete that witness. This records implemented APIs,
+not merge readiness or Inbox adoption. Core model goldens, graph definitions,
+example presentation/Mermaid, and goal seals are unchanged. Run overlays,
+metrics, proposal rendering, viewer `update`, and goal scopes remain proposed.
+
+P8 has been assessed and stays proposed: two-consumer agreement is not established,
 and the sketch leaves invocation evidence, receipt retention, and agent
 uncertainty unresolved. Its assessment above records the evidence and the
 conditions for reopening it. P7 stays deferred under Inbox's plan; this

@@ -1,6 +1,6 @@
 # mission-pipeline-graphpaper
 
-Unreleased **0.1.0**: a separately packaged, static diagram-model core for
+Unreleased **0.1.0**: a separately packaged, static diagram SDK for
 mission-pipeline 1.1.0 and the `scshafe/graphpaper` renderer. It lives in the
 engine repository but is not included in the engine's published payload.
 
@@ -11,10 +11,13 @@ no DOM, fetch, timers, provider calls, store reads, credentials, or effects.
 It currently uses the engine's Node-based validation and digest helpers; it
 does not claim to be a browser bundle.
 
-Server/browser adapters, run overlays, metrics, proposal diagrams, details
-panels, deep links, CSS assets, goal scopes, and live Inbox adoption remain
-proposed. There are no `/server` or `/browser` exports. Unsupported fields
-such as `overlay` and `metrics` are rejected, not silently ignored.
+The `/server` entry implements `renderPipelineFigure` and `viewerAssets`;
+`/browser` implements `mountPipelineViewer`, static selection/deep links, and
+an optional authorized details panel. These adapters have automated coverage;
+the real-browser keyboard, responsive-layout, and reduced-motion witness is
+still pending. Run overlays, metrics, proposal diagrams, live model updates,
+goal scopes, and live Inbox adoption remain proposed. Unsupported fields such
+as `overlay`, `metrics`, and `update` are not accepted.
 
 ## Installation and package identity
 
@@ -26,10 +29,12 @@ The intended renderer is **scshafe/graphpaper**, tested at commit
 The npm registry's unrelated package named `graphpaper` is not this renderer.
 The renderer peer is optional to prevent npm from automatically installing
 that unrelated package. Install the intended renderer explicitly when using
-its types or rendering the returned model:
+its types or either adapter. ELK is optional for model building and fallback
+server rendering, but is required by the complete `viewerAssets()` set:
 
 ```sh
 npm install 'git+https://github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa'
+npm install elkjs@0.10.2
 ```
 
 The repository's dev dependency and lockfile pin that exact source; the SDK
@@ -62,8 +67,8 @@ if (problems.length > 0) throw new Error(problems.join("; "));
 const model = buildPipelineDiagram({ projection, presentation, definition: graph });
 ```
 
-All returned records are detached, deeply frozen, and prototype-free; arrays
-are frozen ordinary arrays. Runtime inputs are captured descriptor-first,
+All core data records are detached, deeply frozen, and prototype-free; arrays
+are frozen ordinary arrays. Core inputs are captured descriptor-first,
 bounded, and validated without invoking accessors, Proxies, or `toJSON`.
 Malformed/schema-invalid data throws. `validatePresentation` returns frozen
 coverage diagnostics; `buildPipelineDiagram` rejects coverage errors except
@@ -117,9 +122,100 @@ It verifies self-consistency, not publisher authorization.
 
 The static class vocabulary follows graphpaper's public type mapping:
 `node-type-code|model|human|agent|callback|endpoint|terminal` and
-`edge-kind-outcome|exit|join`. This package does not ship `pipeline.css` or
-runtime-status styles. Pass `PIPELINE_RENDER_OPTIONS` and the static legend
-to graphpaper explicitly; its layout/SVG implementations remain unchanged.
+`edge-kind-outcome|exit|join`. The shipped `pipeline.css` styles those classes,
+selection/focus, and the optional panel; runtime-status styling remains
+proposed. Adapters supply the static defaults and legend to graphpaper;
+its layout/SVG/selection implementations remain unchanged.
+
+## Static server and browser adapters
+
+After building a model as above, a Node host can render a complete figure:
+
+```ts
+import ELK from "elkjs/lib/elk.bundled.js";
+import { renderPipelineFigure, viewerAssets } from "mission-pipeline-graphpaper/server";
+
+const figure = await renderPipelineFigure(model, {
+  layoutEngine: new ELK(), // Optional; graphpaper has a built-in fallback.
+  figureId: "pipeline-diagram"
+});
+const assets = viewerAssets();
+```
+
+`renderPipelineFigure` validates the static SDK model, captures an injected
+layout method once, and produces SVG plus inert, escaped JSON. It inserts no
+executable scripts or stylesheet loaders. Invalid or throwing injected layout
+results get a generic error before graphpaper logs and falls back; hostile
+thrown objects and private messages are not forwarded to its logger. Figure
+geometry is also checked after layout; unusable final bounds cause a render
+rejection rather than invalid SVG. Figure
+IDs must be unique on a page; the embedded model ID defaults to the resolved
+figure ID plus `-model`. Both IDs can be specified explicitly.
+
+`viewerAssets()` returns a cached, deeply frozen prototype-free mapping of
+eight names to `{ body, contentType, etag }`: `viewer.js`, `viewer-data.js`,
+`viewer-defaults.js`, `types.js`, `graphpaper.js`, `diagram.css`, `pipeline.css`,
+and `elk.js`. Each ETag is the quoted SHA-256 of the exact UTF-8 bytes. The
+browser module's renderer import is rewritten to its sibling `graphpaper.js`;
+all module dependencies are in that set, without Node/engine/CDN imports.
+The function reads installed files only; the host chooses authorized routes,
+cache headers, and CSP. Serve the names together at a consumer-owned URL.
+
+For example, with assets served at `/pipeline/assets/`, the host can include
+both CSS files, load `elk.js` as a classic script if ELK layout is wanted, and
+run this module after the figure is in the document:
+
+```js
+import { mountPipelineViewer } from "/pipeline/assets/viewer.js";
+
+const viewer = await mountPipelineViewer(document.getElementById("pipeline-diagram"), {
+  // Consumer-owned authorization, route, and error handling; SDK never fetches.
+  details: async (nodeId) => {
+    const response = await fetch(`/authorized-details/${encodeURIComponent(nodeId)}`);
+    return response.ok ? response.text() : undefined;
+  }
+});
+viewer.select("review"); // false for an unknown ID; use a node in your model.
+// viewer.destroy(); // Removes owned wiring/panel and restores original SVG.
+```
+
+The mount requires a connected element and exactly one embedded model script,
+unless `model` is supplied explicitly. It returns a frozen prototype-free
+handle with `select(nodeId | null)` and idempotent `destroy()`, not `update`.
+`onSelect` receives a frozen selection snapshot. Deep links default to the
+hash parameter `node`; use `deepLink: false` or `{ param: "pipelineNode" }`.
+Selection preserves unrelated hash parameters and existing history state.
+`legendVisible` and a trusted `layoutEngine` are the other optional controls.
+Overlapping mounts sharing a canvas are refused; destroy permits a fresh
+mount. Repeated figures receive distinct hydrated SVG marker IDs.
+
+The optional details callback receives sealed engine node IDs, not synthetic
+endpoint/terminal IDs. Its response must match the figure's exact graph
+ID/version/digest, selected node ID, and drawn kind. `NodeDetails` is an
+exported data type: sealed node facts, optional declared outputs, optional
+exact-binding model information with either a prompt or a withheld reason,
+optional implementation references, and a question. The host must authorize
+the request and resolve binding/prompt identity exactly; matching context is
+not proof that the provider's facts are authentic. The viewer renders text
+only, refuses malformed/mismatched details with a generic message, and ignores
+late responses after a new selection or teardown. No receipt/artifact payload
+is fetched implicitly. Keyboard selection focuses the panel; closing it or
+pressing Escape restores node focus. The panel is non-modal, with no focus
+trap, and becomes a bottom sheet at narrow widths.
+
+### Browser trust boundary
+
+Use JSON **text** for untrusted `model` and details responses; the viewer
+parses it internally and creates bounded, frozen prototype-free snapshots.
+Live browser objects, the DOM, options/callbacks, and the layout engine are
+trusted capabilities. Ordinary data accessors are rejected descriptor-first,
+but browser JavaScript cannot detect a live Proxy without triggering traps;
+the Node core/server's stronger Proxy rejection is not claimed here. Neither
+adapter accepts arbitrary graphpaper models: only the static SDK schema is
+admitted, with no runtime status, flow animation, stages, or scope callbacks.
+The browser boundary caps each JSON text at 33,554,432 code units, depth at
+24, values at 1,000,000, and aggregate string data at 33,554,432 code units.
+These are admission limits, not a universal engine-size guarantee.
 
 ## Verification and provenance
 
@@ -131,9 +227,12 @@ npm run build && npm run release:manifest && npm run check
 
 The build compiles both packages. The manifest writer packs without rebuilding
 and writes separate engine and SDK manifests under root `release/`. The full
-check tests exact/reproducible payloads and installs all three exact tarballs
+check tests exact/reproducible payloads and installs all four exact tarballs
 offline into a temporary consumer. It runs SDK tests, strict TypeScript export
-checks, and graphpaper built-in layout/SVG smoke checks without a browser.
+checks, graphpaper built-in and real-ELK server rendering, asset closure checks,
+and isolated fake-DOM browser-wiring tests. Fake DOM does not establish actual
+graphpaper browser behavior or visual accessibility; real-browser verification
+is pending and must precede claiming the adapters merge-ready.
 The clean-commit `npm run test:fresh-clone` gate permits dependency fetching
 during `npm ci` only (lifecycle scripts disabled), then runs verification
 offline. Bootstrapping the pinned renderer requires Git repository read access;
