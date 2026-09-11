@@ -135,6 +135,12 @@ behavior are authored as nodes and edges.
 
 ## Host-facing helpers
 
+- `graph/display` provides `projectGraphDisplay`: a pure structural projection
+  of a compiled graph with its exact digest, depth, merged arrows, marking
+  nodes, fan-outs, joins, and terminals. Presentation words stay with the host.
+- `graph/diff` provides `graphDefinitionDiff`: a sealed-definition comparison
+  by node, edge, and terminal identity, carrying both graph digests and
+  machine-readable field changes, including outputs and configuration refs.
 - `graph/budget` provides `graphTurnBudget`: the back edges of a sealed graph
   and, for an acyclic graph, the worst-case queue occurrences and turns per
   node, per kind, and in total.
@@ -176,9 +182,10 @@ the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
 JavaScript plus TypeScript import smokes.
 
-A payload change ships with a regenerated release manifest:
-`npm run release:manifest` writes `release/mission-pipeline-<version>.payload.sha256`
-from a fresh pack, and the gate pins it.
+A payload change ships with a regenerated release manifest. Run
+`npm run build && npm run release:manifest && npm run check` in that order:
+the manifest script packs without rebuilding and writes
+`release/mission-pipeline-<version>.payload.sha256`, which the gate pins.
 
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and

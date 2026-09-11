@@ -11,6 +11,8 @@ export interface CompiledGraph {
     readonly inboundByNode: Readonly<Record<string, readonly Edge[]>>;
     readonly outboundByNode: Readonly<Record<string, readonly Edge[]>>;
 }
+/** @internal Accept only this compiler's validated, immutable results. */
+export declare function requireCompiledGraph(value: unknown): CompiledGraph;
 /** Declared outputs compare as maps: same outcomes, same contracts, any order. */
 export declare function sameDeclaredOutputs(left: Readonly<Record<string, string>> | undefined, right: Readonly<Record<string, string>> | undefined): boolean;
 /**

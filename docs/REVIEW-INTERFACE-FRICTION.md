@@ -481,8 +481,25 @@ engine run that dead-letters an orphan node on its first attempt.
 | P8 | Declared failure helper | medium | small | design tension to record | after two consumers agree on receipt policy |
 | P7 | Join input envelope | high only when measured serial latency demands it | large | new store semantics, conformance additions, Postgres parity | deferred, as Inbox's plan says |
 
-Four slices (P1, P5, P9; P2 with P4; P3; P6) landed as package version
-1.1.0: additive keys and exports, no store migration, two new graph-store
-conformance cases, a regenerated release manifest, and the frontend SDK's
-execution-state and goal contracts ahead of any rendering code. P7 and P8
-remain proposals; P7 is the only one that needs an engine increment.
+P1, P2, P3, P4, P5, P6, and P9 are implemented in unreleased package version
+1.1.0: additive keys and exports, no store migration, and two new graph-store
+conformance cases. Consumers that persist node definition signatures must
+compare `outputs` too; Inbox's Postgres graph store still needs that adapter
+follow-up before it passes those cases.
+
+The [frontend SDK ADR](ADR-GRAPHPAPER-FRONTEND-SDK.md)'s extraction step 1 is
+also complete. `projectGraphDisplay` (`src/graph/display.ts`) derives exact
+graph identity, structural depth, merged arrows, marks, fan-outs, joins, and
+terminals from a compiled graph. `graphDefinitionDiff` (`src/graph/diff.ts`)
+compares sealed definitions by node, edge, and terminal identity, including
+declared outputs and configuration refs. Both return frozen, prototype-free
+data without generated presentation words; golden tests cover the fixture
+graphs and the support-triage example. The graph definitions, example
+presentation, Mermaid diagram, and goal-manifest seals remain unchanged and
+verified, and the package payload manifest is regenerated for the new modules.
+
+The viewer SDK remains proposed; its core is the next extraction step. Within
+this review, P8 is the next slice to assess and stays proposed until two
+consumers agree on receipt policy for failures with an unknown result. P7
+stays deferred under Inbox's plan and is the only remaining proposal that
+needs an engine increment.
