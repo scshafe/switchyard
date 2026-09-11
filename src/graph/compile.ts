@@ -1,6 +1,8 @@
 // graph/compile.ts — compile a sealed v2 graph to frozen executor indexes.
 
 import {
+  declaredNodeOutput,
+  declaredNodeOutputs,
   graphDefinitionRef,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
   MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
@@ -47,6 +49,17 @@ function frozenRecord<T>(entries: readonly (readonly [string, T])[]): Readonly<R
     });
   }
   return Object.freeze(record);
+}
+
+/** Declared outputs compare as maps: same outcomes, same contracts, any order. */
+export function sameDeclaredOutputs(
+  left: Readonly<Record<string, string>> | undefined,
+  right: Readonly<Record<string, string>> | undefined
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((outcome) => Object.hasOwn(right, outcome) && right[outcome] === left[outcome]);
 }
 
 function validateBindingRules(node: MissionPipelineNode): void {
@@ -124,6 +137,19 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
           `Graph edge ${edge.edgeId} from node ${edge.from} references undeclared outcome ${JSON.stringify(outcome)}`
         );
       }
+      // A declared output contract must be accepted by every node this edge
+      // queues, joins included. Settlement checks the same equality on the
+      // actual artifact; proving it here keeps a mismatch out of publication.
+      const emitted = declaredNodeOutput(source, outcome);
+      if (emitted === undefined) continue;
+      for (const target of edge.to) {
+        const targetNode = nodesById[target]!;
+        if (targetNode.input !== emitted) {
+          throw new Error(
+            `Graph edge ${edge.edgeId} carries outcome ${JSON.stringify(outcome)} from node ${edge.from} as ${emitted}, but target node ${target} accepts ${targetNode.input}`
+          );
+        }
+      }
     }
   }
 
@@ -163,10 +189,11 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     }
   }
 
-  // A node ref identifies one definition signature. Principal, binding, turn,
-  // nodeId, and join are graph-instance configuration; dispatch kind, input
-  // contract, and outcome vocabulary are definition-bound. Pure compilation
-  // proves this within a graph; publish stores enforce it across graphs.
+  // A node ref identifies one definition signature. Principal, binding,
+  // configuration, turn, nodeId, and join are graph-instance configuration;
+  // dispatch kind, input contract, outcome vocabulary, and declared output
+  // contracts are definition-bound. Pure compilation proves this within a
+  // graph; publish stores enforce it across graphs.
   const definitionByRef = new Map<string, MissionPipelineNode>();
   for (const node of definition.nodes) {
     const key = refKey(node);
@@ -192,6 +219,11 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     ) {
       throw new Error(
         `Node definition ${node.ref.id}@${node.ref.version} is reused with a different outcome vocabulary; outcome changes require a new node version`
+      );
+    }
+    if (!sameDeclaredOutputs(declaredNodeOutputs(existing), declaredNodeOutputs(node))) {
+      throw new Error(
+        `Node definition ${node.ref.id}@${node.ref.version} is reused with different output contracts; change the node version`
       );
     }
   }

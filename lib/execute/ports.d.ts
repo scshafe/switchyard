@@ -1,6 +1,6 @@
 import { type ArtifactEnvelope, type ArtifactRef } from "../contracts/artifact.js";
 import { type UsageReceipt } from "../contracts/usage-receipt.js";
-import { type GraphDefinitionRef, type MissionPipelineNode, type MissionPipelineNodeBindingRef, type MissionPipelineNodeKind, type MissionPipelineNodeRef } from "../graph/definition.js";
+import { type GraphDefinitionRef, type MissionPipelineNode, type MissionPipelineNodeBindingRef, type MissionPipelineNodeConfigurationRef, type MissionPipelineNodeKind, type MissionPipelineNodeRef } from "../graph/definition.js";
 export declare const MAX_AGENT_TURN_USAGE_RECEIPTS = 256;
 export declare const ENGINE_JOIN_UNSATISFIABLE_OUTCOME: "join_unsatisfiable";
 /** Minimal immutable attempt context visible to a worker-side node body. */
@@ -17,6 +17,8 @@ export interface WorkerNodeTurnContext {
     readonly idempotencyKey: string;
     /** Content identity only; the validated payload is the port's first argument. */
     readonly inputArtifact: ArtifactRef;
+    /** The sealed configuration this node runs under, when the graph declares one. */
+    readonly configuration?: MissionPipelineNodeConfigurationRef;
     readonly signal?: AbortSignal;
 }
 /** Canonical ordinary host completion. Routing remains engine-owned. */

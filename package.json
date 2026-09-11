@@ -1,6 +1,6 @@
 {
   "name": "mission-pipeline",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
@@ -49,6 +49,7 @@
     "test:payload": "node scripts/check-package-payload.mjs",
     "test:release-artifact": "node scripts/check-release-artifact.mjs",
     "test:install": "node scripts/check-pack-install.mjs",
+    "release:manifest": "node scripts/write-release-manifest.mjs",
     "test:fresh-clone": "node scripts/check-fresh-clone.mjs",
     "check": "npm run test:v1-deletion && npm run build && npm run test && npm run test:payload && npm run test:release-artifact && npm run test:install",
     "verify": "npm run clean && npm run check && git diff --exit-code -- lib",

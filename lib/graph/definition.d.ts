@@ -44,14 +44,35 @@ export interface MissionPipelineJoin {
     readonly inbound: readonly string[];
     readonly require: JoinRequirement;
 }
+/**
+ * Content-addressed identity of the host-side configuration a node body runs
+ * under (a policy table, a threshold set, a code revision). The host resolves
+ * it; the engine seals it into the graph digest and the node execution
+ * fingerprint, so a policy change is a visible identity change instead of a
+ * silent drift behind an unchanged attempt key.
+ */
+export interface MissionPipelineNodeConfigurationRef {
+    readonly id: string;
+    readonly version: number;
+    readonly digest: string;
+}
 export interface MissionPipelineNode {
     readonly nodeId: string;
     readonly ref: MissionPipelineNodeRef;
     readonly kind: MissionPipelineNodeKind;
     readonly input: ContractId;
     readonly outcomes: OutcomeVocabulary;
+    /**
+     * The contract this node's body emits per declared outcome. An outcome that
+     * emits no output artifact carries its input forward, so its entry equals
+     * `input`. Omitted outcomes are undeclared: nothing is checked for them.
+     * Declared entries are checked at compile time against every edge target
+     * and at completion time against the returned artifact.
+     */
+    readonly outputs?: Readonly<Record<string, ContractId>>;
     readonly principal: PrincipalRef;
     readonly binding?: MissionPipelineNodeBindingRef;
+    readonly configuration?: MissionPipelineNodeConfigurationRef;
     readonly turn: MissionPipelineNodeTurn;
     readonly join?: MissionPipelineJoin;
 }
@@ -84,8 +105,14 @@ export interface GraphDefinitionRef {
     readonly digest: string;
 }
 export declare function validateMissionPipelineNodeBindingRef(value: unknown, label?: string): MissionPipelineNodeBindingRef;
+/** Validate, detach, and freeze a node configuration ref. */
+export declare function validateMissionPipelineNodeConfigurationRef(value: unknown, label?: string): MissionPipelineNodeConfigurationRef;
 /** Validate one v2 node contract without resolving graph-level references. */
 export declare function validateMissionPipelineNode(value: unknown, label?: string): MissionPipelineNode;
+/** Declared outputs of a validated node, or undefined when none are declared. */
+export declare function declaredNodeOutputs(node: MissionPipelineNode): Readonly<Record<string, ContractId>> | undefined;
+/** The contract a validated node declares for one outcome, or undefined when undeclared. */
+export declare function declaredNodeOutput(node: MissionPipelineNode, outcome: string): ContractId | undefined;
 /** Validate and seal a graph draft with canonical-JSON SHA-256. */
 export declare function createGraphDefinition(input: unknown): GraphDefinition;
 /** Validate a sealed graph and recompute its digest fail-closed. */

@@ -35,6 +35,7 @@ interface NodeDraftOptions {
   readonly kind?: MissionPipelineNodeKind;
   readonly input?: string;
   readonly principal?: string;
+  readonly outputs?: Readonly<Record<string, string>>;
 }
 
 interface ConformanceNodeDraft {
@@ -43,6 +44,7 @@ interface ConformanceNodeDraft {
   readonly kind: MissionPipelineNodeKind;
   readonly input: string;
   readonly outcomes: { readonly version: number; readonly outcomes: readonly string[] };
+  readonly outputs?: Readonly<Record<string, string>>;
   readonly principal: { readonly id: string };
   readonly turn: typeof TURN;
 }
@@ -59,6 +61,7 @@ function node(
     kind,
     input: options.input ?? "unit-artifact.v1",
     outcomes: { version: 1, outcomes },
+    ...(options.outputs === undefined ? {} : { outputs: options.outputs }),
     principal: {
       id: options.principal
         ?? (kind === "human" ? "v2_console" : "v2_worker")
@@ -119,7 +122,8 @@ function sharedNodeGraph(
       refId: options.refId ?? "shared.definition",
       kind: options.kind,
       input: options.input,
-      principal: options.principal
+      principal: options.principal,
+      outputs: options.outputs
     })
   );
 }
@@ -272,8 +276,23 @@ export function registerGraphStoreConformanceTests(
     assert.deepEqual(await store.loadGraph(graphDefinitionRef(reordered)), reordered);
   });
 
+  register("GraphStore node signatures compare declared output contracts as maps", async (store) => {
+    const first = sharedNodeGraph("fixture.outputs-first", {
+      nodeId: "first",
+      outputs: { done: "unit-artifact.v1", skipped: "unit-artifact.v1" }
+    });
+    const reordered = sharedNodeGraph("fixture.outputs-reordered", {
+      nodeId: "second",
+      outputs: { skipped: "unit-artifact.v1", done: "unit-artifact.v1" }
+    });
+
+    await store.publishGraph(first);
+    await store.publishGraph(reordered);
+    assert.deepEqual(await store.loadGraph(graphDefinitionRef(reordered)), reordered);
+  });
+
   const conflicts: readonly {
-    readonly field: "kind" | "input contract" | "outcome vocabulary";
+    readonly field: "kind" | "input contract" | "outcome vocabulary" | "output contracts";
     readonly graphId: string;
     readonly options: SharedNodeGraphOptions;
   }[] = [
@@ -291,6 +310,12 @@ export function registerGraphStoreConformanceTests(
       field: "outcome vocabulary",
       graphId: "fixture.signature-outcome-conflict",
       options: { nodeId: "outcomes-changed", outcomes: ["done", "extra"] }
+    },
+    {
+      // The owner declares no outputs; declaring them is a new definition.
+      field: "output contracts",
+      graphId: "fixture.signature-output-conflict",
+      options: { nodeId: "outputs-declared", outputs: { done: "unit-artifact.v1" } }
     }
   ];
   for (const conflict of conflicts) {

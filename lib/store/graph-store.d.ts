@@ -6,11 +6,19 @@ export interface NodeDefinitionSignature {
     readonly input: ContractId;
     /** Set semantics, represented in canonical lexical order. */
     readonly outcomes: readonly string[];
+    /**
+     * Declared output contracts by outcome, in canonical lexical key order;
+     * present only when the node declares any. A ref/version that declares
+     * outputs in one graph and not in another names two definitions.
+     */
+    readonly outputs?: Readonly<Record<string, ContractId>>;
 }
 /** Validate, detach, and freeze a digest-bearing graph reference. */
 export declare function validateGraphDefinitionRef(value: unknown, label?: string): GraphDefinitionRef;
 /** Canonical signature used by every GraphStore implementation. */
 export declare function nodeDefinitionSignature(node: MissionPipelineNode): NodeDefinitionSignature;
+/** Field-by-field signature comparison every GraphStore implementation must apply. */
+export declare function nodeDefinitionSignatureConflict(published: NodeDefinitionSignature, requested: NodeDefinitionSignature): NodeDefinitionConflictField | undefined;
 /** A sealed graph failed semantic compilation before publication. */
 export declare class GraphPublicationValidationError extends Error {
     readonly code = "graph_publication_invalid";
@@ -36,7 +44,7 @@ export declare class GraphLoadDigestConflictError extends Error {
     readonly requestedDigest: string;
     constructor(graphId: string, graphVersion: number, publishedDigest: string, requestedDigest: string);
 }
-export type NodeDefinitionConflictField = "kind" | "input contract" | "outcome vocabulary";
+export type NodeDefinitionConflictField = "kind" | "input contract" | "outcome vocabulary" | "output contracts";
 /** One node ref/version was given a different definition-bound meaning. */
 export declare class NodeDefinitionPublicationConflictError extends Error {
     readonly code = "node_definition_publication_conflict";

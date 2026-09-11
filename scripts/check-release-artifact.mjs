@@ -12,9 +12,13 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
+// The manifest is pinned per package version: a payload change without a
+// version change fails here, and a version change without its manifest fails
+// here. scripts/write-release-manifest.mjs writes the file this reads.
+const releaseVersion = JSON.parse(await readFile(resolve(root, "package.json"), "utf8")).version;
 const manifestPath = resolve(
   root,
-  "release/mission-pipeline-1.0.0.payload.sha256"
+  `release/mission-pipeline-${releaseVersion}.payload.sha256`
 );
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-release-"));
 

@@ -1791,6 +1791,9 @@ export async function runClaimedUnitTurn(
             ? { bytes: claim.inputArtifact.bytes }
             : {})
         }),
+        ...(Object.hasOwn(node, "configuration") && node.configuration !== undefined
+          ? { configuration: node.configuration }
+          : {}),
         ...(signal === undefined ? {} : { signal: signal as AbortSignal })
       });
       try {

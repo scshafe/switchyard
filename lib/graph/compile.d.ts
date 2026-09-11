@@ -11,6 +11,8 @@ export interface CompiledGraph {
     readonly inboundByNode: Readonly<Record<string, readonly Edge[]>>;
     readonly outboundByNode: Readonly<Record<string, readonly Edge[]>>;
 }
+/** Declared outputs compare as maps: same outcomes, same contracts, any order. */
+export declare function sameDeclaredOutputs(left: Readonly<Record<string, string>> | undefined, right: Readonly<Record<string, string>> | undefined): boolean;
 /**
  * Compile a sealed graph into authored-order indexes. Semantic validation is
  * deliberately kept in this function so every store/executor consumes the

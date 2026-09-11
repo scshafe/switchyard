@@ -78,14 +78,36 @@ export interface MissionPipelineJoin {
   readonly require: JoinRequirement;
 }
 
+/**
+ * Content-addressed identity of the host-side configuration a node body runs
+ * under (a policy table, a threshold set, a code revision). The host resolves
+ * it; the engine seals it into the graph digest and the node execution
+ * fingerprint, so a policy change is a visible identity change instead of a
+ * silent drift behind an unchanged attempt key.
+ */
+export interface MissionPipelineNodeConfigurationRef {
+  readonly id: string;
+  readonly version: number;
+  readonly digest: string;
+}
+
 export interface MissionPipelineNode {
   readonly nodeId: string;
   readonly ref: MissionPipelineNodeRef;
   readonly kind: MissionPipelineNodeKind;
   readonly input: ContractId;
   readonly outcomes: OutcomeVocabulary;
+  /**
+   * The contract this node's body emits per declared outcome. An outcome that
+   * emits no output artifact carries its input forward, so its entry equals
+   * `input`. Omitted outcomes are undeclared: nothing is checked for them.
+   * Declared entries are checked at compile time against every edge target
+   * and at completion time against the returned artifact.
+   */
+  readonly outputs?: Readonly<Record<string, ContractId>>;
   readonly principal: PrincipalRef;
   readonly binding?: MissionPipelineNodeBindingRef;
+  readonly configuration?: MissionPipelineNodeConfigurationRef;
   readonly turn: MissionPipelineNodeTurn;
   readonly join?: MissionPipelineJoin;
 }
@@ -138,8 +160,10 @@ const NODE_KEYS = new Set([
   "kind",
   "input",
   "outcomes",
+  "outputs",
   "principal",
   "binding",
+  "configuration",
   "turn",
   "join"
 ]);
@@ -155,6 +179,7 @@ const NODE_REQUIRED_KEYS = new Set([
 const NODE_REF_KEYS = new Set(["id", "version"]);
 const PRINCIPAL_REF_KEYS = new Set(["id"]);
 const BINDING_REF_KEYS = new Set(["kind", "bindingId", "version", "bindingDigest"]);
+const CONFIGURATION_REF_KEYS = new Set(["id", "version", "digest"]);
 const TURN_KEYS = new Set(["idempotency", "leaseMs", "maxAttempts", "retryTaxonomy"]);
 const JOIN_KEYS = new Set(["inbound", "require"]);
 const N_OF_KEYS = new Set(["nOf"]);
@@ -197,6 +222,57 @@ export function validateMissionPipelineNodeBindingRef(
     },
     label
   );
+}
+
+/** Validate, detach, and freeze a node configuration ref. */
+export function validateMissionPipelineNodeConfigurationRef(
+  value: unknown,
+  label = "node configuration"
+): MissionPipelineNodeConfigurationRef {
+  value = snapshotGraphValidationData(value, label);
+  const raw = assertPlainObject(value, label);
+  assertStrictKeys(raw, CONFIGURATION_REF_KEYS, label);
+  assertRequiredKeys(raw, CONFIGURATION_REF_KEYS, label);
+  return deepFrozenClone(
+    {
+      id: assertIdentifier(raw.id, `${label}.id`),
+      version: assertSafePositiveInt(raw.version, `${label}.version`),
+      digest: assertSha256Hex(raw.digest, `${label}.digest`)
+    },
+    label
+  );
+}
+
+/**
+ * Declared output contracts keyed by outcome. Every key must be one of the
+ * node's declared outcomes; the engine-reserved `join_unsatisfiable` always
+ * carries the reserved contract and cannot be declared.
+ */
+function validateNodeOutputs(
+  value: unknown,
+  outcomes: readonly string[],
+  label: string
+): Readonly<Record<string, ContractId>> {
+  const raw = assertPlainObject(value, label);
+  const keys = Object.keys(raw);
+  if (keys.length === 0) {
+    throw new Error(`${label}: must declare at least one outcome (omit the key instead)`);
+  }
+  const declared = new Set(outcomes);
+  const outputs: Record<string, ContractId> = {};
+  for (const key of keys) {
+    const outcome = assertIdentifier(key, `${label} outcome`);
+    if (outcome === "join_unsatisfiable") {
+      throw new Error(
+        `${label}: engine-reserved outcome "join_unsatisfiable" always carries ${JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT} and cannot be declared`
+      );
+    }
+    if (!declared.has(outcome)) {
+      throw new Error(`${label}: outcome ${JSON.stringify(outcome)} is not declared by this node`);
+    }
+    outputs[outcome] = validateContractId(raw[outcome], `${label}.${outcome}`);
+  }
+  return deepFrozenClone(outputs, label);
 }
 
 function assertBoundedPositiveInt(
@@ -293,12 +369,29 @@ export function validateMissionPipelineNode(
       `${nodeLabel}: outcome vocabulary version ${outcomes.version} must equal node ref version ${ref.version} (outcome changes require a new node version)`
     );
   }
+  let outputs: Readonly<Record<string, ContractId>> | undefined;
+  if (Object.hasOwn(raw, "outputs")) {
+    if (raw.outputs === undefined) {
+      throw new Error(`${nodeLabel}: outputs is present but undefined (omit the key instead)`);
+    }
+    outputs = validateNodeOutputs(raw.outputs, outcomes.outcomes, `${nodeLabel}: outputs`);
+  }
   let binding: MissionPipelineNodeBindingRef | undefined;
   if (Object.hasOwn(raw, "binding")) {
     if (raw.binding === undefined) {
       throw new Error(`${nodeLabel}: binding is present but undefined (omit the key instead)`);
     }
     binding = validateMissionPipelineNodeBindingRef(raw.binding, `${nodeLabel}: binding`);
+  }
+  let configuration: MissionPipelineNodeConfigurationRef | undefined;
+  if (Object.hasOwn(raw, "configuration")) {
+    if (raw.configuration === undefined) {
+      throw new Error(`${nodeLabel}: configuration is present but undefined (omit the key instead)`);
+    }
+    configuration = validateMissionPipelineNodeConfigurationRef(
+      raw.configuration,
+      `${nodeLabel}: configuration`
+    );
   }
   let join: MissionPipelineJoin | undefined;
   if (Object.hasOwn(raw, "join")) {
@@ -314,13 +407,31 @@ export function validateMissionPipelineNode(
       kind,
       input,
       outcomes,
+      ...(outputs === undefined ? {} : { outputs }),
       principal: validatePrincipalRef(raw.principal, `${nodeLabel}: principal`),
       ...(binding === undefined ? {} : { binding }),
+      ...(configuration === undefined ? {} : { configuration }),
       turn: validateTurn(raw.turn, `${nodeLabel}: turn`),
       ...(join === undefined ? {} : { join })
     },
     nodeLabel
   );
+}
+
+/** Declared outputs of a validated node, or undefined when none are declared. */
+export function declaredNodeOutputs(
+  node: MissionPipelineNode
+): Readonly<Record<string, ContractId>> | undefined {
+  return Object.hasOwn(node, "outputs") ? node.outputs : undefined;
+}
+
+/** The contract a validated node declares for one outcome, or undefined when undeclared. */
+export function declaredNodeOutput(
+  node: MissionPipelineNode,
+  outcome: string
+): ContractId | undefined {
+  const outputs = declaredNodeOutputs(node);
+  return outputs !== undefined && Object.hasOwn(outputs, outcome) ? outputs[outcome] : undefined;
 }
 
 function validateTerminal(value: unknown, label: string): TerminalOutcome {
