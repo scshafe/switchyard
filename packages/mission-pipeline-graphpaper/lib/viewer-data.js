@@ -233,7 +233,9 @@ export function validateStaticModel(value) {
             if (own(meta, "marks"))
                 strings(meta.marks, "node marks", 64).forEach((value) => identifier(value, "mark"));
             if (own(meta, "join")) {
-                const join = record(meta.join, ["require", "inbound"], ["require", "inbound"], "join metadata");
+                const join = record(meta.join, ["require", "inbound", "compose"], ["require", "inbound"], "join metadata");
+                if (own(join, "compose"))
+                    oneOf(join.compose, ["select", "envelope"], "join compose");
                 const inbound = strings(join.inbound, "join inbound", 256);
                 unique(inbound, "join inbound");
                 if (inbound.length === 0)

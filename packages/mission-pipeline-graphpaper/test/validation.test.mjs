@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileGraph, createGraphDefinition, projectGraphDisplay } from "mission-pipeline";
+import { compileGraph, createGraphDefinition, JOIN_INPUT_ARTIFACT_CONTRACT, projectGraphDisplay } from "mission-pipeline";
+import { renderPipelineFigure } from "mission-pipeline-graphpaper/server";
 import { buildPipelineDiagram, PIPELINE_PRESENTATION_SCHEMA_VERSION, validatePresentation } from "mission-pipeline-graphpaper";
 import { fixtureGraphs } from "./fixtures/mission-pipeline/node-graph-v2-fixtures.mjs";
 import {
@@ -22,6 +23,32 @@ function input() {
 function problems(value) {
   return validatePresentation(value.projection, value.presentation, { definition: value.definition, goalManifest: value.goalManifest });
 }
+
+test("static SDK carries envelope composition through projection, model, and server admission", async () => {
+  const draft = plain(fixtureGraphs.join);
+  draft.nodes[3].join.compose = "envelope";
+  draft.nodes[3].input = JOIN_INPUT_ARTIFACT_CONTRACT;
+  const definition = createGraphDefinition(draft);
+  const projection = projectGraphDisplay(compileGraph(definition));
+  const presentation = {
+    schemaVersion: PIPELINE_PRESENTATION_SCHEMA_VERSION, title: "Composed branches",
+    nodes: Object.fromEntries(definition.nodes.map(node => [node.nodeId, { name: node.nodeId }])),
+    endpoints: [], terminals: [{ id: "done", name: "Done", ends: definition.terminals }]
+  };
+  const model = buildPipelineDiagram({ definition, projection, presentation });
+  const joined = model.nodes.find(node => node.id === "join");
+  assert.equal(joined.metadata.join.compose, "envelope");
+  assert.ok(joined.rows.some(row => row.label === "join input" && row.value === "accepted branch payload envelope"));
+  assert.equal(Object.isFrozen(joined.metadata.join), true);
+  assert.equal(Object.getPrototypeOf(joined.metadata.join), null);
+  assert.match(await renderPipelineFigure(model), /accepted branch payload envelope/);
+  const conflicting = plain(projection); conflicting.joins[0].compose = "select";
+  assert.throws(() => buildPipelineDiagram({ projection: conflicting, presentation }), /disagrees with its node join/);
+  const wrongInput = plain(projection); wrongInput.nodes[3].input = "wrong.v1";
+  assert.throws(() => buildPipelineDiagram({ projection: wrongInput, presentation }), /envelope join requires/);
+  const invalidModel = plain(model); invalidModel.nodes.find(node => node.id === "join").metadata.join.compose = "merge";
+  await assert.rejects(renderPipelineFigure(invalidModel), /join compose/);
+});
 
 test("coverage diagnostics name missing and unknown nodes and prevent building", () => {
   const value = input();

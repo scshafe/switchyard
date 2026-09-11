@@ -184,8 +184,8 @@ back to the same node.
 letter, releases the lease, marks only that occurrence's outbound join legs
 impossible, and enqueues no successor
 (`src/store/memory-unit-store.ts:3266-3370`). There is no "on failure, route
-to X" in the graph, and no human fallback is reached. An ordinary body-thrown
-error carries no trusted usage receipt (`failureUsage` in
+to X" in the graph, and no human fallback is reached. An unwrapped ordinary
+body-thrown error carries no trusted usage receipt (`failureUsage` in
 `src/execute/unit-runner.ts`). A model or agent completion rejected during
 engine validation retains its already-validated receipt prefix, bound to the
 exact node and attempt key (`captureCompletion` in `src/execute/turn.ts`).
@@ -214,13 +214,15 @@ exact node and attempt key (`captureCompletion` in `src/execute/turn.ts`).
   running. A typed `ExecutionFailureError` declares a definite failure and
   has different engine behavior.
 
-**Proposed, assessed and deferred:** a port helper that maps classified
-failures to declared outcomes with a receipt policy (review proposal P8).
-The [P8 assessment](REVIEW-INTERFACE-FRICTION.md#p8-mapping-failures-to-declared-outcomes-is-re-implemented-per-consumer)
-records why it is not implemented: no second consumer's receipt/recovery
-agreement, insufficient invocation evidence in the sketch, and unresolved
-receipt retention and agent uncertainty. Consumer-owned wrappers remain the
-current pattern; they must preserve these distinctions.
+**Exists (unreleased 1.1.0):** `withDeclaredFailureOutcomes` implements an
+opt-in code/model/agent wrapper with captured admission and usage evidence,
+input/context/binding snapshots, and explicit receipt policy. Models require
+a policy returning one receipt; captured receipts take precedence. Definite
+agent failures can map; untyped uncertainty and cancellation cannot. Recovery
+construction failures preserve validated exact-attempt receipts. The
+[P7/P8 contract](IMPLEMENTED-P7-P8.md) documents the API and boundaries.
+Consumer policies still decide accounting; implementation does not establish
+independent agreement on a real provider's unknown paid attempts.
 
 ### Evidence is immutable and sufficient for replay
 
@@ -237,7 +239,7 @@ same fixture producing identical journey digests in a fresh store.
 **Exists:** a node's input contract is one contract identifier. At settlement
 the store validates the effective artifact (the output, or the input carried
 forward when the body emitted none) against every matched target's declared
-input (`src/store/memory-unit-store.ts:2676-2680`, `:3507-3508`). Bodies
+input, with the envelope-join exception described below. Bodies
 receive only their input payload and a minimal context; they cannot read
 earlier artifacts (`src/execute/ports.ts:50-65`).
 
@@ -261,10 +263,10 @@ In both styles:
   typed facts it was generated from, never the prose. If a summary fails, a
   deterministic fallback line stands in and routing does not change.
 
-### Joins synchronize and select; they do not combine
+### Joins select by default and can opt into aggregation
 
-**Exists**, verified against `src/store/memory-unit-store.ts:2715-2770` and
-the conformance suite (`src/store/unit-store-conformance.ts:1009-1078`):
+**Exists:** omitted `compose` and `compose: "select"` retain these semantics,
+verified by the memory store and conformance suite:
 
 - A join node declares its inbound edge ids and `all` or `{ nOf }`. Progress is
   per (unit, join, inbound edge): pending, offered, or impossible.
@@ -282,7 +284,7 @@ the conformance suite (`src/store/unit-store-conformance.ts:1009-1078`):
 - The join body sees only the selected artifact's payload. Nothing in the port
   context exposes the other offers.
 
-Valid uses today:
+Valid uses of selection:
 
 - A race: `{ nOf: 1 }` between a human decision and a timer callback, where
   either artifact satisfies the same contract (the `escalation-ladder`
@@ -291,9 +293,18 @@ Valid uses today:
   context, where the join body only needs to know that both finished and the
   selected artifact is as good as any.
 
-Not valid today: a join that computes over the payloads of two branches. Use a
-sequential trunk where each step appends its fact, or wait for the **Proposed**
-join-input envelope (review proposal P7).
+**Exists (P7):** an opt-in `compose: "envelope"` join declares input
+`JOIN_INPUT_ARTIFACT_CONTRACT`. Its body receives a sealed payload containing
+the graph/unit/join identities, requirement, and every offer accepted at
+resolution in sealed inbound order, including each source artifact's payload.
+Branches may use different contracts. `nOf` includes the accepted subset, which
+can depend on arrival order and can exceed n when several matching edges are
+accepted in one settlement. Duplicate and later offers never alter the queued
+input. The existing queue's `selectedEdgeId` remains a provenance anchor; it
+does not select the envelope's only payload. No store capability is exposed.
+See [P7/P8 contracts](IMPLEMENTED-P7-P8.md) for limits, snapshot validation,
+and the conformance required of durable adapters. Sequential accumulation
+remains a useful pattern when later steps depend on earlier results.
 
 ## 7. Independent versioning
 

@@ -4,7 +4,7 @@ import { deepFrozenClone, snapshotBoundedValidationData } from "mission-pipeline
 import { assertIdentifier, assertSafePositiveInt, assertSha256Hex } from "mission-pipeline/internal/guards";
 import { compileGraph } from "mission-pipeline/graph/compile";
 import { GRAPH_DISPLAY_SCHEMA_VERSION, projectGraphDisplay } from "mission-pipeline/graph/display";
-import { NODE_TURN_IDEMPOTENCY, NODE_TURN_RETRY_TAXONOMY, validateMissionPipelineNode } from "mission-pipeline/graph/definition";
+import { JOIN_INPUT_ARTIFACT_CONTRACT, NODE_TURN_IDEMPOTENCY, NODE_TURN_RETRY_TAXONOMY, validateMissionPipelineNode } from "mission-pipeline/graph/definition";
 import { validateGoalManifest } from "mission-pipeline/graph/goals";
 import { PIPELINE_PRESENTATION_SCHEMA_VERSION } from "./types.js";
 const own = (value, key) => Object.hasOwn(value, key);
@@ -94,13 +94,15 @@ function projectionData(value) {
         const ref = record(node.ref, ["id", "version"], ["id", "version"], `${label}.ref`);
         // Reuse the engine's node-field validation. These synthetic principal/turn
         // fields are never rendered or retained and prove no source authenticity.
-        validateMissionPipelineNode({
+        const validatedNode = validateMissionPipelineNode({
             nodeId: node.nodeId, kind: node.kind, ref, input: node.input,
             outcomes: { version: ref.version, outcomes: node.outcomes },
             ...Object.fromEntries(["outputs", "binding", "configuration", "join"].filter((key) => own(node, key)).map((key) => [key, node[key]])),
             principal: { id: "graphpaper.validation" },
             turn: { idempotency: NODE_TURN_IDEMPOTENCY, retryTaxonomy: NODE_TURN_RETRY_TAXONOMY, leaseMs: 1, maxAttempts: node.maxAttempts }
         }, label);
+        if (validatedNode.join?.compose === "envelope" && validatedNode.input !== JOIN_INPUT_ARTIFACT_CONTRACT)
+            throw new Error(`${label}: envelope join requires ${JOIN_INPUT_ARTIFACT_CONTRACT}`);
         if (typeof node.depth !== "number" || !Number.isSafeInteger(node.depth) || node.depth < 0 || node.depth > 255)
             throw new Error(`${label}.depth must be an integer in 0..255`);
         bool(node.marks, `${label}.marks`);
@@ -198,10 +200,11 @@ function projectionData(value) {
         }
     const joins = list(raw.joins, "projection.joins", 256).map((value, index) => {
         const label = `projection.joins[${index}]`;
-        const join = record(value, ["nodeId", "require", "inbound"], ["nodeId", "require", "inbound"], label);
+        const join = record(value, ["nodeId", "require", "inbound", "compose"], ["nodeId", "require", "inbound"], label);
         const nodeId = assertIdentifier(join.nodeId, `${label}.nodeId`);
         const node = byNode.get(nodeId);
-        if (node?.join === undefined || canonicalJson(node.join) !== canonicalJson({ require: join.require, inbound: join.inbound }))
+        if (node?.join === undefined || canonicalJson(node.join) !== canonicalJson({ require: join.require, inbound: join.inbound,
+            ...(own(join, "compose") ? { compose: join.compose } : {}) }))
             throw new Error(`${label} disagrees with its node join`);
         const inbound = identifiers(join.inbound, `${label}.inbound`, 256, 1);
         const actual = [...new Set(arrows.filter((arrow) => arrow.to === nodeId).flatMap((arrow) => arrow.edgeIds))];

@@ -17,6 +17,7 @@ import { digest } from "../contracts/digest.js";
 import {
   createGraphDefinition,
   graphDefinitionRef,
+  JOIN_INPUT_ARTIFACT_CONTRACT,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
   MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
   type GraphDefinition,
@@ -389,6 +390,100 @@ function humanJoinGraph(graphId: string): GraphDefinition {
       { nodeId: "review", outcome: "join_unsatisfiable" }
     ]
   });
+}
+
+function envelopeJoinGraph(graph: GraphDefinition): GraphDefinition {
+  const { graphDigest: _graphDigest, ...draft } = graph;
+  return createGraphDefinition({
+    ...draft,
+    nodes: graph.nodes.map((candidate) => ({
+      ...candidate,
+      ...(candidate.join === undefined ? {} : {
+        input: JOIN_INPUT_ARTIFACT_CONTRACT,
+        join: { ...candidate.join, compose: "envelope" }
+      }),
+      ...(candidate.join === undefined && !candidate.nodeId.startsWith("branch-") ? {} : {
+        configuration: {
+          id: `conformance.${candidate.nodeId}.configuration`,
+          version: 1,
+          digest: digest({ nodeId: candidate.nodeId, policy: "conformance" })
+        }
+      })
+    }))
+  });
+}
+
+function threeBranchEnvelopeJoinGraph(graphId: string): GraphDefinition {
+  return envelopeJoinGraph(createGraphDefinition({
+    graphId,
+    version: 1,
+    description: `Envelope subset conformance graph ${graphId}.`,
+    entry: "start",
+    nodes: [
+      node("start", ["ready"]),
+      ...["a", "b", "c"].map((branch) => node(`branch-${branch}`, ["done"])),
+      node("join", ["joined", "join_unsatisfiable"], {
+        join: { inbound: ["a-join", "b-join", "c-join"], require: { nOf: 2 } }
+      })
+    ],
+    edges: [
+      ...["a", "b", "c"].map((branch) => ({
+        edgeId: `start-${branch}`, from: "start", when: { outcome: "ready" }, to: [`branch-${branch}`]
+      })),
+      ...["a", "b", "c"].map((branch) => ({
+        edgeId: `${branch}-join`, from: `branch-${branch}`, when: { outcome: "done" }, to: ["join"]
+      }))
+    ],
+    terminals: [
+      { nodeId: "join", outcome: "joined" },
+      { nodeId: "join", outcome: "join_unsatisfiable" }
+    ]
+  }));
+}
+
+function assertFrozenPayload(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  assert.equal(Object.isFrozen(value), true);
+  for (const item of Object.values(value)) assertFrozenPayload(item);
+}
+
+/** Build expected bytes independently of the join composition implementation. */
+function assertJoinInputArtifact(
+  graph: GraphDefinition,
+  queue: Pick<UnitQueueOccurrence, "unitId" | "nodeId" | "inputArtifact" | "join">,
+  artifacts: ReadonlyMap<string, ArtifactEnvelope>
+): void {
+  const joinNode = graph.nodes.find((candidate) => candidate.nodeId === queue.nodeId)!;
+  assert.ok(joinNode.join !== undefined);
+  assert.ok(queue.join !== undefined);
+  const expected = createArtifactEnvelope(JOIN_INPUT_ARTIFACT_CONTRACT, {
+    schemaVersion: JOIN_INPUT_ARTIFACT_CONTRACT,
+    unitId: queue.unitId,
+    graph: graphDefinitionRef(graph),
+    nodeId: joinNode.nodeId,
+    nodeRef: joinNode.ref,
+    ...(joinNode.configuration === undefined ? {} : { configuration: joinNode.configuration }),
+    require: joinNode.join.require,
+    accepted: joinNode.join.inbound.flatMap((edgeId) => {
+      const offer = queue.join!.accepted.find((candidate) => candidate.edgeId === edgeId);
+      if (offer === undefined) return [];
+      const source = graph.nodes.find((candidate) => candidate.nodeId === offer.sourceNodeId)!;
+      const artifact = artifacts.get(edgeId);
+      assert.ok(artifact !== undefined, `expected accepted artifact at ${edgeId}`);
+      assert.equal(offer.artifact.contractId, artifact.contractId);
+      assert.equal(offer.artifact.digest, artifact.digest);
+      assert.equal(offer.artifact.bytes, artifact.bytes);
+      assert.equal(Object.hasOwn(offer.artifact, "bytes"), Object.hasOwn(artifact, "bytes"));
+      return [{
+        ...offer,
+        sourceNodeRef: source.ref,
+        ...(source.configuration === undefined ? {} : { sourceConfiguration: source.configuration }),
+        artifact
+      }];
+    })
+  });
+  assert.deepEqual(queue.inputArtifact, expected);
+  assertFrozenPayload(queue.inputArtifact.payload);
 }
 
 async function publishAndAdmit(
@@ -1077,6 +1172,199 @@ export function registerUnitStoreConformanceTests(
     }
   });
 
+  register("envelope join delivers heterogeneous payloads and exact source identities in sealed inbound order", async (driver) => {
+    const graph = envelopeJoinGraph(joinGraph("conformance.join-envelope-reverse-arrival", "all"));
+    const unitId = "unit-join-envelope-reverse-arrival";
+    await publishAndAdmit(driver, graph, unitId);
+    await runCode(driver, "start", { outcome: "ready" });
+    const artifactA = createArtifactEnvelope("conformance.classification.v1", {
+      category: "support", labels: ["account"]
+    });
+    const artifactB = createArtifactEnvelope("conformance.lookup.v1", {
+      candidates: [{ id: "case-17", score: 0.75 }], found: true
+    });
+    await runCode(driver, "branch-b", { outcome: "done", outputArtifact: artifactB });
+    driver.advanceClock(1);
+    await runCode(driver, "branch-a", { outcome: "done", outputArtifact: artifactA });
+    const queued = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(queued.length, 1);
+    const queue = queued[0]!;
+    assert.deepEqual(queue.join?.accepted.map((offer) => offer.edgeId), ["a-join", "b-join"]);
+    assert.equal(queue.join?.selectedEdgeId, "a-join");
+    assert.equal(queue.join!.accepted[1]!.offeredAt < queue.join!.accepted[0]!.offeredAt, true);
+    assertJoinInputArtifact(graph, queue, new Map([["a-join", artifactA], ["b-join", artifactB]]));
+    const journey = await driver.unitStore.readJourney({ unitId });
+    for (const offer of queue.join!.accepted) {
+      const source = journey.find((record) => record.kind === "turn_settled"
+        && record.nodeId === offer.sourceNodeId);
+      assert.ok(source?.kind === "turn_settled");
+      assert.equal(offer.sourceQueueId, source.queueId);
+      assert.equal(offer.sourceEvidenceDigest, source.settlementDigest);
+      assert.equal(offer.offeredAt, source.settledAt);
+      assertSettlementSeal(source);
+    }
+    assertJourneyRecordDigests(journey);
+    assert.deepEqual(await driver.unitStore.getArtifact({ artifact: {
+      contractId: queue.inputArtifact.contractId,
+      digest: queue.inputArtifact.digest
+    } }), queue.inputArtifact);
+    let observedInput: unknown;
+    const result = await runNextUnitTurn({
+      store: driver.unitStore,
+      principalId: WORKER_PRINCIPAL,
+      leaseOwner: "conformance-envelope-body",
+      nodeId: "join",
+      ports: { code: { run: async (input) => {
+        observedInput = input;
+        return { outcome: "joined" };
+      } } },
+      now: () => driver.now()
+    });
+    assert.equal(result?.status, "succeeded");
+    assert.deepEqual(observedInput, queue.inputArtifact.payload);
+    assertFrozenPayload(observedInput);
+  });
+
+  register("envelope join preserves each accepted artifact ref when identical payloads differ in optional bytes", async (driver) => {
+    const graph = envelopeJoinGraph(joinGraph("conformance.join-envelope-ref-bytes", "all"));
+    await publishAndAdmit(driver, graph, "unit-join-envelope-ref-bytes");
+    await runCode(driver, "start", { outcome: "ready" });
+    const withBytes = createArtifactEnvelope(ARTIFACT_CONTRACT, { shared: "payload" });
+    const withoutBytes: ArtifactEnvelope = {
+      contractId: withBytes.contractId,
+      digest: withBytes.digest,
+      payload: withBytes.payload
+    };
+    await runCode(driver, "branch-a", { outcome: "done", outputArtifact: withBytes });
+    await runCode(driver, "branch-b", { outcome: "done", outputArtifact: withoutBytes });
+    const queued = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(queued.length, 1);
+    assertJoinInputArtifact(graph, queued[0]!, new Map([
+      ["a-join", withBytes], ["b-join", withoutBytes]
+    ]));
+  });
+
+  register("envelope nOf retains only its accepted subset in sealed order and excludes late arrivals", async (driver) => {
+    const graph = threeBranchEnvelopeJoinGraph("conformance.join-envelope-n-of");
+    const unitId = "unit-join-envelope-n-of";
+    await publishAndAdmit(driver, graph, unitId);
+    await runCode(driver, "start", { outcome: "ready" });
+    const artifactB = createArtifactEnvelope("conformance.second.v1", { accepted: "b" });
+    const artifactC = createArtifactEnvelope("conformance.third.v1", ["accepted-c"]);
+    await runCode(driver, "branch-c", { outcome: "done", outputArtifact: artifactC });
+    assert.equal((await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    })).length, 0);
+    await runCode(driver, "branch-b", { outcome: "done", outputArtifact: artifactB });
+    const queued = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(queued.length, 1);
+    const queue = queued[0]!;
+    assert.deepEqual(queue.join?.accepted.map((offer) => offer.edgeId), ["b-join", "c-join"]);
+    assert.equal(queue.join?.selectedEdgeId, "b-join");
+    assertJoinInputArtifact(graph, queue, new Map([["b-join", artifactB], ["c-join", artifactC]]));
+    const before = queue.inputArtifact;
+    await runCode(driver, "branch-a", {
+      outcome: "done",
+      outputArtifact: createArtifactEnvelope("conformance.late.v1", { excluded: "a" })
+    });
+    const after = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(after.length, 1);
+    assert.equal(after[0]!.queueId, queue.queueId);
+    assert.deepEqual(after[0]!.inputArtifact, before);
+    assert.deepEqual(after[0]!.join, queue.join);
+    const journey = await driver.unitStore.readJourney({ unitId });
+    const late = journey.find((record) => record.kind === "turn_settled"
+      && record.nodeId === "branch-a");
+    assert.ok(late?.kind === "turn_settled");
+    assert.equal(late.routing.some((effect) => effect.kind === "join_offer"
+      && effect.edgeId === "a-join"
+      && effect.disposition === "join_already_resolved_noop"), true);
+  });
+
+  register("envelope nOf includes every offer accepted within the settlement that reaches its threshold", async (driver) => {
+    const graph = envelopeJoinGraph(createGraphDefinition({
+      graphId: "conformance.join-envelope-same-source",
+      version: 1,
+      description: "A threshold does not discard simultaneous matching edges from one settlement.",
+      entry: "source",
+      nodes: [
+        node("source", ["done"]),
+        node("join", ["joined", "join_unsatisfiable"], {
+          join: { inbound: ["third", "first", "second"], require: { nOf: 1 } }
+        })
+      ],
+      edges: ["first", "second", "third"].map((edgeId) => ({
+        edgeId, from: "source", when: { outcome: "done" }, to: ["join"]
+      })),
+      terminals: [
+        { nodeId: "join", outcome: "joined" },
+        { nodeId: "join", outcome: "join_unsatisfiable" }
+      ]
+    }));
+    await publishAndAdmit(driver, graph, "unit-join-envelope-same-source");
+    const output = createArtifactEnvelope("conformance.simultaneous.v1", { shared: true });
+    await runCode(driver, "source", { outcome: "done", outputArtifact: output });
+    const queued = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(queued.length, 1);
+    assert.deepEqual(queued[0]!.join?.accepted.map((offer) => offer.edgeId), ["third", "first", "second"]);
+    assertJoinInputArtifact(graph, queued[0]!, new Map([
+      ["first", output], ["second", output], ["third", output]
+    ]));
+    assert.equal(new Set(queued[0]!.join!.accepted.map((offer) => offer.sourceQueueId)).size, 1);
+    assert.equal(new Set(queued[0]!.join!.accepted.map((offer) => offer.sourceEvidenceDigest)).size, 1);
+  });
+
+  register("envelope join excludes duplicate edge payloads before resolution and late cycle payloads after it", async (driver) => {
+    const graph = envelopeJoinGraph(cyclicJoinGraph("conformance.join-envelope-duplicates"));
+    const unitId = "unit-join-envelope-duplicates";
+    await publishAndAdmit(driver, graph, unitId);
+    await runCode(driver, "start", { outcome: "ready" });
+    await runCode(driver, "branch-a", { outcome: "skip" });
+    await runCode(driver, "helper", { outcome: "go" });
+    const first = createArtifactEnvelope(ARTIFACT_CONTRACT, { first: "a" });
+    const duplicate = createArtifactEnvelope(ARTIFACT_CONTRACT, { excluded: "duplicate-a" });
+    const artifactB = createArtifactEnvelope("conformance.final-leg.v1", { accepted: "b" });
+    await runCode(driver, "branch-a", { outcome: "done", outputArtifact: first });
+    await runCode(driver, "branch-a", { outcome: "done", outputArtifact: duplicate });
+    const pending = await driver.unitStore.readJoinProgress({ unitId, nodeId: "join" });
+    assert.equal(pending?.status, "pending");
+    const offered = pending?.inbound.find((entry) => entry.edgeId === "a-join");
+    assert.ok(offered?.state === "offered");
+    assert.equal(offered.offer.artifact.digest, first.digest);
+    await runCode(driver, "branch-b", { outcome: "done", outputArtifact: artifactB });
+    const queued = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(queued.length, 1);
+    assertJoinInputArtifact(graph, queued[0]!, new Map([["a-join", first], ["b-join", artifactB]]));
+    await runCode(driver, "branch-a", {
+      outcome: "done", outputArtifact: createArtifactEnvelope(ARTIFACT_CONTRACT, { excluded: "late-a" })
+    });
+    const after = await driver.unitStore.listQueuedUnits({
+      principalId: WORKER_PRINCIPAL, nodeId: "join"
+    });
+    assert.equal(after.length, 1);
+    assert.deepEqual(after[0]!.inputArtifact, queued[0]!.inputArtifact);
+    const journey = await driver.unitStore.readJourney({ unitId });
+    const offers = journey.flatMap((record) => record.kind === "turn_settled"
+      && record.nodeId === "branch-a"
+      ? record.routing.filter((effect) => effect.kind === "join_offer" && effect.edgeId === "a-join")
+      : []);
+    assert.deepEqual(offers.map((effect) => effect.kind === "join_offer" ? effect.disposition : undefined), [
+      "accepted", "edge_already_resolved_noop", "join_already_resolved_noop"
+    ]);
+  });
+
   register("nOf join fires once and records every late offer as a no-op", async (driver) => {
     const graph = joinGraph("conformance.join-n-of", { nOf: 1 });
     await publishAndAdmit(driver, graph, "unit-join-n-of");
@@ -1722,12 +2010,19 @@ export function registerUnitStoreConformanceTests(
     assert.equal(settled.status, "succeeded");
   });
 
-  for (const checkpoint of SETTLE_TRANSACTION_CHECKPOINTS) {
-    register(`settle crash at ${checkpoint} is exactly-once and never between queues`, async (driver) => {
-      const graph = crashGraph(`conformance.crash-${checkpoint.replaceAll("_", "-")}`);
-      await publishAndAdmit(driver, graph, `unit-crash-${checkpoint}`);
+  const settlementScenarios = (["select", "envelope"] as const).flatMap((compose) =>
+    SETTLE_TRANSACTION_CHECKPOINTS.map((checkpoint) => ({ compose, checkpoint }))
+  );
+  for (const { compose, checkpoint } of settlementScenarios) {
+    register(`${compose === "envelope" ? "envelope join " : ""}settle crash at ${checkpoint} is exactly-once and never between queues`, async (driver) => {
+      const baseGraph = crashGraph(`conformance.crash-${checkpoint.replaceAll("_", "-")}`);
+      const graph = compose === "envelope" ? envelopeJoinGraph(baseGraph) : baseGraph;
+      const admission = await publishAndAdmit(driver, graph, `unit-crash-${checkpoint}`);
       await runCode(driver, "start", { outcome: "ready" });
       await runCode(driver, "branch-a", { outcome: "done" });
+      const pendingJoin = await driver.unitStore.readJoinProgress({
+        unitId: admission.unit.unitId, nodeId: "join"
+      });
       const branchB = await claimOne(driver, "branch-b");
       const output = createArtifactEnvelope(ARTIFACT_CONTRACT, {
         checkpoint,
@@ -1790,6 +2085,15 @@ export function registerUnitStoreConformanceTests(
         crashed.cachedCompletions.some((cached) => cached.queueId === branchB.queueId),
         true
       );
+      if (compose === "envelope") {
+        assert.equal(crashed.artifacts.filter((artifact) =>
+          artifact.contractId === JOIN_INPUT_ARTIFACT_CONTRACT).length, postCommit ? 1 : 0);
+        if (!postCommit) {
+          assert.deepEqual(await driver.unitStore.readJoinProgress({
+            unitId: admission.unit.unitId, nodeId: "join"
+          }), pendingJoin);
+        }
+      }
 
       await driver.recover();
       if (postCommit) {
@@ -1829,6 +2133,18 @@ export function registerUnitStoreConformanceTests(
         final.joins.filter((join) => join.nodeId === "join" && join.status === "queued").length,
         1
       );
+      if (compose === "envelope") {
+        const joinQueue = final.queues.find((queue) => queue.nodeId === "join")!;
+        assertJoinInputArtifact(graph, joinQueue, new Map([
+          ["a-join", admission.entryQueue.inputArtifact],
+          ["b-join", output]
+        ]));
+        const retainedEnvelopes = final.artifacts.filter((artifact) =>
+          artifact.contractId === JOIN_INPUT_ARTIFACT_CONTRACT);
+        assert.equal(retainedEnvelopes.length, 1);
+        assert.deepEqual(retainedEnvelopes[0], joinQueue.inputArtifact);
+        assertJourneyRecordDigests(final.journey);
+      }
     });
   }
 }

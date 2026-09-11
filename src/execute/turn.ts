@@ -31,6 +31,7 @@ import {
   ExecutionFailureError,
   isExecutionFailureError
 } from "./failure.js";
+import { declaredFailureRecoveryUsage } from "./declared-failures.js";
 import {
   snapshotNodeTurnCompletion,
   snapshotWorkerNodeTurnContext,
@@ -245,7 +246,7 @@ export function nodeTurnResultErrorUsage(
   const evidence = nodeTurnResultErrorEvidenceByError.get(value);
   return evidence?.nodeId === nodeId && evidence.idempotencyKey === idempotencyKey
     ? evidence.usage
-    : undefined;
+    : declaredFailureRecoveryUsage(value, nodeId, idempotencyKey);
 }
 
 /** A worker claim exposed a human/callback wait to an executable worker. */

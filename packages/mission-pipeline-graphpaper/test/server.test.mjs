@@ -300,3 +300,13 @@ test("served viewer ESM imports form a complete local asset set with no runtime 
     }
   }
 });
+
+test("shipped CSS keeps details in the viewport and bounds the canvas despite renderer inline SVG sizing", () => {
+  const css = viewerAssets()["pipeline.css"].body;
+  // These are the host-layout rules; actual geometry is checked in the browser witness.
+  assert.match(css, /\.pipeline-details\s*\{[^}]*position:\s*fixed;[^}]*top:\s*0;[^}]*right:\s*0;[^}]*bottom:\s*0;/u);
+  assert.match(css, /\.pipeline-viewer \[data-pipeline-canvas\]\s*\{[^}]*max-width:\s*var\(--pipeline-diagram-width,\s*100%\)/u);
+  assert.match(css, /\.pipeline-viewer \.diagram-legend\s*\{[^}]*position:\s*static;/u);
+  assert.match(css, /@media \(max-width: 680px\)\s*\{\s*\.pipeline-details\s*\{[^}]*top:\s*auto;[^}]*width:\s*100%;[^}]*max-height:\s*min\(65vh,\s*100%\)/u);
+  assert.match(css, /\.pipeline-details\[hidden\]\s*\{\s*display:\s*none;/u);
+});

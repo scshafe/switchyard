@@ -1,6 +1,6 @@
 # ADR: a standard graphpaper frontend SDK for mission-pipeline graphs
 
-**Status: static SDK core and adapters implemented; browser witness pending (2026-09-10).**
+**Status: static SDK core and adapters implemented; supported local Browser checks recorded, reduced-motion activation unverified (2026-09-11).**
 The separately packaged SDK lives at
 [`packages/mission-pipeline-graphpaper`](../packages/mission-pipeline-graphpaper/README.md),
 version 0.1.0 unreleased, outside the engine payload. All engine exports it relies on are implemented in
@@ -11,9 +11,11 @@ consumer interfaces below remain proposals unless explicitly marked otherwise.
 Static building, presentation validation, static legend/render options,
 historical model metadata, server figures/assets, browser selection/deep links,
 the authorized details seam, and static CSS exist today. Automated checks cover
-these adapters; a real-browser witness remains pending because this session's
-browser runtime list is empty. This is not a merge-readiness or Inbox-adoption
-claim. Run overlays, metrics, proposal rendering, viewer updates, and goal
+these adapters. The [local Browser record](VERIFY-GRAPHPAPER-STATIC-ADAPTERS.md)
+covers ELK rendering, mouse/keyboard selection, identity/races, deep links,
+responsive layout, and teardown. Reduced-motion activation remains unverified
+because the connected Browser exposes no media override. This is not a
+merge-readiness or Inbox-adoption claim. Run overlays, metrics, proposal rendering, viewer updates, and goal
 scopes remain proposed.
 
 ## Context
@@ -70,7 +72,7 @@ mission-pipeline-graphpaper (SDK, peer-depends on both; no DOM in core)
   core:    buildPipelineDiagram, validatePresentation, static legend/options [implemented, 0.1.0]
            buildProposalDiagram, overlays and metrics [proposed]
   server:  renderPipelineFigure (SSR, optional injected ELK), viewerAssets [implemented, 0.1.0]
-  browser: mountPipelineViewer (static hydrate, select, deep link, details seam) [implemented, 0.1.0; browser witness pending]
+  browser: mountPipelineViewer (static hydrate, select, deep link, details seam) [implemented, 0.1.0; local Browser checks recorded]
           │
           ▼
 graphpaper (unchanged: layout, SVG, popovers, selection, pan/zoom, a11y)
@@ -465,20 +467,22 @@ is refused until the first is destroyed.
 
 ## Accessibility, responsiveness, large graphs
 
-Static adapter wiring and CSS are implemented with automated coverage.
-Keyboard behavior, narrow-screen layout, and reduced-motion rendering still
-need the real-browser witness described below.
+Static adapter wiring and CSS have automated coverage and a local Browser
+witness for mouse/keyboard behavior and narrow-screen layout. Reduced-motion
+activation remains unverified; the loaded media rules and the current
+no-preference query were inspected, without changing system settings.
 
 - Keyboard: graphpaper's `tabindex="0"` on nodes and edges, Enter and Space to
   pick, Escape to clear; the SDK adds a visible focus ring for the selected
   node and keeps the panel focusable and closable by keyboard.
 - Reduced motion: the SDK CSS disables panel/node animation and transitions
   under `prefers-reduced-motion`. Runtime flow styling remains proposed.
-- Responsive: the figure carries its natural width and height as CSS
-  variables so the page scales it down only on narrow screens; the panel
-  becomes a bottom sheet under 680px (Inbox's rule, made default).
+- Responsive: the canvas is bounded by the figure's natural width even when
+  pan/zoom sets inline SVG sizing. The key and controls sit below the drawing.
+  The details panel is fixed within the viewport and becomes a bottom sheet
+  at 680px or less; the body scrolls on short screens.
 - Large graphs: compact nodes and tail-placed labels are current defaults;
-  viewport fit still needs visual verification. Proposed: `goals` may
+  local Browser pan/zoom/fit and non-overlapping node bounds were verified. Proposed: `goals` may
   render as drill-down scopes using graphpaper's `scope` feature, but the flat
   view remains the default and the scope node's badge states the exact number
   of model invocations inside, so grouping never hides a call.
@@ -586,15 +590,15 @@ Contract tests (Node, no browser):
   through JSON.
 - Proposed: golden models for the example graph in every runtime mode.
 
-Real-browser witness (pending for these adapter changes): hydrate the
-server figure with elkjs, pick a node by keyboard, follow a deep link, resize
-to a narrow viewport, verify the reduced-motion query, and confirm the details
-panel refuses a mismatched identity. On 2026-09-10 the available browser
-runtime list was empty, so this witness was not run; passing automated tests
-does not close it. graphpaper's own fake-DOM tests cover selection gestures;
-the SDK's fake-DOM tests cover the wiring. A signed-in deployed witness
-remains the consumer's release gate, as Inbox's plan states. No Inbox
-adoption or deployed verification is claimed here.
+Local Browser witness (2026-09-11): real ELK hydration, mouse and Tab/Enter/Space
+selection, panel focus/Escape/close, deep links, identity rejection, deterministic
+stale-response races, teardown/remount, and narrow/short-screen geometry were
+exercised. The current reduced-motion query is false; its CSS rules are loaded,
+but activating the preference is unverified because the Browser exposes no
+media override. The record includes the corrected mouse-capture and layout
+failures, exact checks, and limitations. The 2026-09-10 empty-runtime result is
+historical. A signed-in deployed witness remains the consumer's release gate,
+as Inbox's plan states; no Inbox adoption or deployed verification is claimed.
 
 ## Extraction and adoption plan
 
@@ -611,11 +615,11 @@ adoption or deployed verification is claimed here.
    equals Inbox's current model modulo the new metadata block. Separate package
    at `packages/mission-pipeline-graphpaper`, not part of the engine payload.
 3. **Static server and browser adapters — implementation and automated checks
-   added in unreleased 0.1.0; real-browser witness pending**:
+   added in unreleased 0.1.0; supported local Browser checks recorded**:
    `renderPipelineFigure`, `viewerAssets`, and `mountPipelineViewer` provide
    static SSR, assets/CSS, selection, the authorized details panel, deep links,
-   and teardown. Models and graph/goal seals are unchanged. Complete the
-   browser witness above before declaring this extraction step fully verified.
+   and teardown. Models and graph/goal seals are unchanged. Reduced-motion
+   activation remains outstanding before calling this step fully verified.
 4. **Inbox adoption**: `pipeline-diagram.ts` becomes a thin call into the SDK
    with Inbox's presentation, endpoint-state derivation, metrics query, and
    details endpoint unchanged; delete the duplicated builder once the golden
@@ -626,8 +630,12 @@ adoption or deployed verification is claimed here.
    repository's fixtures as the SDK's own smoke, proving no Inbox assumption
    leaked into the package.
 
-Steps 1–3 make no change to a running consumer. Step 3's outstanding browser
-witness is the next verification slice; Inbox adoption remains future work.
+Steps 1–3 make no change to a running consumer. Next, activate reduced motion
+in a supported Browser and review the static adapter fixes. Commit approval and
+a fresh-clone gate at the new candidate precede any merge decision; Inbox
+adoption remains future work. The graphpaper mouse-capture compatibility shim
+can be revisited after an upstream renderer correction, without starting a new
+SDK feature.
 
 ## Alternatives considered
 
@@ -654,5 +662,7 @@ witness is the next verification slice; Inbox adoption remains future work.
   convention. Longest-path depth for acyclic graphs and breadth-first depth
   for cyclic graphs remain stable across renderers.
 - Keep runtime modes outside the static adapters: overlays, metrics, proposal
-  rendering, `update`, and goal scopes remain proposed. P8 receipt policy and
-  P7 join-envelope work remain deferred independently of this SDK.
+  rendering, `update`, and goal scopes remain proposed. P7 join envelopes and
+  P8 declared-failure policies are now [implemented in the engine](IMPLEMENTED-P7-P8.md).
+  The static SDK preserves optional join composition metadata and labels
+  envelope inputs; it adds no runtime aggregation or failure-policy UI.

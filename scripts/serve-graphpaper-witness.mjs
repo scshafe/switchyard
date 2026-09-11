@@ -39,7 +39,7 @@ const page = `<!doctype html>
 <style>body{margin:0;padding:24px;font:16px/1.5 system-ui,sans-serif;color:#172033;background:#f8fafc}
 main{max-width:1200px;margin:auto}h1{font-size:24px}nav{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
 button,label{font:inherit}button{padding:8px 12px;cursor:pointer}label{display:inline-flex;align-items:center;gap:6px}
-.status{display:block;margin:8px 0;padding:8px;background:#e2e8f0}.figure-host{background:white;padding:12px;border:1px solid #cbd5e1}
+.status{display:block;margin:8px 0;padding:8px;background:#e2e8f0}pre.status{white-space:pre-wrap;overflow-wrap:anywhere}.figure-host{background:white;padding:12px;border:1px solid #cbd5e1}
 @media(max-width:680px){body{padding:12px}.figure-host{padding:4px}}</style>
 <script src="/assets/elk.js" defer></script><script type="module" src="/witness.js"></script></head>
 <body><main><h1>Support triage: static browser witness</h1>
@@ -49,9 +49,13 @@ button,label{font:inherit}button{padding:8px 12px;cursor:pointer}label{display:i
 <button id="clear">Clear selection</button><button id="destroy">Destroy viewer</button><button id="remount">Remount viewer</button></nav>
 <nav aria-label="Details scenarios"><label><input id="wrong-identity" type="checkbox">Return wrong graph identity</label>
 <label><input id="slow-details" type="checkbox">Delay details by 650 ms</label></nav>
+<nav aria-label="Deterministic details races"><button id="race-nodes">Race slow normalizer / fast signal</button>
+<button id="race-identity">Race stale same-node identity</button><button id="destroy-pending">Destroy with pending details</button>
+<button id="remount-pending">Remount with pending details</button></nav>
 <output id="viewer-status" class="status" aria-live="polite">Server figure ready; waiting for hydration.</output>
 <output id="selection-status" class="status" aria-live="polite">Selection: none</output>
 <output id="motion-status" class="status">Motion preference: checking</output>
+<pre id="details-events" class="status" aria-label="Details request log">No details requests.</pre>
 <div class="figure-host">${figure}</div>
 </main></body></html>`;
 const browserScript = `import { mountPipelineViewer } from "/assets/viewer.js";
@@ -60,6 +64,9 @@ const status = get("viewer-status");
 let viewer;
 let mounting = false;
 let selected = null;
+let requestId = 0;
+const events = [];
+const logDetails = (message) => { events.push(message); get("details-events").textContent = events.slice(-6).join("\\n"); };
 const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const showMotion = () => { get("motion-status").textContent = "Motion preference: " + (motion.matches ? "reduced" : "no preference"); };
 motion.addEventListener("change", showMotion);
@@ -72,10 +79,15 @@ async function mount() {
     viewer = await mountPipelineViewer(get("support-triage-figure"), {
       layoutEngine: new window.ELK(),
       details: async (nodeId) => {
+        const id = ++requestId;
         const params = new URLSearchParams({ mismatch: get("wrong-identity").checked ? "1" : "0", delay: get("slow-details").checked ? "650" : "0" });
+        const label = "#" + id + " " + nodeId + " " + params;
+        logDetails("Started " + label);
         const response = await fetch("/details/" + encodeURIComponent(nodeId) + "?" + params);
         if (!response.ok) throw new Error("Local fixture details unavailable");
-        return response.text();
+        const text = await response.text();
+        logDetails("Received " + label);
+        return text;
       },
       onSelect: (pick) => {
         selected = pick.nodeId;
@@ -93,17 +105,39 @@ function select(nodeId) {
 get("select-normalize").addEventListener("click", () => select("normalize"));
 get("select-model").addEventListener("click", () => select("outage-signal"));
 get("clear").addEventListener("click", () => select(null));
-get("destroy").addEventListener("click", () => {
+function destroy() {
   if (!viewer) { status.textContent = "Viewer is not mounted."; return; }
   viewer.destroy(); viewer = undefined; selected = null;
   get("selection-status").textContent = "Selection: none";
   status.textContent = "Viewer destroyed; original server figure restored. Use Remount viewer.";
-});
+}
+get("destroy").addEventListener("click", destroy);
 get("remount").addEventListener("click", () => { void mount(); });
 get("wrong-identity").addEventListener("change", () => {
   if (!viewer) return;
   const again = selected ?? "outage-signal";
   viewer.select(null); viewer.select(again);
+});
+function beginDelayed(mismatch = false) {
+  if (!viewer) { status.textContent = "Viewer is not mounted. Use Remount viewer."; return false; }
+  get("wrong-identity").checked = mismatch;
+  get("slow-details").checked = true;
+  viewer.select(null); viewer.select("normalize");
+  get("wrong-identity").checked = false;
+  get("slow-details").checked = false;
+  return true;
+}
+get("race-nodes").addEventListener("click", () => {
+  if (beginDelayed()) viewer.select("outage-signal");
+});
+get("race-identity").addEventListener("click", () => {
+  if (beginDelayed(true)) { viewer.select(null); viewer.select("normalize"); }
+});
+get("destroy-pending").addEventListener("click", () => {
+  if (beginDelayed()) destroy();
+});
+get("remount-pending").addEventListener("click", () => {
+  if (beginDelayed(true)) { destroy(); void mount(); }
 });
 if (document.readyState === "complete") void mount();
 else window.addEventListener("load", () => { void mount(); }, { once: true });

@@ -22,8 +22,10 @@ presentation and provides static server figures/assets plus browser
 selection, deep links, and an authorized details seam. It is excluded from
 this engine's npm payload; graphpaper and ELK are root development dependencies,
 not engine runtime dependencies. Static adapter code and automated checks are
-in place; the real-browser witness remains pending because no browser runtime
-was available. Runtime overlays, metrics, proposal rendering, viewer updates,
+in place. Local Browser verification now covers ELK layout, mouse/keyboard
+selection, details identity/races, deep links, responsive layout, and teardown.
+Activating reduced motion remains unverified because the connected Browser has
+no media override. Runtime overlays, metrics, proposal rendering, viewer updates,
 goal scopes, and Inbox adoption remain proposed.
 
 Supported runtimes:
@@ -101,8 +103,9 @@ version.
 
 A node may declare `outputs`, the contract its body emits per outcome.
 `compileGraph` then proves that every edge carrying that outcome lands on a
-node whose input accepts it, and a completion carrying any other contract is
-refused before it is cached. Declared outputs are definition data: they move
+node whose input accepts it (except an opt-in envelope join, which embeds the
+source artifact), and a completion carrying any other contract is refused
+before it is cached. Declared outputs are definition data: they move
 the graph digest and the node definition signature. A node may also pin a
 `configuration` ref (`{ id, version, digest }`) naming the host-side policy
 it runs under; the digest enters the graph digest and the node execution
@@ -116,13 +119,21 @@ The closed edge-predicate language is:
 
 Joins support `all` and `nOf` over declared inbound edge IDs. A join fires at
 most once per unit. Unsatisfiable joins emit the declared engine outcome;
-offers arriving after a fired join are journey-recorded no-ops.
+offers arriving after a fired join are journey-recorded no-ops. By default a
+join selects one accepted artifact. `join.compose: "envelope"` instead supplies
+all offers accepted at resolution, with embedded payloads and exact provenance,
+under `JOIN_INPUT_ARTIFACT_CONTRACT` (`mission-pipeline.join-input.v1`).
+See the [P7/P8 contracts](docs/IMPLEMENTED-P7-P8.md) for aggregation and explicit
+failure-to-outcome policy, including downstream adapter requirements.
 
 ## Execution and stores
 
 The v2 execution modules are:
 
 - `execute/ports` — code, model, agent, human, and callback boundaries.
+- `execute/declared-failures` — opt-in `withDeclaredFailureOutcomes` for code,
+  model, and definite agent failures, with invocation-local evidence and
+  consumer-owned receipt policy.
 - `execute/turn` — one physical node-turn attempt, stable idempotency identity,
   output/usage validation, and retryable-versus-terminal failure taxonomy.
 - `execute/unit-runner` — claim a homogeneous per-node batch and request the
@@ -131,6 +142,7 @@ The v2 execution modules are:
   resolution.
 - `store/unit-store` — admission, queues, leases, journeys, joins, settlement,
   outbox, and dead-letter evidence.
+- `store/join-input` — construct and validate sealed aggregation envelopes.
 - `store/memory-graph-store` and `store/memory-unit-store` — the hermetic
   executable specification.
 
@@ -194,10 +206,11 @@ release bytes, installs the packed artifact into a fresh consumer, and runs
 JavaScript plus TypeScript import smokes. It also builds the separately
 packaged static SDK, checks its independent payload/manifest, and runs its
 golden, hostile-input, packed-install, graphpaper layout/SVG, static SSR/assets,
-and fake-DOM browser wiring checks. A real-browser witness for keyboard,
-deep-link, responsive, reduced-motion, and details behavior is still required;
-the current adapter work does not claim merge readiness from automated checks
-alone. See the [SDK ADR](docs/ADR-GRAPHPAPER-FRONTEND-SDK.md) for its status.
+and fake-DOM browser wiring checks. The [local Browser verification record](docs/VERIFY-GRAPHPAPER-STATIC-ADAPTERS.md)
+covers the static adapter's supported interaction and responsive checks, with
+reduced-motion activation and deployed consumer verification still outstanding.
+It does not establish merge readiness. See the [SDK ADR](docs/ADR-GRAPHPAPER-FRONTEND-SDK.md)
+for implemented versus proposed behavior.
 
 A payload change ships with a regenerated release manifest. Run
 `npm run build && npm run release:manifest && npm run check` in that order:

@@ -7,6 +7,8 @@ export type MissionPipelineNodeKind = (typeof MISSION_PIPELINE_NODE_KINDS)[numbe
 export declare const MISSION_PIPELINE_ENGINE_PRINCIPAL_ID: "mission_pipeline.engine";
 /** Output contract emitted by an engine-synthesized unsatisfiable join. */
 export declare const JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT: "mission-pipeline.join-unsatisfiable.v1";
+/** Input contract synthesized for an opt-in composing join. */
+export declare const JOIN_INPUT_ARTIFACT_CONTRACT: "mission-pipeline.join-input.v1";
 export declare const NODE_TURN_IDEMPOTENCY: "per (unitId, nodeId, attemptNumber)";
 export declare const NODE_TURN_RETRY_TAXONOMY: "retryable vs terminal, as v1 durable-stage";
 export declare const MAX_GRAPH_NODES = 256;
@@ -43,6 +45,8 @@ export interface MissionPipelineJoin {
     /** Stable edge IDs; compileGraph requires exact equality with actual inbound edges. */
     readonly inbound: readonly string[];
     readonly require: JoinRequirement;
+    /** Omitted/select preserves one-artifact selection; envelope embeds accepted branch inputs. */
+    readonly compose?: "select" | "envelope";
 }
 /**
  * Content-addressed identity of the host-side configuration a node body runs

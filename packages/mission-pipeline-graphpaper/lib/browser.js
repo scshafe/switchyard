@@ -186,6 +186,27 @@ export async function mountPipelineViewer(container, options = {}) {
         event.stopPropagation();
         closePanel();
     }
+    function preserveMouseTarget(event) {
+        const pointer = event;
+        if (pointer.pointerType !== "mouse" || pointer.button !== 0)
+            return;
+        // graphpaper 0.5.0 captures every press on the SVG for panning. Chromium
+        // then retargets the click to that SVG, losing the node. Mouse dragging
+        // already uses the renderer's window listeners; release only node presses
+        // so its existing click handler receives the original target. Touch/pen
+        // capture and background panning remain renderer-owned.
+        let target = pointer.target;
+        while (target !== null && target !== canvas) {
+            const nodeId = target.getAttribute?.("data-diagram-node");
+            if (nodeId !== null && nodeId !== undefined) {
+                const svg = canvas.querySelector("svg");
+                if (svg?.hasPointerCapture(pointer.pointerId))
+                    svg.releasePointerCapture(pointer.pointerId);
+                return;
+            }
+            target = target.parentElement;
+        }
+    }
     function rememberSelection(nodeId) {
         if (hashParam === null || suppressUrl)
             return;
@@ -281,6 +302,7 @@ export async function mountPipelineViewer(container, options = {}) {
         for (const element of claimed)
             mounted.delete(element);
         window.removeEventListener("hashchange", followHash);
+        canvas.removeEventListener("pointerdown", preserveMouseTarget);
         closeButton?.removeEventListener("click", closePanel);
         panel?.removeEventListener("keydown", panelKeydown);
         cleanupHydratedDiagram(canvas);
@@ -309,6 +331,7 @@ export async function mountPipelineViewer(container, options = {}) {
         });
         if (!canvas.isConnected || !selectDiagramNode(canvas, null, { notify: false }))
             throw new Error("pipeline hydration did not attach selection");
+        canvas.addEventListener("pointerdown", preserveMouseTarget);
         if (details !== undefined) {
             const host = container.parentElement;
             if (host === null)

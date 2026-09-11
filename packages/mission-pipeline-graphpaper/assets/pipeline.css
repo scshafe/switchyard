@@ -12,6 +12,10 @@
   margin: 0;
 }
 .pipeline-viewer .diagram-svg { display: block; width: var(--pipeline-diagram-width, 100%); max-width: 100%; height: auto; margin: 0 auto; }
+/* Pan/zoom sets an inline SVG width; bound its canvas to preserve natural size. */
+.pipeline-viewer [data-pipeline-canvas] { max-width: var(--pipeline-diagram-width, 100%); margin-inline: auto; padding-bottom: 44px; }
+/* Keep the key and zoom controls below the drawing, clear of terminal nodes. */
+.pipeline-viewer .diagram-legend { position: static; width: fit-content; max-width: 100%; box-sizing: border-box; margin: 12px 0 0; }
 .pipeline-viewer .node-type-code > rect { stroke: var(--pipeline-code); }
 .pipeline-viewer .node-type-model > rect { stroke: var(--pipeline-model); }
 .pipeline-viewer .node-type-human > rect { stroke: var(--pipeline-human); }
@@ -31,7 +35,7 @@
 .pipeline-viewer [data-diagram-node]:focus-visible { outline: none; }
 .pipeline-viewer-host { position: relative; }
 .pipeline-details {
-  position: absolute;
+  position: fixed;
   top: 0;
   right: 0;
   bottom: 0;

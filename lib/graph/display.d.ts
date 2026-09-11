@@ -39,6 +39,7 @@ export interface GraphDisplayJoin {
     readonly nodeId: string;
     readonly require: JoinRequirement;
     readonly inbound: readonly string[];
+    readonly compose?: "select" | "envelope";
 }
 export interface GraphDisplayProjection {
     readonly schemaVersion: typeof GRAPH_DISPLAY_SCHEMA_VERSION;

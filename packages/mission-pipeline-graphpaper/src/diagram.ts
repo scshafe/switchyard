@@ -70,6 +70,7 @@ export function buildPipelineDiagram(input: BuildPipelineDiagramInput): DiagramM
       rows: [
         ...(node.marks ? [{ label: "marks", value: vocabulary }] : []),
         { label: "depth", value: String(rank) },
+        ...(join?.compose === "envelope" ? [{ label: "join input", value: "accepted branch payload envelope" }] : []),
         ...(node.marks ? [] : [{ label: "outcomes", value: vocabulary }]),
         ...(words.model === undefined
           ? node.binding === undefined ? [] : [{ label: "binding", value: `${node.binding.bindingId}@${node.binding.version}` }]
@@ -84,7 +85,8 @@ export function buildPipelineDiagram(input: BuildPipelineDiagramInput): DiagramM
         kind: node.kind,
         rank,
         ...(node.marks ? { marks: [...node.outcomes] } : {}),
-        ...(join === undefined ? {} : { join: { require: join.require, inbound: [...join.inbound] } })
+        ...(join === undefined ? {} : { join: { require: join.require, inbound: [...join.inbound],
+          ...(Object.hasOwn(join, "compose") ? { compose: join.compose } : {}) } })
       }
     });
   }

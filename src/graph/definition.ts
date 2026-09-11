@@ -35,6 +35,9 @@ export const MISSION_PIPELINE_ENGINE_PRINCIPAL_ID =
 /** Output contract emitted by an engine-synthesized unsatisfiable join. */
 export const JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT =
   "mission-pipeline.join-unsatisfiable.v1" as const;
+/** Input contract synthesized for an opt-in composing join. */
+export const JOIN_INPUT_ARTIFACT_CONTRACT =
+  "mission-pipeline.join-input.v1" as const;
 
 export const NODE_TURN_IDEMPOTENCY = "per (unitId, nodeId, attemptNumber)" as const;
 export const NODE_TURN_RETRY_TAXONOMY = "retryable vs terminal, as v1 durable-stage" as const;
@@ -76,6 +79,8 @@ export interface MissionPipelineJoin {
   /** Stable edge IDs; compileGraph requires exact equality with actual inbound edges. */
   readonly inbound: readonly string[];
   readonly require: JoinRequirement;
+  /** Omitted/select preserves one-artifact selection; envelope embeds accepted branch inputs. */
+  readonly compose?: "select" | "envelope";
 }
 
 /**
@@ -181,7 +186,8 @@ const PRINCIPAL_REF_KEYS = new Set(["id"]);
 const BINDING_REF_KEYS = new Set(["kind", "bindingId", "version", "bindingDigest"]);
 const CONFIGURATION_REF_KEYS = new Set(["id", "version", "digest"]);
 const TURN_KEYS = new Set(["idempotency", "leaseMs", "maxAttempts", "retryTaxonomy"]);
-const JOIN_KEYS = new Set(["inbound", "require"]);
+const JOIN_KEYS = new Set(["inbound", "require", "compose"]);
+const JOIN_REQUIRED_KEYS = new Set(["inbound", "require"]);
 const N_OF_KEYS = new Set(["nOf"]);
 const TERMINAL_KEYS = new Set(["nodeId", "outcome"]);
 
@@ -322,7 +328,7 @@ function validateJoinRequirement(value: unknown, label: string): JoinRequirement
 function validateJoin(value: unknown, label: string): MissionPipelineJoin {
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, JOIN_KEYS, label);
-  assertRequiredKeys(raw, JOIN_KEYS, label);
+  assertRequiredKeys(raw, JOIN_REQUIRED_KEYS, label);
   if (
     !Array.isArray(raw.inbound)
     || raw.inbound.length < 1
@@ -338,7 +344,14 @@ function validateJoin(value: unknown, label: string): MissionPipelineJoin {
   if (new Set(inbound).size !== inbound.length) {
     throw new Error(`${label}.inbound: edge IDs must be unique`);
   }
-  return { inbound, require: validateJoinRequirement(raw.require, `${label}.require`) };
+  if (Object.hasOwn(raw, "compose") && raw.compose !== "select" && raw.compose !== "envelope") {
+    throw new Error(`${label}.compose: must be "select" | "envelope" (omit the key for selection)`);
+  }
+  return {
+    inbound,
+    require: validateJoinRequirement(raw.require, `${label}.require`),
+    ...(Object.hasOwn(raw, "compose") ? { compose: raw.compose as "select" | "envelope" } : {})
+  };
 }
 
 /** Validate one v2 node contract without resolving graph-level references. */

@@ -13,9 +13,10 @@ does not claim to be a browser bundle.
 
 The `/server` entry implements `renderPipelineFigure` and `viewerAssets`;
 `/browser` implements `mountPipelineViewer`, static selection/deep links, and
-an optional authorized details panel. These adapters have automated coverage;
-the real-browser keyboard, responsive-layout, and reduced-motion witness is
-still pending. Run overlays, metrics, proposal diagrams, live model updates,
+an optional authorized details panel. These adapters have automated coverage and a local Browser witness for ELK,
+mouse/keyboard selection, responsive layout, identity/races, and teardown.
+Reduced-motion activation remains unverified; the connected Browser exposes
+no media override. Run overlays, metrics, proposal diagrams, live model updates,
 goal scopes, and live Inbox adoption remain proposed. Unsupported fields such
 as `overlay`, `metrics`, and `update` are not accepted.
 
@@ -114,7 +115,10 @@ It verifies self-consistency, not publisher authorization.
   optional presentation seams. Depth labels are one-based engine depth, not
   ELK layers. Small outcome vocabularies on a single successor split into one
   arrow per outcome, preserving Inbox's static builder. Joins have a badge and
-  join-edge type; no readiness is inferred.
+  join-edge type; no readiness is inferred. Optional sealed `join.compose`
+  metadata is preserved. Envelope joins add the static row “join input:
+  accepted branch payload envelope”; existing select/omitted composition
+  models keep their prior rendering.
 - `historical: true` adds graphpaper's lifecycle badge metadata. The consumer
   decides whether a version is historical; the SDK reads no publication state.
   Authored IDs remain readable; synthetic ID collisions get stable `~1`, `~2`
@@ -125,7 +129,12 @@ The static class vocabulary follows graphpaper's public type mapping:
 `edge-kind-outcome|exit|join`. The shipped `pipeline.css` styles those classes,
 selection/focus, and the optional panel; runtime-status styling remains
 proposed. Adapters supply the static defaults and legend to graphpaper;
-its layout/SVG/selection implementations remain unchanged.
+its layout/SVG/selection implementations remain unchanged. A browser adapter
+compatibility listener releases graphpaper 0.5.0's SVG pointer capture for
+primary mouse presses on nodes so Chromium delivers the click to the node;
+the renderer still owns selection and drag detection. Touch/pen capture is
+unchanged. The canvas stays within the server's natural diagram width, and
+the key and zoom controls sit below the drawing so they do not cover nodes.
 
 ## Static server and browser adapters
 
@@ -201,7 +210,8 @@ only, refuses malformed/mismatched details with a generic message, and ignores
 late responses after a new selection or teardown. No receipt/artifact payload
 is fetched implicitly. Keyboard selection focuses the panel; closing it or
 pressing Escape restores node focus. The panel is non-modal, with no focus
-trap, and becomes a bottom sheet at narrow widths.
+trap. It stays fixed inside the viewport as a side panel, becoming a bottom
+sheet at widths of 680 px or less. Its body scrolls on short screens.
 
 ### Browser trust boundary
 
@@ -231,8 +241,10 @@ check tests exact/reproducible payloads and installs all four exact tarballs
 offline into a temporary consumer. It runs SDK tests, strict TypeScript export
 checks, graphpaper built-in and real-ELK server rendering, asset closure checks,
 and isolated fake-DOM browser-wiring tests. Fake DOM does not establish actual
-graphpaper browser behavior or visual accessibility; real-browser verification
-is pending and must precede claiming the adapters merge-ready.
+graphpaper browser behavior or visual accessibility. The local Browser witness
+is recorded in `docs/VERIFY-GRAPHPAPER-STATIC-ADAPTERS.md` in the repository;
+reduced-motion activation, assistive-technology/cross-browser checks, and deployed
+consumer verification are not claimed. No merge-readiness claim follows.
 The clean-commit `npm run test:fresh-clone` gate permits dependency fetching
 during `npm ci` only (lifecycle scripts disabled), then runs verification
 offline. Bootstrapping the pinned renderer requires Git repository read access;
