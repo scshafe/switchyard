@@ -134,6 +134,10 @@ and writes separate engine and SDK manifests under root `release/`. The full
 check tests exact/reproducible payloads and installs all three exact tarballs
 offline into a temporary consumer. It runs SDK tests, strict TypeScript export
 checks, and graphpaper built-in layout/SVG smoke checks without a browser.
+The clean-commit `npm run test:fresh-clone` gate permits dependency fetching
+during `npm ci` only (lifecycle scripts disabled), then runs verification
+offline. Bootstrapping the pinned renderer requires Git repository read access;
+an anonymous archive request may return 404 and cannot be assumed cacheable.
 
 The Inbox graph8 golden is an independent capture of Inbox's existing static
 builder. Its source fixture contains a sealed graph, presentation words, and
