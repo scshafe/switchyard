@@ -1,11 +1,11 @@
 # ADR: a standard graphpaper frontend SDK for mission-pipeline graphs
 
-**Status: proposed (2026-09-10).** The SDK package does not exist. Of the
-engine exports it relies on, `projectUnitPath`, the goal manifest, and
-`projectGoalClosures` shipped in 1.1.0; the display projection and the
-promoted diff remain proposals; see
-[`REVIEW-INTERFACE-FRICTION.md`](REVIEW-INTERFACE-FRICTION.md). Every other
-API name below is a proposal.
+**Status: SDK proposed; engine extraction complete (2026-09-10).** The SDK
+package does not exist. All engine exports it relies on are implemented in
+unreleased 1.1.0: `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
+`projectGoalClosures`, and `graphDefinitionDiff`; see
+[`REVIEW-INTERFACE-FRICTION.md`](REVIEW-INTERFACE-FRICTION.md). The SDK and
+consumer interfaces below remain proposals unless explicitly marked otherwise.
 
 ## Context
 
@@ -45,15 +45,16 @@ reduced-motion fallbacks).
 ## Decision
 
 Introduce a framework-independent SDK package between the engine and
-graphpaper, and give the engine the two pure projections the SDK consumes.
+graphpaper. The engine now provides the pure projections the proposed SDK
+would consume.
 
 ```
 mission-pipeline (engine, dependency-free)
-  projectGraphDisplay(compiled)   -> GraphDisplayProjection      [proposed]
+  projectGraphDisplay(compiled)   -> GraphDisplayProjection      [implemented, unreleased 1.1.0]
   projectUnitPath(journey)        -> UnitPathProjection          [implemented, 1.1.0]
   createGoalManifest(graph, draft)-> GoalManifest                 [implemented, 1.1.0; consumer-authored, engine-sealed]
   projectGoalClosures(manifest, path) -> GoalClosureProjection   [implemented, 1.1.0]
-  graphDefinitionDiff(a, b)       -> GraphDefinitionDiff         [proposed; promoted from Inbox]
+  graphDefinitionDiff(a, b)       -> GraphDefinitionDiff         [implemented, unreleased 1.1.0; adapted from Inbox]
           │
           ▼
 mission-pipeline-graphpaper (SDK, peer-depends on both; no DOM in core)
@@ -85,10 +86,11 @@ consumer: presentation words, goal manifest, endpoints; run overlays; metrics;
 
 ## Contracts
 
-### From the engine (proposed)
+### From the engine (implemented in unreleased 1.1.0)
 
-`GraphDisplayProjection` is a serializable, digest-carrying projection of one
-compiled graph. It contains no words a reader sees, only structure:
+`projectGraphDisplay(compiled)` in `src/graph/display.ts` returns a
+serializable, digest-carrying `GraphDisplayProjection` of one compiled graph.
+It contains no presentation words, only structure:
 
 ```ts
 interface GraphDisplayProjection {
@@ -101,8 +103,8 @@ interface GraphDisplayProjection {
     readonly outcomes: readonly string[]; readonly outputs?: Readonly<Record<string, ContractId>>;
     readonly binding?: MissionPipelineNodeBindingRef; readonly configuration?: MissionPipelineNodeConfigurationRef;
     readonly join?: MissionPipelineJoin; readonly maxAttempts: number;
-    readonly depth: number;                                  // longest path from entry; cycles: BFS depth
-    readonly marks: boolean;                                 // every outcome routes to the same successors, none terminal
+    readonly depth: number;                                  // longest path from entry; any cycle: BFS depth for all nodes
+    readonly marks: boolean;                                 // multiple outcomes, identical guaranteed successors, no terminals or conditional-only extras
   }[];
   readonly arrows: readonly {                                // one per (from, to) pair
     readonly from: string; readonly to: string;
@@ -115,11 +117,56 @@ interface GraphDisplayProjection {
 }
 ```
 
+The argument must be the immutable result of `compileGraph` from the same
+package instance. Copied, forged, and JSON-deserialized compiled objects are
+rejected before reading their properties: the compiled shape omits the graph
+description and therefore cannot independently revalidate the full graph
+digest. To cross a process or package-instance boundary, transport the sealed
+`GraphDefinition` and compile it again. The returned display projection is
+detached and can itself round-trip through JSON.
+
+Nodes and terminals retain authored order; arrows are merged by `(from, to)`
+in first-seen edge/target order, with distinct outcomes and contributing edge
+IDs. `conditional` is true if any contributing edge has a `where` arm.
+`fanOut` lists each contributing multi-target edge and its other targets;
+separate edges are not treated as one fan-out. In an acyclic graph, `depth`
+is the longest path from the entry. If any cycle exists, every node uses its
+shortest breadth-first distance from the entry instead.
+
+A marking node has at least two outcomes, no terminal outcomes, and the same
+nonempty guaranteed successor set for every outcome. A conditional edge to
+an additional target prevents marking; a conditional edge to an already
+guaranteed target does not. This reports structural routing, without choosing
+labels or explaining application policy. All returned records are frozen and
+prototype-free, including nested definition data.
+
 `UnitPathProjection` (implemented in `src/store/unit-path.ts`) is the per-run
 execution state, derived only from journey records: per-node state
 (`pending`, `failed`, `dead`, `settled`; absent means never queued) with every
 occurrence, outcomes, edges taken, join progress, open queues, and usage.
-`GraphDefinitionDiff` is Inbox's `graphProposalDiff`, promoted unchanged.
+
+`graphDefinitionDiff(a, b)` in `src/graph/diff.ts` compares two sealed graph
+definitions. `GraphDefinitionDiff` carries the schema
+`mission-pipeline-graph-definition-diff.v1`, both exact identities as `sealed`
+and `candidate` (`graphId`, `version`, `digest`), `sameFamily`, graph-level
+`description` and `entry` changes, `nodes`, `edges`, `terminals`, `unchanged`
+counts, and `empty`.
+
+The comparison uses Inbox's identity rules: nodes by node ID, edges by edge
+ID, terminals by `(nodeId, outcome)`. Reordering those arrays or a node's
+outcome vocabulary does not create a change. Edge target order and
+predicate/join array order remain structural. Identity metadata is reported
+separately: a new graph version alone can have `empty: true`, and a different
+graph ID has `sameFamily: false`.
+
+The engine adaptation adds declared `outputs` and `configuration` comparison,
+seal and hostile-input validation, and frozen, prototype-free output. Field
+changes carry machine-readable paths and canonical JSON strings in `from`
+and `to`, using the literal `undefined` for an absent optional field. Existing
+authored values, including graph descriptions, are comparison data; the
+engine supplies no display labels, unit suffixes, or other presentation
+phrases. Both definitions must validate, but the candidate need not compile,
+so a structurally valid sealed proposal can be inspected before it is runnable.
 
 ### From the consumer
 
@@ -213,7 +260,7 @@ raw graphpaper calls imports graphpaper.
 Server side, one request:
 
 ```ts
-import { compileGraph, projectGraphDisplay, projectUnitPath } from "mission-pipeline";   // proposed exports
+import { compileGraph, projectGraphDisplay, projectUnitPath } from "mission-pipeline";   // implemented engine exports
 import { buildPipelineDiagram, validatePresentation } from "mission-pipeline-graphpaper";
 import { renderPipelineFigure } from "mission-pipeline-graphpaper/server";
 import { TRIAGE_PRESENTATION } from "./triage-presentation.js";                          // consumer words
@@ -362,16 +409,28 @@ panel entirely by passing `details` and handling `onSelect` themselves.
   refuses others loudly.
 - The `DiagramModel` it emits is part of its public contract: golden model
   fixtures for the support-triage example and for Inbox's frozen graph8
-  snapshot are checked in and compared byte for byte, so a rendering change is
-  a visible diff.
+  snapshot must be checked in and compared byte for byte, so a rendering
+  change is a visible diff.
 - CSS class tokens the SDK adds (`node-type-endpoint`, `node-type-terminal`,
   `component-status-settled|pending|failed|dead|reached|idle|added|removed|changed`,
   `edge-kind-outcome|exit|join`, `edge-flavor-unobserved|removed|changed`) are a
-  public contract shipped in `pipeline.css` and listed in the README.
+  public contract that must ship in `pipeline.css` and be listed in the SDK's
+  README.
 - Engine changes that alter `GraphDisplayProjection` or `UnitPathProjection`
   bump their `schemaVersion`; the SDK supports one major of each at a time.
 
 ## Test strategy
+
+Engine projection tests run today in
+[`mission-pipeline-graph-display.test.mjs`](../test/mission-pipeline-graph-display.test.mjs)
+and [`mission-pipeline-graph-diff.test.mjs`](../test/mission-pipeline-graph-diff.test.mjs):
+golden projections and diffs over the fixture graphs and the support-triage
+example, plus routing, depth, identity-comparison, seal-validation, and
+hostile-input cases. The example's existing presentation coverage, Mermaid
+diagram, and goal-manifest seals remain checked against the same unchanged
+graph definitions.
+
+The following SDK checks remain proposed with the SDK implementation.
 
 Contract tests (Node, no browser):
 
@@ -396,15 +455,16 @@ Browser checks (only when rendering or interaction changes): hydrate the
 server figure with elkjs, pick a node by keyboard, follow a deep link, resize
 to a narrow viewport, verify the reduced-motion query, and confirm the details
 panel refuses a mismatched identity. graphpaper's own fake-DOM tests cover
-selection gestures; the SDK's fake-DOM tests cover the wiring. A signed-in
+selection gestures; the SDK's fake-DOM tests must cover the wiring. A signed-in
 deployed witness remains the consumer's release gate, as Inbox's plan states.
 
 ## Extraction and adoption plan
 
-1. **Engine projections** (this repository): `projectUnitPath`, the goal
-   manifest, and `projectGoalClosures` shipped in 1.1.0; `projectGraphDisplay`
-   and `graphDefinitionDiff` remain, with golden tests over the fixture graphs
-   and the support-triage example. Additive.
+1. **Engine projections — complete in unreleased 1.1.0** (this repository):
+   `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
+   `projectGoalClosures`, and `graphDefinitionDiff`, with golden tests over
+   the fixture graphs and the support-triage example. Additive exports; no
+   store migration or graph-definition change.
 2. **SDK core**: port `buildPipelineDiagram` from Inbox's `pipeline-diagram.ts`
    onto the projection, keeping its arrow merging, marking detection, partition
    guard, and unclaimed-terminal rules; add `validatePresentation` (the
@@ -442,11 +502,11 @@ Steps 1 and 2 can land without any change to a running consumer.
   changing the core, and should be added only when a consumer using React
   exists.
 
-## Open questions to settle before implementation
+## Open questions to settle before SDK implementation
 
 - Package location: a separate repository following graphpaper's packaging is
   recommended, because this repository's release gate pins an exact payload of
   `src`, `lib`, and `schemas` only.
-- Whether depth should be computed from the projection's longest path (Inbox)
-  or from ELK's layer assignment; the projection carries the former so the
-  number is stable across renderers.
+- Whether the SDK should display the engine's structural depth or ELK's layer
+  assignment; the projection carries longest-path depth for acyclic graphs
+  and breadth-first depth for cyclic graphs, stable across renderers.

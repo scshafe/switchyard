@@ -29,6 +29,19 @@ export interface CompiledGraph {
   readonly outboundByNode: Readonly<Record<string, readonly Edge[]>>;
 }
 
+// The compiled shape omits description, so it cannot authenticate its digest
+// after a JSON round trip. Keep provenance private rather than trusting a
+// caller-supplied digest next to otherwise plausible topology.
+const compiledGraphs = new WeakSet<object>();
+
+/** @internal Accept only this compiler's validated, immutable results. */
+export function requireCompiledGraph(value: unknown): CompiledGraph {
+  if (value === null || typeof value !== "object" || !compiledGraphs.has(value)) {
+    throw new Error("graph display: requires a compileGraph result; recompile the sealed GraphDefinition");
+  }
+  return value as CompiledGraph;
+}
+
 function pairKey(nodeId: string, outcome: string): string {
   return `${nodeId}\u0000${outcome}`;
 }
@@ -324,7 +337,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
 
   // Every definition component/ref is already a detached deep-frozen snapshot;
   // the newly derived arrays and prototype-free records are frozen above.
-  return Object.freeze({
+  const compiled = Object.freeze({
     graph: graphDefinitionRef(definition),
     entry: definition.entry,
     nodes: definition.nodes,
@@ -335,4 +348,6 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     inboundByNode,
     outboundByNode
   });
+  compiledGraphs.add(compiled);
+  return compiled;
 }

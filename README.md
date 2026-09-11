@@ -162,6 +162,12 @@ behavior are authored as nodes and edges.
 
 ## Host-facing helpers
 
+- `graph/display` provides `projectGraphDisplay`: a pure structural projection
+  of a compiled graph with its exact digest, depth, merged arrows, marking
+  nodes, fan-outs, joins, and terminals. Presentation words stay with the host.
+- `graph/diff` provides `graphDefinitionDiff`: a sealed-definition comparison
+  by node, edge, and terminal identity, carrying both graph digests and
+  machine-readable field changes, including outputs and configuration refs.
 - `graph/budget` provides `graphTurnBudget`: the back edges of a sealed graph
   and, for an acyclic graph, the worst-case queue occurrences and turns per
   node, per kind, and in total.

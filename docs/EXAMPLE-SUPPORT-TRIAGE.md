@@ -133,6 +133,30 @@ are outside the goal; their decisions close the workflow, not the goal. The
 overloaded comparison graph seals the same goal with one member, `triage`,
 whose `proposed` and `standard` resolve it and whose `uncertain` escalates.
 
+The engine's display projection is available in unreleased 1.1.0. Using the
+fixture's exports, a consumer can derive the structure and check that its goal
+manifest describes the same exact graph:
+
+```js
+import assert from "node:assert/strict";
+import { projectGraphDisplay } from "mission-pipeline";
+import {
+  COMPILED_SUPPORT_TRIAGE_GRAPH,
+  SUPPORT_TRIAGE_GOAL_MANIFEST
+} from "./test/fixtures/mission-pipeline/support-triage-example.mjs";
+
+const display = projectGraphDisplay(COMPILED_SUPPORT_TRIAGE_GRAPH);
+assert.deepEqual({ ...display.graph }, { ...SUPPORT_TRIAGE_GOAL_MANIFEST.graph });
+```
+
+`projectGraphDisplay` accepts the original `compileGraph` result from the
+same package instance; a transported sealed definition must be compiled again.
+Its result carries structural depth, merged arrows, marking nodes, fan-outs,
+joins, and terminals. The names and diagram above remain consumer-owned
+presentation; the graphpaper SDK in the ADR is still proposed. Golden tests
+also compare `graphDefinitionDiff` for the focused and overloaded graphs,
+including both exact graph digests.
+
 ## Contracts
 
 Each step consumes the exact artifact the previous step emitted. The engine

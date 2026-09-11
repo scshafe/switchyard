@@ -54,11 +54,15 @@ recommended pattern, and what is only proposed.
   proposals (problem, workaround, interface, compatibility, tests), marking
   the ones implemented in 1.1.0: unit-path projection, turn budget, code port
   by node, declared output contracts, the node configuration ref, and the
-  goal manifest with its closure projection.
+  goal manifest with its closure projection, and model turn invocation
+  request. The closing section records the remaining engine display/diff
+  projections implemented in unreleased 1.1.0 and the deferred work.
 - [ADR: graphpaper frontend SDK](ADR-GRAPHPAPER-FRONTEND-SDK.md) proposes a
   framework-independent viewer package between this engine and graphpaper,
   with ownership boundaries, contracts, a consumer integration sketch, and an
-  extraction plan.
+  extraction plan. Engine extraction is complete in unreleased 1.1.0,
+  including `projectGraphDisplay` and `graphDefinitionDiff`; the SDK remains
+  proposed.
 - [Workflow: a graph change includes its picture](WORKFLOW-GRAPH-CHANGES.md)
   states the expectation that presentation, examples, and verification land
   with every definition change, and the checks that prove it.
