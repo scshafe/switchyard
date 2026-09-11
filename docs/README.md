@@ -56,7 +56,9 @@ recommended pattern, and what is only proposed.
   by node, declared output contracts, the node configuration ref, and the
   goal manifest with its closure projection, and model turn invocation
   request. The closing section records the remaining engine display/diff
-  projections implemented in unreleased 1.1.0 and the deferred work.
+  projections implemented in unreleased 1.1.0. P8's assessment documents its
+  deferred receipt/recovery contract and the missing second-consumer evidence;
+  P7 remains deferred under Inbox's plan.
 - [ADR: graphpaper frontend SDK](ADR-GRAPHPAPER-FRONTEND-SDK.md) proposes a
   framework-independent viewer package between this engine and graphpaper,
   with ownership boundaries, contracts, a consumer integration sketch, and an

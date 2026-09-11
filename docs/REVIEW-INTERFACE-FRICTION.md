@@ -1,8 +1,9 @@
 # Review: interface and code-design friction for focused-objective graphs
 
 **Status: findings and proposals (2026-09-10); P1, P2, P3, P4, P5, P6, and
-P9 implemented in 1.1.0 the same day.** Everything under "What works today" was verified
-against the source and tests named. Each proposal names its compatibility
+P9 implemented in unreleased 1.1.0 the same day; P8 assessed and deferred.**
+Everything under "What works today" was verified against the source and tests
+named. Each proposal names its compatibility
 consequences and the tests that prove it; the implemented ones say where they
 landed.
 
@@ -393,11 +394,14 @@ input is not the reserved contract.
 
 ### P8. Mapping failures to declared outcomes is re-implemented per consumer
 
-**Problem.** A thrown error in a port becomes a retryable or terminal failure
-with no receipt and no successor. Consumers that want a person to see a
-provider refusal must return a declared outcome instead, and must supply a
-receipt policy for attempts whose result is unknown. Inbox implemented this
-twice (the action ports and the candidate replay ports).
+**Problem.** An ordinary error thrown by a code or model port becomes a
+retryable or terminal failure with no trusted receipt and no successor.
+Consumers that want a person to see a provider refusal must return a declared
+outcome instead, and must supply a receipt policy for attempts whose result
+is unknown. Inbox implemented this twice (the action ports and the candidate
+replay ports). For model and agent turns, returned completions whose validation
+fails are different: the engine preserves their already-validated receipts. Agent transport
+uncertainty also has separate recovery semantics, described below.
 
 **Workaround.** Per-consumer port wrappers.
 
@@ -422,6 +426,85 @@ consumer chooses which classes to declare.
 **Tests.** A mapped failure becomes the declared outcome with the artifact and
 receipt; an unmapped failure still throws; a model port without a receipt
 policy is rejected at construction.
+
+**Assessment (2026-09-10): deferred; no helper implemented or exported.**
+P8 would remove repeated failure-to-outcome handling, but converting a failure
+to an outcome also settles an attempt and assigns usage. The reviewed sources
+do not establish the required agreement between two consumers: Inbox's action
+ports use admission state and retained telemetry, while its candidate replay
+ports simulate ceiling receipts without provider calls. Both belong to Inbox;
+the support-triage example has no policy for unknown paid attempts. The
+resolution is to retain consumer-owned wrappers and keep the sketch proposed
+until a second consumer validates the receipt and recovery contract. Requiring
+a receipt callback alone does not resolve these differences, and a new test
+fixture would not constitute independent consumer agreement.
+
+Evidence checked for this assessment:
+
+- In `inbox-pipeline`, `src/node-graph-v2/email-action-ports.ts`
+  (`ActionModelAttemptCapture`, `indeterminateUsageReceipt`, and the model
+  port's catch block) distinguishes rejection before provider work from
+  admitted or replayed-indeterminate attempts. It preserves captured usage
+  when available and otherwise charges the sealed tier ceiling; recovery
+  carries the exact input state payload into the output artifact.
+  `test/node-graph-v2-email-action-receipt.test.ts` proves no invented usage
+  before dispatch, retained ceiling usage for replayed uncertainty, and
+  ceiling usage for admitted provider failure.
+- Inbox's `src/simplification/replay.ts` explicitly accepts no provider or
+  callback argument and labels its accounting `fixture_replay`.
+  `test/simplification-replay.test.ts` asserts that it does not qualify a
+  model. The two Inbox implementations demonstrate reuse potential, not a
+  second consumer's policy for physical attempts.
+- This repository's
+  [`support-triage-example.mjs`](../test/fixtures/mission-pipeline/support-triage-example.mjs)
+  fixture resolver throws the scripted `dependency_unavailable` error without
+  attaching usage. The
+  [example test](../test/mission-pipeline-support-triage-example.test.mjs)
+  proves bounded retries, no successor, and zero recorded receipts for that
+  fixture. It does not establish whether a real provider admitted work.
+
+The sketch also leaves three implementation boundaries unresolved:
+
+1. **Invocation evidence and input.**
+   [`ExecutionFailure`](../src/execute/failure.ts) contains only `code` and
+   `retryable`. The proposed receipt callback cannot distinguish admission,
+   captured telemetry, binding-specific ceilings, or retained replay state
+   from those fields. The artifact callback receives a context containing an
+   input artifact reference, not the separately supplied input payload needed
+   by Inbox's recovery. Shared mutable callback state is not a substitute for
+   an invocation-scoped contract under concurrent turns.
+2. **Receipt retention when recovery fails.**
+   [`captureCompletion`](../src/execute/turn.ts) preserves validated receipts
+   from a rejected returned completion in private evidence bound to the exact
+   node and attempt key. The runner's
+   [`failureUsage`](../src/execute/unit-runner.ts) accepts only that evidence
+   for model and agent turns; code turns never retain usage. A caller-thrown
+   error with a `usage` property is insufficient. If a receipt
+   policy succeeds and fallback artifact construction then throws, the sketch
+   has no specified path to preserve that receipt. The contract must address
+   transformation failures without trusting arbitrary thrown usage or silently
+   replacing valid observations with a synthetic ceiling.
+3. **Agent uncertainty and cancellation.** An
+   [`AgentNodePort`](../src/execute/ports.ts) submits intent and separately
+   awaits a settled result. Untyped rejection in either phase deliberately
+   leaves the attempt unresolved for reclaim with the same key; a typed
+   `ExecutionFailureError` instead declares a definite failure. A generic
+   classification-to-outcome map could settle unfinished work. Submission
+   returns `void`, so it cannot directly return a mapped completion either.
+   The proposed single-receipt callback also leaves the agent's bounded
+   receipt collection unspecified. Cancellation must not accidentally become
+   completion through an ordinary error mapping.
+
+Reopen P8 when two consumers agree on invocation evidence, pre-dispatch versus
+admitted-unknown accounting, preservation of existing receipts, fallback
+construction failure, cancellation, and replay/agent uncertainty. Acceptance
+tests must prove those cases through the runner and its journal/outbox, as
+well as mapping, pass-through, immutable capability capture, and construction
+guards. Existing receipt-prefix, exact-attempt evidence, and agent-reclaim
+tests in [`mission-pipeline-node-ports.test.mjs`](../test/mission-pipeline-node-ports.test.mjs)
+and [`mission-pipeline-node-turn.test.mjs`](../test/mission-pipeline-node-turn.test.mjs)
+remain the behavior to preserve. No code-only subset or agent semantic change
+is being shipped under the original general helper proposal.
 
 ### P9. One code port per kind, not per node
 
@@ -478,7 +561,7 @@ engine run that dead-letters an orphan node on its first attempt.
 | P4 | Configuration ref in the fingerprint | medium: fixes silent policy drift | small | additive key | implemented in 1.1.0 |
 | P3 | Goal manifest and closure projection | medium: expresses the consumer invariant | medium | additive modules | implemented in 1.1.0 |
 | P6 | v2 model request shape | low | small | none | implemented in 1.1.0 |
-| P8 | Declared failure helper | medium | small | design tension to record | after two consumers agree on receipt policy |
+| P8 | Declared failure helper | medium | scope pending evidence contract | receipt retention and unresolved agent work | assessed; deferred until two consumers agree on receipt/recovery policy |
 | P7 | Join input envelope | high only when measured serial latency demands it | large | new store semantics, conformance additions, Postgres parity | deferred, as Inbox's plan says |
 
 P1, P2, P3, P4, P5, P6, and P9 are implemented in unreleased package version
@@ -498,8 +581,9 @@ graphs and the support-triage example. The graph definitions, example
 presentation, Mermaid diagram, and goal-manifest seals remain unchanged and
 verified, and the package payload manifest is regenerated for the new modules.
 
-The viewer SDK remains proposed; its core is the next extraction step. Within
-this review, P8 is the next slice to assess and stays proposed until two
-consumers agree on receipt policy for failures with an unknown result. P7
-stays deferred under Inbox's plan and is the only remaining proposal that
-needs an engine increment.
+The viewer SDK remains proposed; its core is the next extraction step. P8 has
+been assessed and stays proposed: two-consumer agreement is not established,
+and the sketch leaves invocation evidence, receipt retention, and agent
+uncertainty unresolved. Its assessment above records the evidence and the
+conditions for reopening it. P7 stays deferred under Inbox's plan; this
+assessment makes no change to engine or store semantics.
