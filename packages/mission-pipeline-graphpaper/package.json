@@ -9,12 +9,14 @@
   "types": "./lib/index.d.ts",
   "exports": {
     ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./server": { "types": "./lib/server.d.ts", "default": "./lib/server.js" },
+    "./browser": { "types": "./lib/browser.d.ts", "default": "./lib/browser.js" },
     "./package.json": "./package.json"
   },
-  "files": ["src", "lib", "README.md", "LICENSE"],
+  "files": ["src", "lib", "assets/pipeline.css", "README.md", "LICENSE"],
   "sideEffects": false,
-  "peerDependencies": { "@scshafe/switchyard": "^1.1.0", "graphpaper": "^0.5.0" },
-  "peerDependenciesMeta": { "graphpaper": { "optional": true } },
+  "peerDependencies": { "@scshafe/switchyard": "^1.1.0", "graphpaper": "^0.5.0", "elkjs": "^0.10.2" },
+  "peerDependenciesMeta": { "graphpaper": { "optional": true }, "elkjs": { "optional": true } },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "npm --prefix ../.. run check"

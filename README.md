@@ -45,8 +45,13 @@ Consumers implement the exported store and node-kind ports.
 The repository also contains the separately packaged, unreleased
 [`mission-pipeline-graphpaper` static SDK](packages/mission-pipeline-graphpaper/README.md).
 It builds graphpaper diagram data from engine projections and consumer
-presentation. It is excluded from this engine's npm payload; graphpaper is
-only a root development dependency, not an engine runtime dependency.
+presentation and provides static server figures/assets plus browser
+selection, deep links, and an authorized details seam. It is excluded from
+this engine's npm payload; graphpaper and ELK are root development dependencies,
+not engine runtime dependencies. Static adapter code and automated checks are
+in place; the real-browser witness remains pending because no browser runtime
+was available. Runtime overlays, metrics, proposal rendering, viewer updates,
+goal scopes, and Inbox adoption remain proposed.
 
 Supported runtimes:
 
@@ -216,7 +221,11 @@ the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
 JavaScript plus TypeScript import smokes. It also builds the separately
 packaged static SDK, checks its independent payload/manifest, and runs its
-golden, hostile-input, packed-install, and graphpaper layout/SVG checks.
+golden, hostile-input, packed-install, graphpaper layout/SVG, static SSR/assets,
+and fake-DOM browser wiring checks. A real-browser witness for keyboard,
+deep-link, responsive, reduced-motion, and details behavior is still required;
+the current adapter work does not claim merge readiness from automated checks
+alone. See the [SDK ADR](docs/ADR-GRAPHPAPER-FRONTEND-SDK.md) for its status.
 
 `pnpm run test:fresh-clone` repeats the install, build and verify in a fresh
 clone of the committed `HEAD` (it requires a clean working tree). `lib/` is

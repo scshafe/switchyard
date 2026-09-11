@@ -3,6 +3,7 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "paths": {
       "@scshafe/switchyard": ["../../lib/index.d.ts"],
       "@scshafe/switchyard/*": ["../../lib/*.d.ts"]

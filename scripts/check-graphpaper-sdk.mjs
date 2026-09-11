@@ -1,4 +1,4 @@
-// Verify the separately packed static SDK against exact, offline-installed peers.
+// Verify the separately packed SDK against exact, offline-installed peers.
 // The npm registry's graphpaper name is unrelated: use the committed Git pin.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -6,13 +6,14 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const sdkRoot = join(root, "packages/mission-pipeline-graphpaper");
 const graphpaperRoot = join(root, "node_modules/graphpaper");
+const elkRoot = join(root, "node_modules/elkjs");
 const graphpaperCommit = "89240f15c171a26009430ad7eb45eb85ac2567aa";
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-graphpaper-check-"));
 
@@ -61,21 +62,31 @@ function assertImportBoundary(path, source, knownFiles) {
   const sourceRoot = join(sdkRoot, path.includes(`${sep}src${sep}`) ? "src" : "lib");
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const sourceTypeScript = sourceRoot.endsWith(`${sep}src`);
-  const ambientEffects = new Set(["fetch", "XMLHttpRequest", "WebSocket", "document", "window", "process", "setTimeout", "setInterval", "requestAnimationFrame", "eval", "Function"]);
+  const module = basename(path).replace(/(?:\.d)?\.(?:ts|js)$/, "");
+  const browser = module === "browser";
+  const server = module === "server";
+  const browserSafe = new Set(["browser", "viewer-data", "viewer-defaults", "viewer-types", "types"]);
+  const ambientEffects = new Set(["fetch", "XMLHttpRequest", "WebSocket", ...browser ? [] : ["document", "window"], "process", "setTimeout", "setInterval", "requestAnimationFrame", "eval", "Function"]);
   const inspect = (node) => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       const specifier = node.moduleSpecifier;
       if (specifier !== undefined) {
         assert.ok(ts.isStringLiteral(specifier), `${path}: module specifier must be literal`);
         const name = specifier.text;
+        const typeOnly = ts.isImportDeclaration(node) ? node.importClause?.isTypeOnly === true : node.isTypeOnly === true;
         if (name === "graphpaper") {
-          const typeOnly = ts.isImportDeclaration(node) ? node.importClause?.isTypeOnly === true : node.isTypeOnly === true;
-          assert.ok(typeOnly, `${path}: graphpaper is type-only in the static core`);
+          assert.ok(typeOnly || browser || server, `${path}: graphpaper runtime imports belong only to adapters`);
         } else if (name.startsWith(".")) {
           const target = resolve(dirname(path), sourceTypeScript ? name.replace(/\.js$/, ".ts") : name);
           assert.ok(target.startsWith(`${sourceRoot}${sep}`) && knownFiles.has(target), `${path}: relative import escapes package or is missing: ${name}`);
+          const targetModule = basename(target).replace(/(?:\.d)?\.(?:ts|js)$/, "");
+          if (browserSafe.has(module)) assert.ok(browserSafe.has(targetModule), `${path}: browser dependency reaches Node-only module ${name}`);
+          if (!browser && !server) assert.ok(targetModule !== "browser" && targetModule !== "server", `${path}: core must not import adapters`);
+        } else if (name.startsWith("node:")) {
+          assert.ok(server && ["node:crypto", "node:fs", "node:module"].includes(name), `${path}: Node capabilities belong only to the server adapter`);
         } else {
           assert.ok(engineImports.has(name), `${path}: import outside static core allowlist: ${name}`);
+          if (browserSafe.has(module)) assert.ok(typeOnly, `${path}: browser imports engine runtime`);
         }
       }
     }
@@ -85,7 +96,15 @@ function assertImportBoundary(path, source, knownFiles) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require") {
       throw new Error(`${path}: CommonJS require is outside the static core boundary`);
     }
-    if (ts.isIdentifier(node) && ambientEffects.has(node.text)) {
+    // The browser capability walker must stop at intrinsic prototype roots;
+    // reading that root is not dynamic code execution. Keep every other use
+    // of Function (including constructors and aliases) outside the boundary.
+    const intrinsicFunctionRoot = ts.isIdentifier(node) && node.text === "Function"
+      && ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node
+      && node.parent.name.text === "prototype"
+      && ts.isBinaryExpression(node.parent.parent)
+      && node.parent.parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+    if (ts.isIdentifier(node) && ambientEffects.has(node.text) && !intrinsicFunctionRoot) {
       throw new Error(`${path}: ambient browser/process/effect capability is outside the static core: ${node.text}`);
     }
     ts.forEachChild(node, inspect);
@@ -129,9 +148,9 @@ try {
   assert.equal(packageJson.version, "0.1.0");
   assert.deepEqual(packageJson.dependencies ?? {}, {});
   assert.deepEqual(packageJson.optionalDependencies ?? {}, {});
-  assert.deepEqual(packageJson.peerDependencies, { "@scshafe/switchyard": "^1.1.0", graphpaper: "^0.5.0" });
-  assert.deepEqual(packageJson.peerDependenciesMeta, { graphpaper: { optional: true } }, "the unrelated registry graphpaper must not be auto-installed");
-  assert.deepEqual(Object.keys(packageJson.exports).sort(), [".", "./package.json"]);
+  assert.deepEqual(packageJson.peerDependencies, { "@scshafe/switchyard": "^1.1.0", graphpaper: "^0.5.0", elkjs: "^0.10.2" });
+  assert.deepEqual(packageJson.peerDependenciesMeta, { graphpaper: { optional: true }, elkjs: { optional: true } }, "the unrelated registry graphpaper must not be auto-installed; ELK is optional except for full viewer assets");
+  assert.deepEqual(Object.keys(packageJson.exports).sort(), [".", "./browser", "./package.json", "./server"]);
 
   const sourceFiles = await walk(join(sdkRoot, "src"));
   const outputFiles = await walk(join(sdkRoot, "lib"));
@@ -151,7 +170,7 @@ try {
   }
 
   const expectedPayload = new Set([
-    "LICENSE", "README.md", "package.json",
+    "LICENSE", "README.md", "package.json", "assets/pipeline.css",
     ...[...knownFiles].map((path) => relative(sdkRoot, path).split(sep).join("/"))
   ]);
   const first = await pack(sdkRoot, join(scratch, "sdk-first"));
@@ -189,10 +208,13 @@ try {
   assert.equal(graphpaperMetadata.exports["."].default, "./src/index.js");
   const engine = await pack(root, join(scratch, "engine"));
   const graphpaper = await pack(graphpaperRoot, join(scratch, "graphpaper"));
+  const elk = await pack(elkRoot, join(scratch, "elk"));
+  assert.equal(elk.report.name, "elkjs");
+  assert.equal(elk.report.version, "0.10.2");
   const consumer = join(scratch, "consumer");
   await mkdir(consumer);
   await writeFile(join(consumer, "package.json"), `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`);
-  await run("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=optional", engine.path, first.path, graphpaper.path], { cwd: consumer, show: true });
+  await run("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=optional", engine.path, first.path, graphpaper.path, elk.path], { cwd: consumer, show: true });
   await cp(join(sdkRoot, "test"), join(consumer, "test"), { recursive: true });
   await cp(join(root, "test/fixtures/mission-pipeline"), join(consumer, "test/fixtures/mission-pipeline"), { recursive: true });
   const testFiles = (await walk(join(consumer, "test"))).filter((path) => path.endsWith(".test.mjs"));
@@ -204,6 +226,8 @@ import assert from "node:assert/strict";
 import { compileGraph, projectGraphDisplay } from "@scshafe/switchyard";
 import { buildPipelineDiagram, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION } from "mission-pipeline-graphpaper";
 import { layoutDiagram, renderDiagramSvg } from "graphpaper";
+import { renderPipelineFigure, viewerAssets } from "mission-pipeline-graphpaper/server";
+import ELK from "elkjs/lib/elk.bundled.js";
 import { SUPPORT_TRIAGE_GRAPH, SUPPORT_TRIAGE_PRESENTATION, SUPPORT_TRIAGE_GOAL_MANIFEST } from "./test/fixtures/switchyard/support-triage-example.mjs";
 const projection = projectGraphDisplay(compileGraph(SUPPORT_TRIAGE_GRAPH));
 const model = buildPipelineDiagram({ projection, presentation: { ...SUPPORT_TRIAGE_PRESENTATION, schemaVersion: PIPELINE_PRESENTATION_SCHEMA_VERSION }, definition: SUPPORT_TRIAGE_GRAPH, goalManifest: SUPPORT_TRIAGE_GOAL_MANIFEST });
@@ -217,6 +241,11 @@ assert.ok(svg.includes("<svg") && svg.includes("Support triage"));
 assert.ok(svg.includes("node-type-model") && svg.includes("edge-kind-exit"));
 assert.equal(JSON.stringify(model), before, "renderer must accept frozen SDK data without changing it");
 console.log("SDK packed renderer layout + SVG smoke passed (graphpaper built-in layout, no browser or ELK).");
+const figure = await renderPipelineFigure(model, { layoutEngine: new ELK() });
+assert.ok(figure.includes('data-pipeline-model') && figure.includes('graphpaper · ELK'));
+const assets = viewerAssets();
+assert.equal(Object.keys(assets).length, 8);
+console.log("SDK packed server figure + ELK + complete viewer assets smoke passed.");
 `);
   await run(process.execPath, ["smoke.mjs"], { cwd: consumer, show: true });
 
@@ -224,6 +253,9 @@ console.log("SDK packed renderer layout + SVG smoke passed (graphpaper built-in 
 import { buildPipelineDiagram, validatePresentation, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION, type PipelinePresentation, type BuildPipelineDiagramInput, type PipelineDiagramMetadata } from "mission-pipeline-graphpaper";
 import type { GraphDisplayProjection, GraphDefinition, GoalManifest } from "@scshafe/switchyard";
 import type { DiagramModel, DiagramLegendEntry, DiagramRenderOptions } from "graphpaper";
+import { renderPipelineFigure, viewerAssets, type RenderPipelineFigureOptions } from "mission-pipeline-graphpaper/server";
+import { mountPipelineViewer, type MountPipelineViewerOptions, type PipelineViewerHandle } from "mission-pipeline-graphpaper/browser";
+import type { NodeDetails } from "mission-pipeline-graphpaper";
 const projection = undefined as unknown as GraphDisplayProjection;
 const definition = undefined as unknown as GraphDefinition;
 const goalManifest = undefined as unknown as GoalManifest;
@@ -241,6 +273,13 @@ pipelineLegend("metrics");
 // @ts-expect-error execution overlay remains proposed
 buildPipelineDiagram({ projection, presentation, overlay: {} });
 void model; void problems; void legend; void options; void metadata;
+const serverOptions: RenderPipelineFigureOptions = { figureId: "pipeline-one", modelElementId: "pipeline-model-one" };
+const html: Promise<string> = renderPipelineFigure(model, serverOptions);
+const browserOptions: MountPipelineViewerOptions = { model, details: async (nodeId): Promise<NodeDetails | string | undefined> => undefined };
+const handle: Promise<PipelineViewerHandle> = mountPipelineViewer(undefined as unknown as Element, browserOptions);
+void html; void handle; void viewerAssets();
+// @ts-expect-error runtime overlay update is still proposed
+(undefined as unknown as PipelineViewerHandle).update({});
 `);
   await writeFile(join(consumer, "tsconfig.json"), `${JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022", strict: true, noEmit: true, skipLibCheck: false }, files: ["smoke.ts"] }, null, 2)}\n`);
   await run(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "--project", "tsconfig.json"], { cwd: consumer, show: true });

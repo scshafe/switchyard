@@ -64,9 +64,13 @@ recommended pattern, and what is only proposed.
   with ownership boundaries, contracts, a consumer integration sketch, and an
   extraction plan. Engine extraction is complete in unreleased 1.1.0,
   including `projectGraphDisplay` and `graphDefinitionDiff`. The
-  [static SDK core](../packages/mission-pipeline-graphpaper/README.md) is
+  [static SDK](../packages/mission-pipeline-graphpaper/README.md) is
   implemented as a separate in-repository package, version 0.1.0 unreleased;
-  server/browser adapters and runtime modes remain proposed.
+  it includes server figures/assets and browser selection, deep links, and an
+  authorized details seam. Automated adapter checks exist; the real-browser
+  witness is pending because this session has no available browser runtime.
+  Runtime modes, viewer updates, goal scopes, and Inbox adoption remain
+  proposed; no merge-readiness claim follows from the automated checks.
 - [Workflow: a graph change includes its picture](WORKFLOW-GRAPH-CHANGES.md)
   states the expectation that presentation, examples, and verification land
   with every definition change, and the checks that prove it.
