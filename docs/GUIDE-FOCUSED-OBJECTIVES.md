@@ -184,8 +184,11 @@ back to the same node.
 letter, releases the lease, marks only that occurrence's outbound join legs
 impossible, and enqueues no successor
 (`src/store/memory-unit-store.ts:3266-3370`). There is no "on failure, route
-to X" in the graph, and no human fallback is reached. A thrown error carries
-no usage receipt (`src/execute/unit-runner.ts:1240-1251`).
+to X" in the graph, and no human fallback is reached. An ordinary body-thrown
+error carries no trusted usage receipt (`failureUsage` in
+`src/execute/unit-runner.ts`). A model or agent completion rejected during
+engine validation retains its already-validated receipt prefix, bound to the
+exact node and attempt key (`captureCompletion` in `src/execute/turn.ts`).
 
 **Pattern:** decide per failure class:
 
@@ -196,15 +199,28 @@ no usage receipt (`src/execute/unit-runner.ts:1240-1251`).
   outcomes, graph v2 and v4) and its candidate graph declares `unusable` on
   every model node with `maxAttempts: 1`. Keep the reason in the artifact so
   lifecycle causes stay distinguishable from semantic uncertainty.
-- Infrastructure failures (transport, timeout): let the engine retry under the
-  budget and dead-letter; the host re-admits or repairs. Charge usage for an
-  admitted attempt whose result is unknown by returning a receipt of trust
-  `estimated_tier_ceiling` or `unavailable` from the port instead of throwing,
-  or the accounting is silently zero.
+- Infrastructure failures in a code or model port (transport, timeout): let
+  the engine retry under the budget and dead-letter; the host re-admits or
+  repairs. If provider work was admitted and its result is unknown, a model
+  consumer can instead explicitly choose a declared failure outcome with a
+  receipt of trust `estimated_tier_ceiling` or `unavailable`. That choice
+  settles the attempt and routes the graph; it requires a policy grounded in
+  admission state and any retained usage evidence. A receipt callback alone
+  cannot establish that policy.
+  Do not infer a free call from missing telemetry or charge unattempted calls.
+- Agent submit/await transport uncertainty: retain the existing unresolved
+  reservation and recover with the same attempt key. Mapping an untyped
+  transport rejection into an outcome could settle work that is still
+  running. A typed `ExecutionFailureError` declares a definite failure and
+  has different engine behavior.
 
-**Proposed:** a small port helper that maps classified failures to declared
-outcomes with a receipt policy (review proposal P8), so consumers stop
-re-implementing this.
+**Proposed, assessed and deferred:** a port helper that maps classified
+failures to declared outcomes with a receipt policy (review proposal P8).
+The [P8 assessment](REVIEW-INTERFACE-FRICTION.md#p8-mapping-failures-to-declared-outcomes-is-re-implemented-per-consumer)
+records why it is not implemented: no second consumer's receipt/recovery
+agreement, insufficient invocation evidence in the sketch, and unresolved
+receipt retention and agent uncertainty. Consumer-owned wrappers remain the
+current pattern; they must preserve these distinctions.
 
 ### Evidence is immutable and sufficient for replay
 
