@@ -4,7 +4,7 @@ import { deepFrozenClone, snapshotBoundedValidationData } from "@scshafe/switchy
 import { assertIdentifier, assertSafePositiveInt, assertSha256Hex } from "@scshafe/switchyard/internal/guards";
 import { compileGraph } from "@scshafe/switchyard/graph/compile";
 import { GRAPH_DISPLAY_SCHEMA_VERSION, projectGraphDisplay, type GraphDisplayArrow, type GraphDisplayProjection } from "@scshafe/switchyard/graph/display";
-import { NODE_TURN_IDEMPOTENCY, NODE_TURN_RETRY_TAXONOMY, validateSwitchyardNode, type TerminalOutcome } from "@scshafe/switchyard/graph/definition";
+import { JOIN_INPUT_ARTIFACT_CONTRACT, NODE_TURN_IDEMPOTENCY, NODE_TURN_RETRY_TAXONOMY, validateSwitchyardNode, type TerminalOutcome } from "@scshafe/switchyard/graph/definition";
 import { validateGoalManifest } from "@scshafe/switchyard/graph/goals";
 import { PIPELINE_PRESENTATION_SCHEMA_VERSION, type PipelinePresentation, type PresentationValidationOptions } from "./types.js";
 
@@ -101,13 +101,14 @@ function projectionData(value: unknown): GraphDisplayProjection {
     const ref = record(node.ref, ["id", "version"], ["id", "version"], `${label}.ref`);
     // Reuse the engine's node-field validation. These synthetic principal/turn
     // fields are never rendered or retained and prove no source authenticity.
-    validateSwitchyardNode({
+    const validatedNode = validateSwitchyardNode({
       nodeId: node.nodeId, kind: node.kind, ref, input: node.input,
       outcomes: { version: ref.version, outcomes: node.outcomes },
       ...Object.fromEntries(["outputs", "binding", "configuration", "join"].filter((key) => own(node, key)).map((key) => [key, node[key]])),
       principal: { id: "graphpaper.validation" },
       turn: { idempotency: NODE_TURN_IDEMPOTENCY, retryTaxonomy: NODE_TURN_RETRY_TAXONOMY, leaseMs: 1, maxAttempts: node.maxAttempts }
     }, label);
+    if (validatedNode.join?.compose === "envelope" && validatedNode.input !== JOIN_INPUT_ARTIFACT_CONTRACT) throw new Error(`${label}: envelope join requires ${JOIN_INPUT_ARTIFACT_CONTRACT}`);
     if (typeof node.depth !== "number" || !Number.isSafeInteger(node.depth) || node.depth < 0 || node.depth > 255) throw new Error(`${label}.depth must be an integer in 0..255`);
     bool(node.marks, `${label}.marks`);
     return node;
@@ -193,10 +194,11 @@ function projectionData(value: unknown): GraphDisplayProjection {
   }
   const joins = list(raw.joins, "projection.joins", 256).map((value, index) => {
     const label = `projection.joins[${index}]`;
-    const join = record(value, ["nodeId", "require", "inbound"], ["nodeId", "require", "inbound"], label);
+    const join = record(value, ["nodeId", "require", "inbound", "compose"], ["nodeId", "require", "inbound"], label);
     const nodeId = assertIdentifier(join.nodeId, `${label}.nodeId`);
     const node = byNode.get(nodeId);
-    if (node?.join === undefined || canonicalJson(node.join) !== canonicalJson({ require: join.require, inbound: join.inbound })) throw new Error(`${label} disagrees with its node join`);
+    if (node?.join === undefined || canonicalJson(node.join) !== canonicalJson({ require: join.require, inbound: join.inbound,
+      ...(own(join, "compose") ? { compose: join.compose } : {}) })) throw new Error(`${label} disagrees with its node join`);
     const inbound = identifiers(join.inbound, `${label}.inbound`, 256, 1);
     const actual = [...new Set(arrows.filter((arrow) => arrow.to === nodeId).flatMap((arrow) => arrow.edgeIds as readonly string[]))];
     if (canonicalJson([...inbound].sort()) !== canonicalJson(actual.sort())) throw new Error(`${label} disagrees with inbound edges`);

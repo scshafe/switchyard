@@ -83,6 +83,8 @@ export interface AdmitUnitInput {
 
 export interface QueueJoinProvenance {
   readonly joinNodeId: string;
+  /** First accepted edge in sealed inbound order; an anchor, not the consumed
+   * artifact when the sealed node opts into compose: "envelope". */
   readonly selectedEdgeId: string;
   readonly accepted: readonly JoinAcceptedOffer[];
 }

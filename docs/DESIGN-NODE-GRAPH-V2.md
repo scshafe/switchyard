@@ -138,7 +138,9 @@ Edge {
 }
 
 Join (a property of the target node) {
+  inbound: edgeId[]
   require: "all" | { nOf: number }   // over its declared inbound edges
+  compose?: "select" | "envelope"   // additive 1.1.0 revision; default select
 }
 ```
 
@@ -275,6 +277,15 @@ but nothing here depends on it, and no substrate change is proposed.
 
 N0 is complete. Each answer below is binding for v2.0; changing one later
 is a design revision, not a drive-by.
+
+**2026-09-11 additive revision, explicitly requested by the user:** P7 permits
+`join.compose: "envelope"` with the reserved `mission-pipeline.join-input.v1`
+input contract. It embeds accepted branch payloads without giving bodies store
+access. Omitted/`select` composition retains the original selection behavior;
+firing, unsatisfiability, late offers, and atomicity remain as ratified below.
+P8 adds an explicit consumer-owned port wrapper for declared failure outcomes;
+it does not add failure edges or settle uncertain agent work. See the
+[implemented contracts](IMPLEMENTED-P7-P8.md) and adapter conformance requirements.
 
 1. **Naming.** `MissionPipelineNode`, `MissionPipelineUnit`, and `journey`
    for the append-only turn history — the operator's coinages, kept.

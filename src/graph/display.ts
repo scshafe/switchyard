@@ -57,6 +57,7 @@ export interface GraphDisplayJoin {
   readonly nodeId: string;
   readonly require: JoinRequirement;
   readonly inbound: readonly string[];
+  readonly compose?: "select" | "envelope";
 }
 
 export interface GraphDisplayProjection {
@@ -212,7 +213,8 @@ export function projectGraphDisplay(compiled: CompiledGraph): GraphDisplayProjec
     joins: compiled.nodes.filter((node) => Object.hasOwn(node, "join")).map((node) => ({
       nodeId: node.nodeId,
       require: node.join!.require,
-      inbound: node.join!.inbound
+      inbound: node.join!.inbound,
+      ...(Object.hasOwn(node.join!, "compose") ? { compose: node.join!.compose } : {})
     }))
   };
   return prototypeFree(deepFrozenClone(projection, "graph display projection"));

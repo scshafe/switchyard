@@ -1,7 +1,8 @@
 # Review: interface and code-design friction for focused-objective graphs
 
 **Status: findings and proposals (2026-09-10); P1, P2, P3, P4, P5, P6, and
-P9 implemented in unreleased 1.1.0 the same day; P8 assessed and deferred.**
+P9 implemented in unreleased 1.1.0 the same day. P7 and P8 implemented on
+2026-09-11 at the user’s request; the original P8 assessment is retained below.**
 Everything under "What works today" was verified against the source and tests
 named. Each proposal names its compatibility
 consequences and the tests that prove it; the implemented ones say where they
@@ -30,7 +31,7 @@ place the API made the pattern in
 | Journey records sealed per record; artifacts content-addressed; join provenance retained | `src/store/unit-store.ts` | conformance; the example's replay test |
 | Memory store as executable specification with deterministic clock and ids | `src/store/memory-unit-store.ts` | every test above |
 
-### Join semantics, stated exactly
+### Default select-join semantics, stated exactly
 
 Verified against `src/store/memory-unit-store.ts:2715-2770` (selection),
 `:2816-2887` (offers), and `src/store/unit-store-conformance.ts:1009-1078`:
@@ -52,8 +53,10 @@ Verified against `src/store/memory-unit-store.ts:2715-2770` (selection),
 6. Late offers are journey-recorded no-ops; an unreachable leg resolves the
    join to the engine-authored `join_unsatisfiable` outcome and artifact.
 
-So a join **synchronizes predecessors and selects one accepted artifact**. It
-does not combine payloads. A valid example is the `join` fixture in
+With omitted `compose` or `compose: "select"`, a join **synchronizes
+predecessors and selects one accepted artifact**. Opt-in envelope joins now
+embed accepted payloads; see P7 below. The default does not combine payloads.
+A valid example is the `join` fixture in
 `test/fixtures/mission-pipeline/node-graph-v2-fixtures.mjs`: `start` fans out
 to `branch-a` and `branch-b`, both emit `unit-artifact.v1`, and `join`
 (`require: "all"`) queues once with branch A's artifact and both offers in its
@@ -139,7 +142,7 @@ Rules: every key is a declared outcome of the node; the engine-reserved
 carries its input forward, so its entry equals `node.input`; an omitted
 outcome is undeclared and unchecked, as before. `compileGraph` proves that
 every edge carrying a declared outcome lands on a target whose `input` equals
-the declaration, joins included, naming the edge, outcome, contract, and
+the declaration, select joins included, naming the edge, outcome, contract, and
 target on failure. `validateNodeTurnCompletion` refuses a completion whose
 returned artifact (or carried-forward input) differs from the declaration, so
 the mismatch is a terminal contract rejection before caching, not a stuck
@@ -361,18 +364,18 @@ tests still pass.
 
 ### P7. Real aggregation across branches needs an engine increment
 
-**Problem.** As stated above, a join selects one artifact. Combining branch
-payloads today means a sequential trunk, which costs latency when the branches
+**Original problem.** A default join selects one artifact. Previously, combining
+branch payloads required a sequential trunk, which costs latency when the branches
 are independent model calls. Inbox lists this as an optional later foundation
 and requires it to bind exact unit, graph, source, edge, node, queue, and
 configuration identities.
 
 **Workaround.** Sequential accumulation.
 
-**Proposed.** An opt-in join composition mode:
+**Implemented (unreleased 1.1.0, 2026-09-11).** An opt-in join composition mode:
 
 ```ts
-// proposed extension of MissionPipelineJoin
+// implemented optional MissionPipelineJoin key
 readonly compose?: "select" | "envelope";  // default "select" (today's behaviour)
 ```
 
@@ -381,9 +384,12 @@ With `"envelope"`, the queued input artifact is a reserved
 `join.inbound` order, every accepted offer's artifact ref and its provenance,
 plus the unit, graph, join node, and requirement. The join node's declared
 input must be that reserved contract (mirroring the `join_unsatisfiable`
-rule). Whether the envelope embeds payloads or refs that the host resolves is
-the design decision to settle first; embedding keeps bodies store-free and is
-the recommendation.
+rule). Payloads are embedded, keeping bodies store-free. Public
+`createJoinInputArtifact` and `validateJoinInputArtifact` helpers validate
+seals and exact identities; the memory store additionally proves retained
+source occurrences, settlement/synthetic evidence, and accepted-offer routing.
+See [the contract and verification record](IMPLEMENTED-P7-P8.md) for optional
+ref metadata, aggregate limits, nOf subsets, and durable-adapter requirements.
 
 **Compatibility.** Additive optional key; existing joins unchanged.
 
@@ -403,9 +409,16 @@ replay ports). For model and agent turns, returned completions whose validation
 fails are different: the engine preserves their already-validated receipts. Agent transport
 uncertainty also has separate recovery semantics, described below.
 
-**Workaround.** Per-consumer port wrappers.
+**Implemented (unreleased 1.1.0, 2026-09-11):**
+`withDeclaredFailureOutcomes` now handles code/model/definite-agent failures
+with explicit invocation-local evidence, receipt precedence, and exact-attempt
+receipt retention. The user explicitly requested implementation after the
+assessment below. This does not establish a second consumer's agreement or
+change uncertain agent recovery. See [the implemented API and tests](IMPLEMENTED-P7-P8.md).
 
-**Proposed.** A port helper:
+**Historical workaround.** Per-consumer port wrappers.
+
+**Original proposal (superseded signature).** A port helper:
 
 ```ts
 // proposed: src/execute/declared-failures.ts
@@ -427,7 +440,9 @@ consumer chooses which classes to declare.
 receipt; an unmapped failure still throws; a model port without a receipt
 policy is rejected at construction.
 
-**Assessment (2026-09-10): deferred; no helper implemented or exported.**
+**Historical assessment (2026-09-10): deferred at that time; no helper was
+implemented or exported.** The following records the original evidence and
+conditions, not current implementation status.
 P8 would remove repeated failure-to-outcome handling, but converting a failure
 to an outcome also settles an attempt and assigns usage. The reviewed sources
 do not establish the required agreement between two consumers: Inbox's action
@@ -463,7 +478,7 @@ Evidence checked for this assessment:
   proves bounded retries, no successor, and zero recorded receipts for that
   fixture. It does not establish whether a real provider admitted work.
 
-The sketch also leaves three implementation boundaries unresolved:
+The original sketch also left three implementation boundaries unresolved:
 
 1. **Invocation evidence and input.**
    [`ExecutionFailure`](../src/execute/failure.ts) contains only `code` and
@@ -495,7 +510,8 @@ The sketch also leaves three implementation boundaries unresolved:
    receipt collection unspecified. Cancellation must not accidentally become
    completion through an ordinary error mapping.
 
-Reopen P8 when two consumers agree on invocation evidence, pre-dispatch versus
+The assessment recommended reopening P8 when two consumers agreed on invocation
+evidence, pre-dispatch versus
 admitted-unknown accounting, preservation of existing receipts, fallback
 construction failure, cancellation, and replay/agent uncertainty. Acceptance
 tests must prove those cases through the runner and its journal/outbox, as
@@ -503,8 +519,9 @@ well as mapping, pass-through, immutable capability capture, and construction
 guards. Existing receipt-prefix, exact-attempt evidence, and agent-reclaim
 tests in [`mission-pipeline-node-ports.test.mjs`](../test/mission-pipeline-node-ports.test.mjs)
 and [`mission-pipeline-node-turn.test.mjs`](../test/mission-pipeline-node-turn.test.mjs)
-remain the behavior to preserve. No code-only subset or agent semantic change
-is being shipped under the original general helper proposal.
+remain the behavior to preserve. The subsequent implementation covers all three
+port kinds under the explicit contract above; no independent consumer adoption
+or receipt-policy agreement is claimed.
 
 ### P9. One code port per kind, not per node
 
@@ -561,8 +578,8 @@ engine run that dead-letters an orphan node on its first attempt.
 | P4 | Configuration ref in the fingerprint | medium: fixes silent policy drift | small | additive key | implemented in 1.1.0 |
 | P3 | Goal manifest and closure projection | medium: expresses the consumer invariant | medium | additive modules | implemented in 1.1.0 |
 | P6 | v2 model request shape | low | small | none | implemented in 1.1.0 |
-| P8 | Declared failure helper | medium | scope pending evidence contract | receipt retention and unresolved agent work | assessed; deferred until two consumers agree on receipt/recovery policy |
-| P7 | Join input envelope | high only when measured serial latency demands it | large | new store semantics, conformance additions, Postgres parity | deferred, as Inbox's plan says |
+| P8 | Declared failure helper | medium | invocation evidence and policy | receipt retention and unresolved agent work | implemented in 1.1.0; downstream receipt-policy agreement remains unverified |
+| P7 | Join input envelope | high when branches need aggregation | large | new opt-in store semantics, conformance additions, Postgres parity | implemented in 1.1.0; Inbox durable candidate covered, permanent pin pending |
 
 P1, P2, P3, P4, P5, P6, and P9 are implemented in unreleased package version
 1.1.0: additive keys and exports, no store migration, and two new graph-store
@@ -597,15 +614,18 @@ checks: `renderPipelineFigure` emits SVG and escaped inert model JSON;
 `mountPipelineViewer` adds selection, deep links, an authorized details panel,
 and teardown. The browser accepts untrusted model/details JSON text and treats
 live objects, callbacks, DOM, and ELK as trusted host inputs. Node adapters
-use the existing engine hostile-input helpers. A real-browser witness remains
-pending because the available browser runtime list was empty on 2026-09-10;
-the next slice is to complete that witness. This records implemented APIs,
+use the existing engine hostile-input helpers. A real-browser witness was
+completed on 2026-09-11 for the supported interactions;
+[the record](VERIFY-GRAPHPAPER-STATIC-ADAPTERS.md) preserves measured results
+and the remaining reduced-motion activation limitation. This records implemented APIs,
 not merge readiness or Inbox adoption. Core model goldens, graph definitions,
 example presentation/Mermaid, and goal seals are unchanged. Run overlays,
 metrics, proposal rendering, viewer `update`, and goal scopes remain proposed.
 
-P8 has been assessed and stays proposed: two-consumer agreement is not established,
-and the sketch leaves invocation evidence, receipt retention, and agent
-uncertainty unresolved. Its assessment above records the evidence and the
-conditions for reopening it. P7 stays deferred under Inbox's plan; this
-assessment makes no change to engine or store semantics.
+P7 and P8 are subsequently implemented under the user's explicit request.
+The [contract and verification record](IMPLEMENTED-P7-P8.md) documents the
+opt-in semantics and exact checks. No store migration was added. Inbox/Postgres
+source adoption is subsequently recorded in the implementation record, with
+its permanent pin and P2 SQL publication limitations still open. Independent
+agreement on real-provider accounting remains separate; fixtures do not
+establish physical-provider qualification.

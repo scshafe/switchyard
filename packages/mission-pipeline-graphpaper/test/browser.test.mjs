@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import test from "node:test";
-import { layoutDiagram as realLayoutDiagram } from "graphpaper";
+import { bindDiagramInteractions, clearDiagramNodeSelection as realClear, cleanupHydratedDiagram as realCleanup, layoutDiagram as realLayoutDiagram } from "graphpaper";
 
 const state = { calls: [], selections: new WeakMap(), beforeHydrate: undefined, cleanups: 0 };
 globalThis.__pipelineViewerGraphpaperTest = state;
@@ -58,6 +58,7 @@ class Element extends Events {
   hidden = false;
   text = "";
   constructor(document, tag) { super(); this.ownerDocument = document; this.tagName = tag.toUpperCase(); }
+  get parentNode() { return this.parentElement; }
   get isConnected() { return this === this.ownerDocument.body || this.parentElement?.isConnected === true; }
   get nextSibling() { return this.parentElement?.childNodes[this.parentElement.childNodes.indexOf(this) + 1] ?? null; }
   get classList() { return {
@@ -265,6 +266,40 @@ test("keyboard selection opens a focusable sibling panel; close and Escape resto
   assert.equal(panel.hidden, true);
   assert.equal(view.document.activeElement.getAttribute("data-diagram-node"), "outage-signal");
   handle.destroy();
+});
+
+test("mouse node presses retain their click target with renderer pointer capture; drags do not select", async () => {
+  const view = fixture(); const picks = [];
+  const handle = await mountPipelineViewer(view.container, { onSelect: (pick) => picks.push(pick) });
+  const svg = view.canvas.querySelector("svg");
+  const node = view.canvas.querySelector('[data-diagram-node="normalize"]');
+  const rect = view.document.createElement("rect"); node.append(rect);
+  let captured = false;
+  svg.hasPointerCapture = (id) => captured && id === 1;
+  svg.releasePointerCapture = (id) => { assert.equal(id, 1); captured = false; };
+  bindDiagramInteractions(view.canvas, model, state.calls.at(-1).options);
+  const down = (target, pointerType = "mouse", button = 0) => {
+    captured = true; // The renderer captured on the SVG before this event bubbles.
+    view.canvas.fire("pointerdown", { target, pointerType, button, pointerId: 1, clientX: 10, clientY: 10 });
+  };
+  try {
+    down(rect);
+    assert.equal(captured, false, "a stationary mouse click must keep the node target");
+    view.canvas.fire("click", { target: captured ? svg : rect });
+    assert.equal(picks.at(-1).nodeId, "normalize");
+    assert.equal(picks.at(-1).source, "pointer");
+    realClear(view.canvas);
+    const count = picks.length;
+    down(rect);
+    view.canvas.fire("pointermove", { target: rect, clientX: 80, clientY: 10 });
+    view.canvas.fire("click", { target: rect });
+    assert.equal(picks.length, count, "renderer travel threshold still suppresses a drag release");
+    for (const [target, type, button] of [[svg, "mouse", 0], [rect, "touch", 0], [rect, "pen", 0], [rect, "mouse", 2]]) {
+      down(target, type, button);
+      assert.equal(captured, true, "other gestures retain renderer capture");
+    }
+  } finally { realCleanup(view.canvas); handle.destroy(); }
+  assert.equal(view.canvas.listeners.get("pointerdown").size, 0);
 });
 
 test("selection callbacks and panel text use the frozen snapshot rather than renderer node copies", async () => {

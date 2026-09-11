@@ -22,6 +22,7 @@ export * from "./store/graph-store.js";
 export * from "./store/memory-graph-store.js";
 export * from "./store/unit-store.js";
 export * from "./store/routing.js";
+export * from "./store/join-input.js";
 export * from "./store/memory-unit-store.js";
 export * from "./store/unit-path.js";
 export * from "./store/goal-closures.js";
@@ -31,6 +32,22 @@ export * from "./execute/turn.js";
 export * from "./execute/turn-evidence.js";
 export * from "./execute/unit-runner.js";
 export * from "./execute/code-port.js";
+export {
+  withDeclaredFailureOutcomes,
+  type DeclaredFailurePortKind,
+  type DeclaredFailureOperation,
+  type DeclaredFailureAdmission,
+  type DeclaredFailureEvidenceCapture,
+  type DeclaredFailureEvidence,
+  type DeclaredFailureInvocation,
+  type DeclaredFailureCodePort,
+  type DeclaredFailureModelPort,
+  type DeclaredFailureAgentPort,
+  type DeclaredFailureOptions,
+  type DeclaredFailureCodeOptions,
+  type DeclaredFailureModelOptions,
+  type DeclaredFailureAgentOptions
+} from "./execute/declared-failures.js";
 export * from "./prompt/contracts.js";
 export * from "./prompt/compiler.js";
 export * from "./model/binding.js";

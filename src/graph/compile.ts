@@ -4,6 +4,7 @@ import {
   declaredNodeOutput,
   declaredNodeOutputs,
   graphDefinitionRef,
+  JOIN_INPUT_ARTIFACT_CONTRACT,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
   SWITCHYARD_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
@@ -136,6 +137,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
       }
       if (
         predicateOutcomes(edge.when).includes("join_unsatisfiable")
+        && targetNode.join?.compose !== "envelope"
         && targetNode.input !== JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT
       ) {
         throw new Error(
@@ -150,13 +152,13 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
           `Graph edge ${edge.edgeId} from node ${edge.from} references undeclared outcome ${JSON.stringify(outcome)}`
         );
       }
-      // A declared output contract must be accepted by every node this edge
-      // queues, joins included. Settlement checks the same equality on the
-      // actual artifact; proving it here keeps a mismatch out of publication.
+      // Envelope joins accept heterogeneous sealed artifacts and synthesize
+      // their own reserved input; all other targets consume the carried contract.
       const emitted = declaredNodeOutput(source, outcome);
       if (emitted === undefined) continue;
       for (const target of edge.to) {
         const targetNode = nodesById[target]!;
+        if (targetNode.join?.compose === "envelope") continue;
         if (targetNode.input !== emitted) {
           throw new Error(
             `Graph edge ${edge.edgeId} carries outcome ${JSON.stringify(outcome)} from node ${edge.from} as ${emitted}, but target node ${target} accepts ${targetNode.input}`
@@ -185,6 +187,9 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
   for (const node of definition.nodes) {
     validateBindingRules(node);
     const join = Object.hasOwn(node, "join") ? node.join : undefined;
+    if (join?.compose === "envelope" && node.input !== JOIN_INPUT_ARTIFACT_CONTRACT) {
+      throw new Error(`Join node ${node.nodeId} with compose "envelope" requires ${JOIN_INPUT_ARTIFACT_CONTRACT} as its input contract (got ${node.input})`);
+    }
     if (join === undefined && node.outcomes.outcomes.includes("join_unsatisfiable")) {
       throw new Error(
         `Graph non-join node ${node.nodeId} cannot declare engine-reserved outcome "join_unsatisfiable"`

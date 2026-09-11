@@ -65,6 +65,8 @@ try {
     import { compileGraph } from "@scshafe/switchyard/graph/compile";
     import { projectGraphDisplay } from "@scshafe/switchyard/graph/display";
     import { graphDefinitionDiff } from "@scshafe/switchyard/graph/diff";
+    import { createJoinInputArtifact, validateJoinInputArtifact } from "@scshafe/switchyard/store/join-input";
+    import { withDeclaredFailureOutcomes } from "@scshafe/switchyard/execute/declared-failures";
     import { nodeTurnIdempotencyKey } from "@scshafe/switchyard/execute/turn";
     import { runClaimedUnitTurn } from "@scshafe/switchyard/execute/unit-runner";
     import { validateModelStageBinding } from "@scshafe/switchyard/model/binding";
@@ -111,6 +113,13 @@ try {
     if (typeof nodeTurnIdempotencyKey !== "function" || typeof validateModelStageBinding !== "function") {
       throw new Error("v2 execution/model export missing");
     }
+    if (root.createJoinInputArtifact !== createJoinInputArtifact
+      || root.validateJoinInputArtifact !== validateJoinInputArtifact
+      || root.withDeclaredFailureOutcomes !== withDeclaredFailureOutcomes
+      || root.JOIN_INPUT_ARTIFACT_CONTRACT !== "switchyard.join-input.v1"
+      || "declaredFailureRecoveryUsage" in root || "isDeclaredFailureUnresolved" in root) {
+      throw new Error("P7/P8 public export boundary mismatch");
+    }
     if (AGENT_STEP_REQUEST_SCHEMA_VERSION !== "agent-step-request.v1" || typeof compileGateFlow !== "function") {
       throw new Error("agent/gate helper export missing");
     }
@@ -155,6 +164,12 @@ try {
       createGraphDefinition,
       projectGraphDisplay,
       graphDefinitionDiff,
+      createJoinInputArtifact,
+      validateJoinInputArtifact,
+      withDeclaredFailureOutcomes,
+      JOIN_INPUT_ARTIFACT_CONTRACT,
+      type JoinInputPayload,
+      type DeclaredFailureModelPort,
       nodeExecutionFingerprint,
       nodeTurnIdempotencyKey,
       recordHumanNodeDecision,
@@ -193,6 +208,15 @@ try {
     const compiled = undefined as unknown as CompiledGraph;
     const display: GraphDisplayProjection = projectGraphDisplay(compiled);
     const diff: GraphDefinitionDiff = graphDefinitionDiff(graph, graph);
+    const joinInput: JoinInputPayload = validateJoinInputArtifact(graph,
+      createJoinInputArtifact(graph, { unitId: "fixture", nodeId: "join", accepted: [] })).payload;
+    const modelFailurePort = undefined as unknown as DeclaredFailureModelPort;
+    // @ts-expect-error model failure recovery requires an explicit receipt policy
+    withDeclaredFailureOutcomes(modelFailurePort, { kind: "model", outcomes: {}, artifact: () => { throw new Error("fixture"); } });
+    // @ts-expect-error composition is a closed optional vocabulary
+    const wrongJoin: import("@scshafe/switchyard").SwitchyardJoin = { inbound: ["edge"], require: "all", compose: "merge" };
+    void joinInput;
+    void JOIN_INPUT_ARTIFACT_CONTRACT;
     const node = undefined as unknown as SwitchyardNode;
     const outcomes = undefined as unknown as OutcomeVocabulary;
     const predicate = undefined as unknown as OutcomePredicate;
