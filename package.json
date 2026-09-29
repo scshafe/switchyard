@@ -55,7 +55,7 @@
     "test:install": "node scripts/check-pack-install.mjs",
     "test:fresh-clone": "node scripts/check-fresh-clone.mjs",
     "check": "pnpm run test:v1-deletion && pnpm run build && pnpm run test && pnpm run test:payload && pnpm run test:release-artifact && pnpm run test:install",
-    "verify": "pnpm run clean && pnpm run check && git diff --exit-code -- lib",
+    "verify": "pnpm run clean && pnpm run check",
     "prepack": "pnpm run build",
     "prepublishOnly": "pnpm run verify",
     "release:manifest": "node scripts/write-release-manifest.mjs"

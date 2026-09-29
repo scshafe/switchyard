@@ -168,6 +168,10 @@ the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
 JavaScript plus TypeScript import smokes.
 
+`pnpm run test:fresh-clone` repeats the install, build and verify in a fresh
+clone of the committed `HEAD` (it requires a clean working tree). `lib/` is
+build output and is not committed.
+
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and
 [`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md).
