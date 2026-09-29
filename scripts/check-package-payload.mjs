@@ -68,6 +68,7 @@ async function expectedFilesIn(directory, accepts) {
 }
 
 const expected = new Set([
+  "CHANGELOG.md",
   "LICENSE",
   "README.md",
   "package.json",

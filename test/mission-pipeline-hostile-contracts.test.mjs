@@ -6,8 +6,8 @@ import {
   createArtifactEnvelope,
   validateArtifactEnvelope,
   validateArtifactRef
-} from "mission-pipeline/contracts/artifact";
-import { validateUsageReceipt } from "mission-pipeline/contracts/usage-receipt";
+} from "@scshafe/mission-pipeline/contracts/artifact";
+import { validateUsageReceipt } from "@scshafe/mission-pipeline/contracts/usage-receipt";
 
 function unavailableReceipt(overrides = {}) {
   return {

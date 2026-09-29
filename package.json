@@ -1,13 +1,13 @@
 {
-  "name": "mission-pipeline",
-  "version": "1.0.0",
+  "name": "@scshafe/mission-pipeline",
+  "version": "1.0.1",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
   "author": "mission-pipeline contributors",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/scshafe/mission-pipeline.git"
+    "url": "https://github.com/scshafe/mission-pipeline.git"
   },
   "bugs": {
     "url": "https://github.com/scshafe/mission-pipeline/issues"
@@ -36,10 +36,14 @@
     "src",
     "lib",
     "schemas",
+    "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "tsconfig.json"
   ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "sideEffects": false,
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
@@ -53,7 +57,8 @@
     "check": "npm run test:v1-deletion && npm run build && npm run test && npm run test:payload && npm run test:release-artifact && npm run test:install",
     "verify": "npm run clean && npm run check && git diff --exit-code -- lib",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run verify"
+    "prepublishOnly": "npm run verify",
+    "release:manifest": "node scripts/write-release-manifest.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

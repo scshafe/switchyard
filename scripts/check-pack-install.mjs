@@ -52,15 +52,15 @@ try {
 
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const smoke = `
-    import * as root from "mission-pipeline";
-    import { createGraphDefinition } from "mission-pipeline/graph/definition";
-    import { compileGraph } from "mission-pipeline/graph/compile";
-    import { nodeTurnIdempotencyKey } from "mission-pipeline/execute/turn";
-    import { runClaimedUnitTurn } from "mission-pipeline/execute/unit-runner";
-    import { validateModelStageBinding } from "mission-pipeline/model/binding";
-    import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "mission-pipeline/agent/step";
-    import { compileGateFlow } from "mission-pipeline/gate/compiler";
-    import metadata from "mission-pipeline/package.json" with { type: "json" };
+    import * as root from "@scshafe/mission-pipeline";
+    import { createGraphDefinition } from "@scshafe/mission-pipeline/graph/definition";
+    import { compileGraph } from "@scshafe/mission-pipeline/graph/compile";
+    import { nodeTurnIdempotencyKey } from "@scshafe/mission-pipeline/execute/turn";
+    import { runClaimedUnitTurn } from "@scshafe/mission-pipeline/execute/unit-runner";
+    import { validateModelStageBinding } from "@scshafe/mission-pipeline/model/binding";
+    import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "@scshafe/mission-pipeline/agent/step";
+    import { compileGateFlow } from "@scshafe/mission-pipeline/gate/compiler";
+    import metadata from "@scshafe/mission-pipeline/package.json" with { type: "json" };
 
     const graph = createGraphDefinition({
       graphId: "install.smoke",
@@ -120,7 +120,7 @@ try {
     ];
     for (const subpath of retiredSubpaths) {
       try {
-        await import("mission-pipeline/" + subpath);
+        await import("@scshafe/mission-pipeline/" + subpath);
         throw new Error("retired subpath resolved: " + subpath);
       } catch (error) {
         if (String(error?.message).startsWith("retired subpath resolved:")) throw error;
@@ -151,10 +151,10 @@ try {
       type TurnExecutionStore,
       type TurnRunnerStore,
       type WorkerNodeTurnContext
-    } from "mission-pipeline";
-    import type { UnitStore } from "mission-pipeline/store/unit-store";
-    import type { ModelInvocationRequest } from "mission-pipeline/model/invoker";
-    import type { AgentStepExecutor } from "mission-pipeline/agent/executor-port";
+    } from "@scshafe/mission-pipeline";
+    import type { UnitStore } from "@scshafe/mission-pipeline/store/unit-store";
+    import type { ModelInvocationRequest } from "@scshafe/mission-pipeline/model/invoker";
+    import type { AgentStepExecutor } from "@scshafe/mission-pipeline/agent/executor-port";
 
     const exported = {
       compileGraph,

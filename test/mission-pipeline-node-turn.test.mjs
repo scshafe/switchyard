@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { createArtifactEnvelope } from "mission-pipeline/contracts/artifact";
-import { createGraphDefinition } from "mission-pipeline/graph/definition";
+import { createArtifactEnvelope } from "@scshafe/mission-pipeline/contracts/artifact";
+import { createGraphDefinition } from "@scshafe/mission-pipeline/graph/definition";
 import {
   ExecutionFailureError
-} from "mission-pipeline/execute/failure";
+} from "@scshafe/mission-pipeline/execute/failure";
 import {
   executeNodeTurnAttempt,
   isNodeTurnInvocationUncertainError,
@@ -14,7 +14,7 @@ import {
   nodeTurnCompletionDigest,
   nodeTurnIdempotencyKey,
   WorkerNodeKindError
-} from "mission-pipeline/execute/turn";
+} from "@scshafe/mission-pipeline/execute/turn";
 import {
   admitCallbackNodeEvent,
   MAX_TURN_OUTBOX_EVENTS,
@@ -30,7 +30,7 @@ import {
   TurnLeaseLostError,
   TurnSettlementUncertainError,
   turnOutboxEventDigest
-} from "mission-pipeline/execute/unit-runner";
+} from "@scshafe/mission-pipeline/execute/unit-runner";
 
 const TURN = Object.freeze({
   idempotency: "per (unitId, nodeId, attemptNumber)",

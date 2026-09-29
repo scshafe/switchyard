@@ -2,16 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { canonicalJson } from "mission-pipeline/contracts/digest";
+import { canonicalJson } from "@scshafe/mission-pipeline/contracts/digest";
 import {
   MAX_GRAPH_VALIDATION_DEPTH,
   MAX_GRAPH_VALIDATION_STRING_CODE_UNITS,
   MAX_GRAPH_VALIDATION_VALUES
-} from "mission-pipeline/graph/limits";
+} from "@scshafe/mission-pipeline/graph/limits";
 import {
   MAX_NODE_OUTCOMES,
   validateOutcomeVocabulary
-} from "mission-pipeline/graph/outcome";
+} from "@scshafe/mission-pipeline/graph/outcome";
 import {
   isUnconditionalOutcomePredicate,
   predicateOutcomes,
@@ -19,7 +19,7 @@ import {
   validateJsonPointer,
   validateJsonScalar,
   validateOutcomePredicate
-} from "mission-pipeline/graph/edge";
+} from "@scshafe/mission-pipeline/graph/edge";
 import {
   createGraphDefinition,
   graphDefinitionRef,
@@ -28,8 +28,8 @@ import {
   validateGraphDefinition,
   validateMissionPipelineNode,
   validateMissionPipelineNodeBindingRef
-} from "mission-pipeline/graph/definition";
-import { compileGraph } from "mission-pipeline/graph/compile";
+} from "@scshafe/mission-pipeline/graph/definition";
+import { compileGraph } from "@scshafe/mission-pipeline/graph/compile";
 import {
   adversarialGraphs,
   fixtureGraphs,

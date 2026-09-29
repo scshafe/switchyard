@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   artifactRef,
   createArtifactEnvelope
-} from "mission-pipeline/contracts/artifact";
+} from "@scshafe/mission-pipeline/contracts/artifact";
 import {
   ENGINE_JOIN_UNSATISFIABLE_OUTCOME,
   MAX_AGENT_TURN_USAGE_RECEIPTS,
@@ -14,7 +14,7 @@ import {
   snapshotNodeTurnCompletion,
   snapshotWorkerNodeTurnContext,
   validateNodeTurnCompletion
-} from "mission-pipeline/execute/ports";
+} from "@scshafe/mission-pipeline/execute/ports";
 import {
   MODEL_BINDING,
   node

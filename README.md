@@ -1,4 +1,4 @@
-# mission-pipeline
+# @scshafe/mission-pipeline
 
 Mission Pipeline is a dependency-free, digest-sealed node-graph engine for
 durable unit journeys. Every node has its own queue. Completing one node turn
@@ -8,6 +8,25 @@ releases the turn lease.
 
 Version 1.0 is the node-graph-only major release. There is no compatibility
 execution path for the retired traversal engine.
+
+## Install
+
+The package is private and published to GitHub Packages. Map the scope in the
+consumer's committed `.npmrc` (this line only, never a credential):
+
+```ini
+@scshafe:registry=https://npm.pkg.github.com
+```
+
+Authenticate in user-level npm/pnpm config or through `NODE_AUTH_TOKEN` in CI,
+then depend on an exact version:
+
+```sh
+pnpm add --save-exact @scshafe/mission-pipeline@1.0.1
+```
+
+Import specifiers are `@scshafe/mission-pipeline` and
+`@scshafe/mission-pipeline/<subpath>`.
 
 ## Runtime boundary
 
@@ -26,7 +45,7 @@ Supported runtimes:
 import {
   compileGraph,
   createGraphDefinition
-} from "mission-pipeline";
+} from "@scshafe/mission-pipeline";
 
 const graph = createGraphDefinition({
   graphId: "example.review",
