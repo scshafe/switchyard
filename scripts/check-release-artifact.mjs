@@ -9,13 +9,10 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot as root, readReleaseIdentity } from "./release-identity.mjs";
 
-const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const manifestPath = resolve(
-  root,
-  "release/mission-pipeline-1.0.0.payload.sha256"
-);
+const identity = await readReleaseIdentity(root);
+const manifestPath = resolve(root, identity.manifest);
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-release-"));
 
 async function run(command, args, options = {}) {
@@ -82,6 +79,9 @@ async function pack(destination) {
   );
   if (report.length !== 1 || typeof report[0].filename !== "string") {
     throw new Error("npm pack did not produce exactly one artifact");
+  }
+  if (report[0].name !== identity.name || report[0].version !== identity.version) {
+    throw new Error("packed identity does not match package.json");
   }
   return {
     report: report[0],
@@ -152,7 +152,14 @@ try {
     /~\//,
     /\.openclaw/,
     /\.mission-control/,
-    /\b(?:file|link|workspace):/
+    /\b(?:file|link|workspace):/,
+    // Token-shaped strings (LIB-12a): GitHub classic/OAuth/app/refresh tokens,
+    // fine-grained PATs, npm tokens, .npmrc credential lines, and PEM blocks.
+    /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+    /\bgithub_pat_[A-Za-z0-9_]{20,}/,
+    /\bnpm_[A-Za-z0-9]{36}\b/,
+    /-----BEGIN [A-Z0-9 ]+-----/,
+    /_authToken\s*=/
   ];
   for (const [path, expectedDigest] of manifest) {
     const content = await run("tar", ["-xOzf", first.path, `package/${path}`]);
@@ -168,7 +175,7 @@ try {
     for (const pattern of forbiddenBytes) {
       if (pattern.test(content)) {
         throw new Error(
-          `mutable local/package-manager reference ${pattern} found in ${path}`
+          `forbidden local/package-manager/credential reference ${pattern} found in ${path}`
         );
       }
     }
