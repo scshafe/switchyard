@@ -7,7 +7,13 @@ import { fileURLToPath } from "node:url";
 import { PNPM_PACK_ARGS, singlePackReport } from "./release-identity.mjs";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-pack-"));
+// With MISSION_PIPELINE_SMOKE_CONSUMER set to a directory that already has
+// the package installed (the publish workflow's install-back of the registry
+// version), skip pack+install and run the same smokes there.
+const installedConsumer = process.env.MISSION_PIPELINE_SMOKE_CONSUMER;
+const scratch = installedConsumer
+  ? undefined
+  : await mkdtemp(join(tmpdir(), "mission-pipeline-pack-"));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -25,7 +31,7 @@ async function run(command, args, options = {}) {
   return stdout;
 }
 
-try {
+async function packAndInstall() {
   const packed = singlePackReport(await run("pnpm", [
     ...PNPM_PACK_ARGS,
     "--pack-destination",
@@ -44,6 +50,13 @@ try {
     "--offline",
     join(scratch, packed.basename)
   ], { cwd: consumer });
+  return consumer;
+}
+
+try {
+  const consumer = installedConsumer === undefined
+    ? await packAndInstall()
+    : resolve(installedConsumer);
 
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const smoke = `
@@ -209,7 +222,11 @@ try {
     "--project",
     "tsconfig.json"
   ], { cwd: consumer });
-  console.log("Mission Pipeline packed-install runtime + TypeScript smoke passed.");
+  console.log(
+    installedConsumer === undefined
+      ? "Mission Pipeline packed-install runtime + TypeScript smoke passed."
+      : `Mission Pipeline installed-consumer runtime + TypeScript smoke passed (${consumer}).`
+  );
 } finally {
-  await rm(scratch, { force: true, recursive: true });
+  if (scratch !== undefined) await rm(scratch, { force: true, recursive: true });
 }

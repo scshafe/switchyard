@@ -9,7 +9,7 @@ published versions are never deleted, replaced or reused.
 
 First version published to GitHub Packages. No API or runtime behaviour change
 from 1.0.0: `src/`, `lib/` and `schemas/` are byte-identical to 1.0.0; only
-`package.json`, `README.md` and this file differ in the payload.
+`package.json`, `README.md` and `CHANGELOG.md` differ in the payload.
 
 - Renamed to `@scshafe/mission-pipeline` and published to
   `https://npm.pkg.github.com`. Consumers change `mission-pipeline/<subpath>`

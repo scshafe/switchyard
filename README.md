@@ -172,6 +172,24 @@ JavaScript plus TypeScript import smokes.
 clone of the committed `HEAD` (it requires a clean working tree). `lib/` is
 build output and is not committed.
 
+## Releasing
+
+1. On a branch: bump `version` in `package.json`, add a `## <x.y.z> — <date>`
+   section to `CHANGELOG.md`, run `pnpm run build && pnpm run release:manifest`
+   to write `release/scshafe-mission-pipeline-<x.y.z>.payload.sha256`, run
+   `pnpm run verify`, and merge to `main`.
+2. After CI is green on `main`, push the annotated tag `v<x.y.z>` on that
+   commit. `.github/workflows/publish.yml` refuses a tag that is not on
+   `main` or does not equal `package.json`'s version, verifies, publishes to
+   GitHub Packages, installs the published version back, compares its
+   integrity with a local pack, and creates the GitHub Release with the
+   tarball and manifest digests.
+3. Published versions are immutable: a bad release is superseded by a higher
+   patch version with a changelog note. Nobody runs `pnpm publish` by hand.
+
+`workflow_dispatch` of `publish.yml` with `dry_run` set stops at
+`pnpm publish --dry-run`.
+
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and
 [`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md).
