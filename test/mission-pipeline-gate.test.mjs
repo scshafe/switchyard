@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { digest } from "mission-pipeline/contracts/digest";
+import { digest } from "@scshafe/mission-pipeline/contracts/digest";
 import {
   createGateBudgetPolicy,
   createGateFlowDefinition,
@@ -14,12 +14,12 @@ import {
   gateValidityPolicyRef,
   validateGateFlowTransition,
   validateGateStepOutcome
-} from "mission-pipeline/gate/contracts";
-import { validateGateTerminationCertificate } from "mission-pipeline/gate/certificate";
+} from "@scshafe/mission-pipeline/gate/contracts";
+import { validateGateTerminationCertificate } from "@scshafe/mission-pipeline/gate/certificate";
 import {
   compileGateFlow,
   validateCompiledGateFlow
-} from "mission-pipeline/gate/compiler";
+} from "@scshafe/mission-pipeline/gate/compiler";
 
 const ref = (id) => ({ id, version: 1, digest: digest({ id, version: 1 }) });
 const success = (code) => ({ code, kind: "success", description: `${code} succeeded` });

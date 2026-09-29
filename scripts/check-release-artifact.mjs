@@ -9,13 +9,15 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  PNPM_PACK_ARGS,
+  projectRoot as root,
+  readReleaseIdentity,
+  singlePackReport
+} from "./release-identity.mjs";
 
-const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const manifestPath = resolve(
-  root,
-  "release/mission-pipeline-1.0.0.payload.sha256"
-);
+const identity = await readReleaseIdentity(root);
+const manifestPath = resolve(root, identity.manifest);
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-release-"));
 
 async function run(command, args, options = {}) {
@@ -71,21 +73,17 @@ function parseManifest(text) {
 
 async function pack(destination) {
   await mkdir(destination);
-  const report = JSON.parse(
-    await run("npm", [
-      "pack",
-      "--json",
-      "--ignore-scripts",
-      "--pack-destination",
-      destination
-    ])
+  // pnpm pack is the packer `pnpm publish` uses; its tarball (and the
+  // package.json it rewrites) is what the registry will hold.
+  const report = singlePackReport(
+    await run("pnpm", [...PNPM_PACK_ARGS, "--pack-destination", destination])
   );
-  if (report.length !== 1 || typeof report[0].filename !== "string") {
-    throw new Error("npm pack did not produce exactly one artifact");
+  if (report.name !== identity.name || report.version !== identity.version) {
+    throw new Error("packed identity does not match package.json");
   }
   return {
-    report: report[0],
-    path: join(destination, report[0].filename)
+    report,
+    path: join(destination, report.basename)
   };
 }
 
@@ -99,16 +97,13 @@ try {
   const secondSha256 = hash("sha256", secondBytes);
   if (firstSha256 !== secondSha256) {
     throw new Error(
-      `two clean npm packs were not byte-reproducible: ${firstSha256} != ${secondSha256}`
+      `two clean pnpm packs were not byte-reproducible: ${firstSha256} != ${secondSha256}`
     );
   }
+  // pnpm pack reports no digests; the registry's dist.integrity and
+  // dist.shasum are these values over the same bytes.
   const shasum = hash("sha1", firstBytes);
   const integrity = `sha512-${hash("sha512", firstBytes, "base64")}`;
-  for (const packed of [first, second]) {
-    if (packed.report.shasum !== shasum || packed.report.integrity !== integrity) {
-      throw new Error("npm pack shasum/integrity report does not match artifact bytes");
-    }
-  }
 
   const verbose = await run("tar", ["-tvzf", first.path]);
   for (const line of verbose.trim().split(/\r?\n/)) {
@@ -152,7 +147,14 @@ try {
     /~\//,
     /\.openclaw/,
     /\.mission-control/,
-    /\b(?:file|link|workspace):/
+    /\b(?:file|link|workspace):/,
+    // Token-shaped strings (LIB-12a): GitHub classic/OAuth/app/refresh tokens,
+    // fine-grained PATs, npm tokens, .npmrc credential lines, and PEM blocks.
+    /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+    /\bgithub_pat_[A-Za-z0-9_]{20,}/,
+    /\bnpm_[A-Za-z0-9]{36}\b/,
+    /-----BEGIN [A-Z0-9 ]+-----/,
+    /_authToken\s*=/
   ];
   for (const [path, expectedDigest] of manifest) {
     const content = await run("tar", ["-xOzf", first.path, `package/${path}`]);
@@ -168,14 +170,14 @@ try {
     for (const pattern of forbiddenBytes) {
       if (pattern.test(content)) {
         throw new Error(
-          `mutable local/package-manager reference ${pattern} found in ${path}`
+          `forbidden local/package-manager/credential reference ${pattern} found in ${path}`
         );
       }
     }
   }
   console.log(JSON.stringify({
     result: "pass",
-    filename: first.report.filename,
+    filename: first.report.basename,
     fileCount: manifest.size,
     sha256: firstSha256,
     shasum,

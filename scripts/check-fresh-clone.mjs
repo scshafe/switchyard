@@ -48,12 +48,25 @@ try {
   const tree = (await run("git", ["rev-parse", "HEAD^{tree}"])).trim();
   await run("git", ["clone", "--no-local", "--no-tags", root, clone]);
   await run("git", ["checkout", "--detach", commit], { cwd: clone });
+  // The scratch clone may sit on another filesystem than the candidate
+  // (tmpdir), where pnpm would pick a different, empty store; reuse the
+  // candidate's store so the offline install sees the same packages.
+  const storeDir = (await run("pnpm", ["store", "path"])).trim();
   await run(
-    "npm",
-    ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"],
+    "pnpm",
+    [
+      "install",
+      "--frozen-lockfile",
+      "--offline",
+      "--ignore-scripts",
+      "--store-dir",
+      storeDir
+    ],
     { cwd: clone }
   );
-  await run("npm", ["run", "verify"], { cwd: clone });
+  // lib/ is not committed: build it from src/ before verifying.
+  await run("pnpm", ["run", "build"], { cwd: clone });
+  await run("pnpm", ["run", "verify"], { cwd: clone });
   const cloneStatus = await run("git", ["status", "--porcelain=v1"], {
     cwd: clone
   });

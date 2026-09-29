@@ -4,9 +4,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PNPM_PACK_ARGS, singlePackReport } from "./release-identity.mjs";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-pack-"));
+// With MISSION_PIPELINE_SMOKE_CONSUMER set to a directory that already has
+// the package installed (the publish workflow's install-back of the registry
+// version), skip pack+install and run the same smokes there.
+const installedConsumer = process.env.MISSION_PIPELINE_SMOKE_CONSUMER;
+const scratch = installedConsumer
+  ? undefined
+  : await mkdtemp(join(tmpdir(), "mission-pipeline-pack-"));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -24,17 +31,12 @@ async function run(command, args, options = {}) {
   return stdout;
 }
 
-try {
-  const packed = JSON.parse(await run("npm", [
-    "pack",
-    "--json",
-    "--ignore-scripts",
+async function packAndInstall() {
+  const packed = singlePackReport(await run("pnpm", [
+    ...PNPM_PACK_ARGS,
     "--pack-destination",
     scratch
   ], { capture: true }));
-  if (packed.length !== 1 || typeof packed[0].filename !== "string") {
-    throw new Error("npm pack did not return one tarball");
-  }
 
   const consumer = join(scratch, "consumer");
   await mkdir(consumer);
@@ -42,25 +44,31 @@ try {
     join(consumer, "package.json"),
     `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`
   );
-  await run("npm", [
-    "install",
+  await run("pnpm", [
+    "add",
     "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    join(scratch, packed[0].filename)
+    "--offline",
+    join(scratch, packed.basename)
   ], { cwd: consumer });
+  return consumer;
+}
+
+try {
+  const consumer = installedConsumer === undefined
+    ? await packAndInstall()
+    : resolve(installedConsumer);
 
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const smoke = `
-    import * as root from "mission-pipeline";
-    import { createGraphDefinition } from "mission-pipeline/graph/definition";
-    import { compileGraph } from "mission-pipeline/graph/compile";
-    import { nodeTurnIdempotencyKey } from "mission-pipeline/execute/turn";
-    import { runClaimedUnitTurn } from "mission-pipeline/execute/unit-runner";
-    import { validateModelStageBinding } from "mission-pipeline/model/binding";
-    import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "mission-pipeline/agent/step";
-    import { compileGateFlow } from "mission-pipeline/gate/compiler";
-    import metadata from "mission-pipeline/package.json" with { type: "json" };
+    import * as root from "@scshafe/mission-pipeline";
+    import { createGraphDefinition } from "@scshafe/mission-pipeline/graph/definition";
+    import { compileGraph } from "@scshafe/mission-pipeline/graph/compile";
+    import { nodeTurnIdempotencyKey } from "@scshafe/mission-pipeline/execute/turn";
+    import { runClaimedUnitTurn } from "@scshafe/mission-pipeline/execute/unit-runner";
+    import { validateModelStageBinding } from "@scshafe/mission-pipeline/model/binding";
+    import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "@scshafe/mission-pipeline/agent/step";
+    import { compileGateFlow } from "@scshafe/mission-pipeline/gate/compiler";
+    import metadata from "@scshafe/mission-pipeline/package.json" with { type: "json" };
 
     const graph = createGraphDefinition({
       graphId: "install.smoke",
@@ -120,7 +128,7 @@ try {
     ];
     for (const subpath of retiredSubpaths) {
       try {
-        await import("mission-pipeline/" + subpath);
+        await import("@scshafe/mission-pipeline/" + subpath);
         throw new Error("retired subpath resolved: " + subpath);
       } catch (error) {
         if (String(error?.message).startsWith("retired subpath resolved:")) throw error;
@@ -151,10 +159,10 @@ try {
       type TurnExecutionStore,
       type TurnRunnerStore,
       type WorkerNodeTurnContext
-    } from "mission-pipeline";
-    import type { UnitStore } from "mission-pipeline/store/unit-store";
-    import type { ModelInvocationRequest } from "mission-pipeline/model/invoker";
-    import type { AgentStepExecutor } from "mission-pipeline/agent/executor-port";
+    } from "@scshafe/mission-pipeline";
+    import type { UnitStore } from "@scshafe/mission-pipeline/store/unit-store";
+    import type { ModelInvocationRequest } from "@scshafe/mission-pipeline/model/invoker";
+    import type { AgentStepExecutor } from "@scshafe/mission-pipeline/agent/executor-port";
 
     const exported = {
       compileGraph,
@@ -214,7 +222,11 @@ try {
     "--project",
     "tsconfig.json"
   ], { cwd: consumer });
-  console.log("Mission Pipeline packed-install runtime + TypeScript smoke passed.");
+  console.log(
+    installedConsumer === undefined
+      ? "Mission Pipeline packed-install runtime + TypeScript smoke passed."
+      : `Mission Pipeline installed-consumer runtime + TypeScript smoke passed (${consumer}).`
+  );
 } finally {
-  await rm(scratch, { force: true, recursive: true });
+  if (scratch !== undefined) await rm(scratch, { force: true, recursive: true });
 }

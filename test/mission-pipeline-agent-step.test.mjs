@@ -7,11 +7,11 @@ import {
   AGENT_STEP_RESULT_SCHEMA_VERSION,
   validateAgentStepRequest,
   validateAgentStepResult
-} from "mission-pipeline/agent/step";
+} from "@scshafe/mission-pipeline/agent/step";
 import {
   createFakeAgentStepExecutor,
   fakeUsageReceipt
-} from "mission-pipeline/agent/fake-executor";
+} from "@scshafe/mission-pipeline/agent/fake-executor";
 
 const mirror = (name) => new URL(`../schemas/${name}`, import.meta.url);
 const fixture = (name) =>

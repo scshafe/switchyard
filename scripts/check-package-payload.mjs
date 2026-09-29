@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { readFile, readdir } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PNPM_PACK_ARGS, singlePackReport } from "./release-identity.mjs";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 
@@ -68,6 +69,7 @@ async function expectedFilesIn(directory, accepts) {
 }
 
 const expected = new Set([
+  "CHANGELOG.md",
   "LICENSE",
   "README.md",
   "package.json",
@@ -79,23 +81,20 @@ for (const [directory, accepts] of rootRules) {
   }
 }
 
-const report = JSON.parse(
-  await run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"])
+const report = singlePackReport(
+  await run("pnpm", [...PNPM_PACK_ARGS, "--dry-run"])
 );
-if (report.length !== 1) {
-  throw new Error(`npm pack returned ${report.length} package reports`);
-}
 const packageJson = JSON.parse(
   await readFile(resolve(root, "package.json"), "utf8")
 );
 if (
-  report[0].name !== packageJson.name
-  || report[0].version !== packageJson.version
+  report.name !== packageJson.name
+  || report.version !== packageJson.version
 ) {
-  throw new Error("npm pack identity does not match package.json");
+  throw new Error("pnpm pack identity does not match package.json");
 }
 
-const actual = new Set(report[0].files?.map((entry) => entry.path) ?? []);
+const actual = new Set(report.files?.map((entry) => entry.path) ?? []);
 const missing = [...expected].filter((path) => !actual.has(path)).sort();
 const unexpected = [...actual].filter((path) => !expected.has(path)).sort();
 if (missing.length > 0 || unexpected.length > 0) {

@@ -1,4 +1,4 @@
-# mission-pipeline
+# @scshafe/mission-pipeline
 
 Mission Pipeline is a dependency-free, digest-sealed node-graph engine for
 durable unit journeys. Every node has its own queue. Completing one node turn
@@ -8,6 +8,25 @@ releases the turn lease.
 
 Version 1.0 is the node-graph-only major release. There is no compatibility
 execution path for the retired traversal engine.
+
+## Install
+
+The package is private and published to GitHub Packages. Map the scope in the
+consumer's committed `.npmrc` (this line only, never a credential):
+
+```ini
+@scshafe:registry=https://npm.pkg.github.com
+```
+
+Authenticate in user-level npm/pnpm config or through `NODE_AUTH_TOKEN` in CI,
+then depend on an exact version:
+
+```sh
+pnpm add --save-exact @scshafe/mission-pipeline@1.0.1
+```
+
+Import specifiers are `@scshafe/mission-pipeline` and
+`@scshafe/mission-pipeline/<subpath>`.
 
 ## Runtime boundary
 
@@ -26,7 +45,7 @@ Supported runtimes:
 import {
   compileGraph,
   createGraphDefinition
-} from "mission-pipeline";
+} from "@scshafe/mission-pipeline";
 
 const graph = createGraphDefinition({
   graphId: "example.review",
@@ -140,13 +159,36 @@ behavior are authored as nodes and edges.
 ## Verification
 
 ```sh
-npm run check
+pnpm install --frozen-lockfile
+pnpm run verify
 ```
 
 The gate builds from a clean output directory, runs the v1-deletion guard and
 the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
 JavaScript plus TypeScript import smokes.
+
+`pnpm run test:fresh-clone` repeats the install, build and verify in a fresh
+clone of the committed `HEAD` (it requires a clean working tree). `lib/` is
+build output and is not committed.
+
+## Releasing
+
+1. On a branch: bump `version` in `package.json`, add a `## <x.y.z> — <date>`
+   section to `CHANGELOG.md`, run `pnpm run build && pnpm run release:manifest`
+   to write `release/scshafe-mission-pipeline-<x.y.z>.payload.sha256`, run
+   `pnpm run verify`, and merge to `main`.
+2. After CI is green on `main`, push the annotated tag `v<x.y.z>` on that
+   commit. `.github/workflows/publish.yml` refuses a tag that is not on
+   `main` or does not equal `package.json`'s version, verifies, publishes to
+   GitHub Packages, installs the published version back, compares its
+   integrity with a local pack, and creates the GitHub Release with the
+   tarball and manifest digests.
+3. Published versions are immutable: a bad release is superseded by a higher
+   patch version with a changelog note. Nobody runs `pnpm publish` by hand.
+
+`workflow_dispatch` of `publish.yml` with `dry_run` set stops at
+`pnpm publish --dry-run`.
 
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and

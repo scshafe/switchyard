@@ -17,7 +17,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { canonicalJson, digest, rawBodyDigest } from "mission-pipeline/contracts/digest";
+import { canonicalJson, digest, rawBodyDigest } from "@scshafe/mission-pipeline/contracts/digest";
 import {
   CONTRACT_ID_PATTERN,
   CONTRACT_ID_MAX_LENGTH,
@@ -30,7 +30,7 @@ import {
   validateArtifactEnvelope,
   createArtifactEnvelope,
   artifactRef
-} from "mission-pipeline/contracts/artifact";
+} from "@scshafe/mission-pipeline/contracts/artifact";
 
 const fixture = (rel) => new URL(`./fixtures/mission-pipeline/${rel}`, import.meta.url);
 const mirror = (rel) => new URL(`../schemas/${rel}`, import.meta.url);

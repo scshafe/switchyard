@@ -12,8 +12,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { projectRoot, readReleaseIdentity } from "./release-identity.mjs";
 
-const projectRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
+// The current release manifest path and version come from the project's own
+// package.json, never from a hardcoded literal (probe roots reuse them).
+const projectRelease = await readReleaseIdentity(projectRoot);
 const root = process.env.MISSION_PIPELINE_V1_GUARD_PROBE_ROOT === undefined
   ? projectRoot
   : resolve(process.env.MISSION_PIPELINE_V1_GUARD_PROBE_ROOT);
@@ -56,7 +59,7 @@ const requiredPaths = [
   "src/execute/unit-runner.ts",
   "src/store/graph-store.ts",
   "src/store/unit-store.ts",
-  "release/mission-pipeline-1.0.0.payload.sha256"
+  projectRelease.manifest
 ];
 
 const forbiddenSymbols = [
@@ -130,7 +133,7 @@ async function makeProbeRoot() {
   await writeProbeFile(
     probeRoot,
     "package.json",
-    `${JSON.stringify({ version: "1.0.0" })}\n`
+    `${JSON.stringify({ version: projectRelease.version })}\n`
   );
   await runProbe(probeRoot);
   return probeRoot;

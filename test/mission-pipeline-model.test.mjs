@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { digest } from "mission-pipeline/contracts/digest";
-import { classifyExecutionFailure } from "mission-pipeline/execute/failure";
+import { digest } from "@scshafe/mission-pipeline/contracts/digest";
+import { classifyExecutionFailure } from "@scshafe/mission-pipeline/execute/failure";
 import {
   createPromptComponent,
   createPersonaDefinition,
@@ -10,19 +10,19 @@ import {
   personaRef,
   promptComponentRef,
   promptStackRef
-} from "mission-pipeline/prompt/contracts";
+} from "@scshafe/mission-pipeline/prompt/contracts";
 import {
   compilePromptStack,
   validateCompiledPrompt
-} from "mission-pipeline/prompt/compiler";
+} from "@scshafe/mission-pipeline/prompt/compiler";
 import {
   createInferenceProfileRef,
   createModelStageBinding,
   modelStageBindingRef,
   resolveModelBindingRef,
   validateModelStageBinding
-} from "mission-pipeline/model/binding";
-import { verifyResolvedModelBinding } from "mission-pipeline/model/invoker";
+} from "@scshafe/mission-pipeline/model/binding";
+import { verifyResolvedModelBinding } from "@scshafe/mission-pipeline/model/invoker";
 
 const PARAMETERS = Object.freeze({
   temperature: 0,
