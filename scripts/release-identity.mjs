@@ -16,6 +16,23 @@ export function releaseBaseName(name) {
   return name.replace(/^@/, "").replace("/", "-");
 }
 
+// `pnpm pack --json` prints one object; tolerate an array of one for safety.
+// The filename is absolute when --pack-destination is given, relative
+// otherwise; callers join the basename with their own destination.
+export function singlePackReport(stdout) {
+  const parsed = JSON.parse(stdout);
+  const reports = Array.isArray(parsed) ? parsed : [parsed];
+  if (reports.length !== 1 || typeof reports[0]?.filename !== "string") {
+    throw new Error("pnpm pack did not report exactly one artifact");
+  }
+  const report = reports[0];
+  return { ...report, basename: report.filename.split("/").pop() };
+}
+
+// Lifecycle scripts are skipped when packing inside the checks: the caller
+// has already built lib/, and prepack would rebuild it mid-check.
+export const PNPM_PACK_ARGS = ["pack", "--json", "--config.ignore-scripts=true"];
+
 export async function readReleaseIdentity(root = projectRoot) {
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const { name, version } = packageJson;

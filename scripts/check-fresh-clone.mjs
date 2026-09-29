@@ -49,11 +49,11 @@ try {
   await run("git", ["clone", "--no-local", "--no-tags", root, clone]);
   await run("git", ["checkout", "--detach", commit], { cwd: clone });
   await run(
-    "npm",
-    ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"],
+    "pnpm",
+    ["install", "--frozen-lockfile", "--offline", "--ignore-scripts"],
     { cwd: clone }
   );
-  await run("npm", ["run", "verify"], { cwd: clone });
+  await run("pnpm", ["run", "verify"], { cwd: clone });
   const cloneStatus = await run("git", ["status", "--porcelain=v1"], {
     cwd: clone
   });

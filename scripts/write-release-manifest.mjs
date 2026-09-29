@@ -11,7 +11,12 @@ import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { projectRoot as root, readReleaseIdentity } from "./release-identity.mjs";
+import {
+  PNPM_PACK_ARGS,
+  projectRoot as root,
+  readReleaseIdentity,
+  singlePackReport
+} from "./release-identity.mjs";
 
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-manifest-"));
 
@@ -40,13 +45,13 @@ async function run(command, args, options = {}) {
 
 try {
   const identity = await readReleaseIdentity(root);
-  const report = JSON.parse(
-    await run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", scratch])
+  const report = singlePackReport(
+    await run("pnpm", [...PNPM_PACK_ARGS, "--pack-destination", scratch])
   );
-  if (report.length !== 1 || typeof report[0].filename !== "string") {
-    throw new Error("npm pack did not produce exactly one artifact");
+  if (report.name !== identity.name || report.version !== identity.version) {
+    throw new Error("packed identity does not match package.json");
   }
-  const tarball = join(scratch, report[0].filename);
+  const tarball = join(scratch, report.basename);
   const entries = (await run("tar", ["-tzf", tarball]))
     .trim()
     .split(/\r?\n/)

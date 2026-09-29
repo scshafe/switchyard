@@ -159,7 +159,8 @@ behavior are authored as nodes and edges.
 ## Verification
 
 ```sh
-npm run check
+pnpm install --frozen-lockfile
+pnpm run verify
 ```
 
 The gate builds from a clean output directory, runs the v1-deletion guard and

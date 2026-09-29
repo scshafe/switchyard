@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PNPM_PACK_ARGS, singlePackReport } from "./release-identity.mjs";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-pack-"));
@@ -25,16 +26,11 @@ async function run(command, args, options = {}) {
 }
 
 try {
-  const packed = JSON.parse(await run("npm", [
-    "pack",
-    "--json",
-    "--ignore-scripts",
+  const packed = singlePackReport(await run("pnpm", [
+    ...PNPM_PACK_ARGS,
     "--pack-destination",
     scratch
   ], { capture: true }));
-  if (packed.length !== 1 || typeof packed[0].filename !== "string") {
-    throw new Error("npm pack did not return one tarball");
-  }
 
   const consumer = join(scratch, "consumer");
   await mkdir(consumer);
@@ -42,12 +38,11 @@ try {
     join(consumer, "package.json"),
     `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`
   );
-  await run("npm", [
-    "install",
+  await run("pnpm", [
+    "add",
     "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    join(scratch, packed[0].filename)
+    "--offline",
+    join(scratch, packed.basename)
   ], { cwd: consumer });
 
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));

@@ -9,7 +9,12 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { projectRoot as root, readReleaseIdentity } from "./release-identity.mjs";
+import {
+  PNPM_PACK_ARGS,
+  projectRoot as root,
+  readReleaseIdentity,
+  singlePackReport
+} from "./release-identity.mjs";
 
 const identity = await readReleaseIdentity(root);
 const manifestPath = resolve(root, identity.manifest);
@@ -68,24 +73,17 @@ function parseManifest(text) {
 
 async function pack(destination) {
   await mkdir(destination);
-  const report = JSON.parse(
-    await run("npm", [
-      "pack",
-      "--json",
-      "--ignore-scripts",
-      "--pack-destination",
-      destination
-    ])
+  // pnpm pack is the packer `pnpm publish` uses; its tarball (and the
+  // package.json it rewrites) is what the registry will hold.
+  const report = singlePackReport(
+    await run("pnpm", [...PNPM_PACK_ARGS, "--pack-destination", destination])
   );
-  if (report.length !== 1 || typeof report[0].filename !== "string") {
-    throw new Error("npm pack did not produce exactly one artifact");
-  }
-  if (report[0].name !== identity.name || report[0].version !== identity.version) {
+  if (report.name !== identity.name || report.version !== identity.version) {
     throw new Error("packed identity does not match package.json");
   }
   return {
-    report: report[0],
-    path: join(destination, report[0].filename)
+    report,
+    path: join(destination, report.basename)
   };
 }
 
@@ -99,16 +97,13 @@ try {
   const secondSha256 = hash("sha256", secondBytes);
   if (firstSha256 !== secondSha256) {
     throw new Error(
-      `two clean npm packs were not byte-reproducible: ${firstSha256} != ${secondSha256}`
+      `two clean pnpm packs were not byte-reproducible: ${firstSha256} != ${secondSha256}`
     );
   }
+  // pnpm pack reports no digests; the registry's dist.integrity and
+  // dist.shasum are these values over the same bytes.
   const shasum = hash("sha1", firstBytes);
   const integrity = `sha512-${hash("sha512", firstBytes, "base64")}`;
-  for (const packed of [first, second]) {
-    if (packed.report.shasum !== shasum || packed.report.integrity !== integrity) {
-      throw new Error("npm pack shasum/integrity report does not match artifact bytes");
-    }
-  }
 
   const verbose = await run("tar", ["-tvzf", first.path]);
   for (const line of verbose.trim().split(/\r?\n/)) {
@@ -182,7 +177,7 @@ try {
   }
   console.log(JSON.stringify({
     result: "pass",
-    filename: first.report.filename,
+    filename: first.report.basename,
     fileCount: manifest.size,
     sha256: firstSha256,
     shasum,
