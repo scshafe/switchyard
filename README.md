@@ -30,7 +30,7 @@ Authenticate in user-level npm/pnpm config or through `NODE_AUTH_TOKEN` in CI,
 then depend on an exact version:
 
 ```sh
-pnpm add --save-exact @scshafe/switchyard@2.0.0
+pnpm add --save-exact @scshafe/switchyard@2.3.0
 ```
 
 Import specifiers are `@scshafe/switchyard` and
@@ -277,9 +277,14 @@ behavior are authored as nodes and edges.
 - `execute/code-port` provides `codeNodePortByNode`: one code body per node
   behind the kind-keyed worker port; an unregistered node fails terminally
   before any body runs.
+- `execute/worker` provides `runWorker`, the polling worker loop around
+  `runNextUnitTurns` (every worker principal in turn, idle sleep, stop
+  signal, per-turn report), and `workerPrincipals`.
+- `execute/fake-model` provides `fakeModelPort`, a deterministic model port
+  for first runs and tests, and `unavailableUsageReceipt`.
 - `execute/approval-review` provides `withApprovalReviewPorts`,
-  `approvalReviewHumanDecision`, `applyApprovalReviewCompletion` and
-  `reviewNotes`; `graph/approval-review` names the synthesized ids and roles
+  `approvalReviewHumanDecision`, `humanNodeAnswers`,
+  `applyApprovalReviewCompletion` and `reviewNotes`; `graph/approval-review` names the synthesized ids and roles
   (`approvalReviewRole`); `graph/binary` provides `binaryQuestion`.
 - `contracts/` provides canonical-JSON SHA-256 digests, artifact envelopes,
   artifact refs, and usage receipts.

@@ -24,6 +24,7 @@ import {
   type SwitchyardNodeRef
 } from "../graph/definition.js";
 import {
+  APPROVAL_OUTCOMES,
   REVIEW_REJECTED_OUTCOME,
   REVIEW_REWORK_OUTCOME,
   REVIEWER_OUTCOMES,
@@ -417,6 +418,25 @@ export function approvalReviewHumanDecision(
     ...(completion.outputArtifact === undefined ? {} : { outputArtifact: completion.outputArtifact }),
     actor: raw.actor as NodeTurnActorAttribution
   });
+}
+
+/**
+ * The answers a person (or a model body) gives at a node, which are not
+ * always the node's sealed outcomes: an approval node is answered
+ * `approved | denied`, a review node `accepted | rejected` (stored as
+ * `accepted:<outcome>`, `rework` or `rejected`), and a reviewed node or its
+ * rework twin with the subject's own outcomes. Any other node is answered
+ * with its outcomes. Pass the answer to `approvalReviewHumanDecision`.
+ */
+export function humanNodeAnswers(graphRaw: GraphDefinition, nodeId: string): readonly string[] {
+  const graph = validateGraphDefinition(graphRaw);
+  const role = approvalReviewRole(graph, nodeId);
+  if (role?.role === "approval") return APPROVAL_OUTCOMES;
+  if (role?.role === "review") return REVIEWER_OUTCOMES;
+  if (role !== undefined) return Object.freeze(reviewedOutcomes(role.subject).slice());
+  const node = graph.nodes.find((candidate) => candidate.nodeId === nodeId);
+  if (node === undefined) throw new Error(`graph ${graph.graphId} has no node ${JSON.stringify(nodeId)}`);
+  return Object.freeze(reviewedOutcomes(node).slice());
 }
 
 export interface ApprovalReviewPortOptions {

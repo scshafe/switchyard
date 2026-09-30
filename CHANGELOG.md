@@ -7,6 +7,26 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
+## 2.3.0 — unreleased (W4: first-run helpers)
+
+Additive. No graph, digest, runner, store or wire change.
+
+- `runWorker({ store, ports, leaseOwner, graphs | principals, batch?, idleMs?,
+  untilIdle?, signal?, onSettled? })` is the polling worker loop every host
+  wrote around `runNextUnitTurns`: it claims a batch for each worker
+  principal in turn, reports each settlement, sleeps when a pass claims
+  nothing, and returns on `signal` (between passes; claimed turns finish) or,
+  with `untilIdle`, after the first empty pass. `workerPrincipals(graphs)`
+  lists the principals of a graph's code, model and agent nodes.
+- `fakeModelPort(rules)` is a deterministic `ModelNodePort` for first runs
+  and tests: per node an outcome, a completion or a function of the input,
+  with the required usage receipt attached. `unavailableUsageReceipt(ms)` is
+  that receipt (trust `unavailable`, charging the policy floor).
+- `humanNodeAnswers(graph, nodeId)` gives the answers a person gives at a
+  node (`approved | denied` at an approval, `accepted | rejected` at a
+  review, the node's outcomes elsewhere), to pair with
+  `approvalReviewHumanDecision`.
+
 ## 2.2.0 — unreleased (W1: approval and review settings)
 
 Additive. Graphs without the new settings seal and run exactly as in 2.1.0,
