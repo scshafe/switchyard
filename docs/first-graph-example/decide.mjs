@@ -2,8 +2,9 @@
 //   node --env-file=.env decide.mjs
 //   node --env-file=.env decide.mjs <unit-id> <answer> ["notes"]
 import {
+  SWITCHYARD_REVIEW_REQUEST_CONTRACT,
   approvalReviewHumanDecision,
-  approvalReviewRole,
+  humanNodeAnswers,
   reviewNotes
 } from "@scshafe/switchyard";
 
@@ -12,19 +13,13 @@ import { graph } from "./graph.mjs";
 
 const actorId = process.env.ACTOR ?? "alice";
 
-// What a person answers at a node. Approval and review nodes store other
-// outcomes (e.g. "accepted:composed"); approvalReviewHumanDecision maps them.
-function answersFor(turn) {
-  const role = approvalReviewRole(graph, turn.nodeId);
-  if (role?.role === "approval") return ["approved", "denied"];
-  if (role?.role === "review") return ["accepted", "rejected"];
-  return turn.outcomes;
-}
-
-// What the person is looking at: the text, or the reply under review.
+// What the person is looking at. A review node receives a
+// switchyard.review-request.v1 record: the round, the node's input, and the
+// output under review (here a reply.v1, { body }). The other human node here,
+// is-question.escalate-1, receives the message itself, a ticket.v1.
 function subjectOf(turn) {
   const payload = turn.inputArtifact.payload;
-  if (turn.inputArtifact.contractId === "switchyard.review-request.v1") {
+  if (turn.inputArtifact.contractId === SWITCHYARD_REVIEW_REQUEST_CONTRACT) {
     return `round ${payload.round} of ${payload.maxRounds}:\n${payload.output.payload.body}`;
   }
   return payload.text;
@@ -37,7 +32,8 @@ try {
   if (unitId === undefined) {
     if (pending.length === 0) console.log("nothing is waiting for a person");
     for (const turn of pending) {
-      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${answersFor(turn).join(" | ")}`);
+      const answers = humanNodeAnswers(graph, turn.nodeId);
+      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${answers.join(" | ")}`);
       console.log(`  ${subjectOf(turn).replaceAll("\n", "\n  ")}`);
     }
   } else {
@@ -46,14 +42,16 @@ try {
     if (turn.graph.digest !== graph.graphDigest) {
       throw new Error(`unit ${unitId} runs another version of the graph`);
     }
-    // Shape the answer for this node, then record it. The engine checks it
-    // against the node's outcomes and routes the unit on.
+    // Check the answer and shape it for this node: at a review, "rejected"
+    // is stored as "rework" (or "rejected" in the last round) and carries
+    // the notes; "accepted" as "accepted:composed".
     const decision = approvalReviewHumanDecision(graph, {
       queued: turn,
       outcome: answer,
       ...(notes === undefined ? {} : { outputArtifact: reviewNotes(notes) }),
       actor: { actorId }
     });
+    // Record it. The engine settles the turn and routes the unit on.
     await humanDecisions.record({
       queueId: turn.queueId,
       outcome: decision.outcome,

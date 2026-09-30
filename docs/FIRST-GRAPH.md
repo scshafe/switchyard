@@ -6,13 +6,18 @@ minutes. You need no model server: the models are a few lines of fake,
 deterministic code, and a later step shows where a real one plugs in.
 
 Everything you type is in this guide, in order. The finished project is in
-[`first-graph-example/`](first-graph-example/), byte for byte the files below
-(plus the `pnpm-lock.yaml` of the author's run).
+[`docs/first-graph-example/`](https://github.com/scshafe/switchyard/tree/main/docs/first-graph-example),
+byte for byte the files below. Links to other switchyard files go to the
+GitHub repository `scshafe/switchyard`, which is private: opening them needs
+the same access as installing the packages (see
+[Prerequisites](#prerequisites)).
 
-The guide uses the published packages `@scshafe/switchyard` **2.2.0** and
-`@scshafe/switchyard-postgres` **0.1.1**. Switchyard 2.3.0 (not published yet)
-adds helpers that shorten three of the files; see
-[With switchyard 2.3.0](#with-switchyard-230).
+The guide uses `@scshafe/switchyard` **2.3.0** and
+`@scshafe/switchyard-postgres` **0.1.1**. On switchyard 2.2.0 the helpers
+`runWorker`, `fakeModelPort`, `humanNodeAnswers`, `latestReviewNotes` and
+the usage-receipt helpers do not exist yet;
+[the 2.2.0 edition of this guide](https://github.com/scshafe/switchyard/blob/ef32068e01d993487a2c7757ab0e68b198f2668b/docs/FIRST-GRAPH.md)
+writes them by hand.
 
 ## What you will build
 
@@ -49,21 +54,30 @@ Three nodes you write, three ideas:
   `npm install -g pnpm@10`.
 - **Docker**, able to run containers as your user (rootless is fine). Check
   with `docker run --rm hello-world`.
-- **A GitHub account that can read the `@scshafe` packages**, and a
-  **classic personal access token with only the `read:packages` scope**
-  (step 1).
+- **Read access to the `@scshafe` packages.** They are private packages on
+  GitHub Packages, so installing them needs two things:
+  - a **GitHub account that can read both packages**,
+    `@scshafe/switchyard` and `@scshafe/switchyard-postgres`. Ask the
+    maintainer (scshafe) to give your account read access to them, and to
+    the repositories `scshafe/switchyard` and `scshafe/switchyard-postgres`
+    if you want to open this guide's links;
+  - a **classic personal access token** of that account with **only the
+    `read:packages` scope**. Step 1 creates it.
 
 ## 1. Let pnpm read `@scshafe` packages
 
-The packages are private, on GitHub Packages. pnpm needs a token to download
-them. GitHub Packages' npm registry accepts only **classic** tokens, not
-fine-grained ones.
+GitHub Packages asks for a token even to download a package, and its npm
+registry accepts only **classic** tokens, not fine-grained ones. The token
+only needs to read packages, so give it nothing else.
 
-1. On GitHub, open **Settings → Developer settings → Personal access tokens →
-   Tokens (classic) → Generate new token (classic)**.
+1. On GitHub, signed in as the account with access, open **Settings →
+   Developer settings → Personal access tokens → Tokens (classic) → Generate
+   new token (classic)** (<https://github.com/settings/tokens/new>).
 2. Give it a name (e.g. `read scshafe packages`), an expiry, and tick
-   **only `read:packages`**. Generate it and copy the `ghp_...` value.
-3. Put it in your **user-level** npm config, `~/.npmrc`, never in a project:
+   **only `read:packages`**. Generate it and copy the `ghp_...` value; GitHub
+   shows it once.
+3. Put it in your **user-level** npm config, `~/.npmrc`, readable only by
+   you, and never in a project (a project file gets committed):
 
    ```sh
    touch ~/.npmrc && chmod 600 ~/.npmrc
@@ -75,6 +89,9 @@ fine-grained ones.
    ```ini
    //npm.pkg.github.com/:_authToken=ghp_YOUR_TOKEN
    ```
+
+   The line says "send this token to `npm.pkg.github.com`", and nowhere
+   else. pnpm reads `~/.npmrc` in every project.
 
 You check that it works in the next step.
 
@@ -102,22 +119,28 @@ it wrote):
 }
 ```
 
-Create `.npmrc`. It tells pnpm that `@scshafe/*` packages come from GitHub
-Packages. It holds no credential, so it is safe to commit:
+Create `.npmrc` in the project. It tells pnpm that `@scshafe/*` packages
+come from GitHub Packages. It holds no credential, so it is safe to commit:
 
 <!-- file: .npmrc -->
 ```ini
 @scshafe:registry=https://npm.pkg.github.com
 ```
 
+Without this line pnpm asks the public npm registry for `@scshafe/*` and gets
+a 404. You could put the line in `~/.npmrc` instead, next to the token, and
+if yours already has it, the project file changes nothing for you. Keep it
+anyway: it travels with the project, so a clone, a teammate or a CI job
+installs from the right registry with only a token of its own.
+
 Check that pnpm can see the packages:
 
 ```sh
-pnpm view @scshafe/switchyard@2.2.0 version
+pnpm view @scshafe/switchyard@2.3.0 version
 ```
 
 ```
-2.2.0
+2.3.0
 ```
 
 If this fails, see [Troubleshooting](#troubleshooting). Now install the
@@ -125,14 +148,14 @@ engine, the Postgres stores, and `pg` (the Postgres client; your code creates
 the connection pool, so it is a direct dependency):
 
 ```sh
-pnpm add --save-exact @scshafe/switchyard@2.2.0 @scshafe/switchyard-postgres@0.1.1 pg@8.23.0
+pnpm add --save-exact @scshafe/switchyard@2.3.0 @scshafe/switchyard-postgres@0.1.1 pg@8.23.0
 ```
 
 The progress lines vary; the output ends with:
 
 ```
 dependencies:
-+ @scshafe/switchyard 2.2.0
++ @scshafe/switchyard 2.3.0
 + @scshafe/switchyard-postgres 0.1.1
 + pg 8.23.0
 ```
@@ -150,7 +173,7 @@ dependencies:
     "node": ">=22.22.0 <23 || >=24.18.0 <25"
   },
   "dependencies": {
-    "@scshafe/switchyard": "2.2.0",
+    "@scshafe/switchyard": "2.3.0",
     "@scshafe/switchyard-postgres": "0.1.1",
     "pg": "8.23.0"
   }
@@ -167,7 +190,9 @@ docker run -d --name first-switchyard-db -p 127.0.0.1:5432:5432 \
 ```
 
 The first time, Docker downloads the image, then prints the new container's
-id. Wait until the server accepts connections (a few seconds):
+id. The image keeps its data in a Docker volume made for this container;
+[Clean up](#clean-up) removes both. Wait until the server accepts
+connections (a few seconds):
 
 ```sh
 until docker exec first-switchyard-db pg_isready -h 127.0.0.1 -q; do sleep 1; done
@@ -320,6 +345,9 @@ export const graph = createGraphDefinition({
       outputs: { composed: REPLY },
       principal: { id: PRINCIPALS.worker },
       turn,
+      // Up to two rounds: a rejection in round 1 sends the draft back to
+      // compose-reply::rework with the reviewer's notes; a rejection in
+      // round 2, the last one, takes the onReject route and ends the unit.
       review: { by: person, onReject: "terminal", maxRounds: 2 }
     }
   ],
@@ -346,6 +374,17 @@ Things to notice:
   is unsure. You spread its nodes, edges and ends into the graph.
 - `approval` and `review` are settings on a node. You do not write the
   approval or review nodes yourself.
+- **Rounds.** `review: { by: person, onReject: "terminal", maxRounds: 2 }`
+  gives the reply up to two reviews. `accepted`, in any round, sends the
+  reply on (here, to done). `rejected` in round 1 does **not** end the unit:
+  `compose-reply` runs again with the reviewer's notes, and its new reply
+  comes back for round 2. Only a rejection in the last round (round
+  `maxRounds`) takes the `onReject` route, and `"terminal"` means the unit
+  ends there, rejected. (`onReject: { to: "some-node" }` sends a final
+  rejection to another node instead; `onReject: { retry: true }` keeps
+  sending the reply back, with no limit, and takes no `maxRounds`.)
+- `approval: { by: piiScreen, onDeny: "terminal" }` has no rounds: the
+  approver answers once, and a denial takes the `onDeny` route.
 - Every outcome must go somewhere: along an edge, or to an end
   (`terminals`). `createGraphDefinition` refuses a graph where an outcome
   goes nowhere.
@@ -407,10 +446,10 @@ You wrote three nodes; the sealed graph has seven. `binaryQuestion` added
 `is-question.escalate-1` (the person). The `approval` setting became
 `draft-answer::approval`, which now comes before `draft-answer`: the edge
 from `is-question` points at it. The `review` setting became
-`compose-reply::review` (a person answers `accepted` or `rejected`) and
-`compose-reply::rework` (the same code runs again with the reviewer's notes,
-here at most once more, because `maxRounds: 2`). They are ordinary nodes with
-their own queues.
+`compose-reply::review` (a person answers `accepted` or `rejected`, stored as
+`accepted:composed`, `rework` or `rejected`) and `compose-reply::rework`
+(the same code runs again with the reviewer's notes, in round 2). They are
+ordinary nodes with their own queues.
 
 ## 5. The model
 
@@ -418,68 +457,47 @@ Switchyard calls your code through **ports**, one per kind of node. The model
 port has one method, `invoke(input, binding, context)`: `input` is the data
 the node receives, `binding` says which model the node runs on, and
 `context.nodeId` says which node is asking. It returns an outcome, optionally
-an artifact to pass on, and exactly one usage receipt.
+an artifact to pass on, and exactly one **usage receipt**, a record of what
+the call used.
 
-Create `models.mjs`. The fake model answers from simple rules on the text,
-so a given message always gets the same answers:
+Create `models.mjs`. `fakeModelPort` builds a model port from one rule per
+node, so a given message always gets the same answers:
 
 <!-- file: models.mjs -->
 ```js
-// models.mjs: the model port. switchyard calls invoke() for every model
-// turn: is-question, draft-answer::approval (the PII screen) and draft-answer.
+// models.mjs: the model port. switchyard calls it for every model turn:
+// is-question, draft-answer::approval (the PII screen) and draft-answer.
 //
-// fakeModel answers from simple rules on the text, so the same input always
-// gets the same answer and no model server is needed. realModel (in
-// real-model.mjs) asks an OpenAI-compatible server instead.
-import { createArtifactEnvelope } from "@scshafe/switchyard";
+// fakeModelPort answers from rules on the text, so the same input always
+// gets the same answer and no model server is needed. It also attaches the
+// usage receipt every model turn must return. realModel (in real-model.mjs)
+// asks an OpenAI-compatible server instead.
+import { createArtifactEnvelope, fakeModelPort } from "@scshafe/switchyard";
 
 import { DRAFT } from "./graph.mjs";
 
-// Every model turn must return exactly one usage receipt. A fake model has
-// no provider telemetry, so it charges the smallest allowed amount.
-export function noTelemetryReceipt(durationMs) {
-  return {
-    schemaVersion: "usage-receipt.v1",
-    trust: "unavailable",
-    observedInputTokens: null,
-    observedOutputTokens: null,
-    chargedTokens: 1,
-    observedCostMicroUsd: null,
-    chargedCostMicroUsd: 1,
-    durationMs
-  };
-}
-
 const PERSONAL_DATA = /[\w.+-]+@[\w-]+\.[\w.]+|\d{3}[\s-]?\d{3}[\s-]?\d{4}/;
 
-function fakeAnswer(nodeId, text) {
-  switch (nodeId) {
-    case "is-question": // "Is this message a question we should answer?"
-      if (text.trim().endsWith("?")) return { outcome: "yes" };
-      if (/unsubscribe|buy now/i.test(text)) return { outcome: "no" };
-      return { outcome: "unsure" };
-    case "draft-answer::approval": // "May this text go to a cloud model?"
-      return { outcome: PERSONAL_DATA.test(text) ? "denied" : "approved" };
-    case "draft-answer": // the "cloud" model writes a draft
-      return {
-        outcome: "drafted",
-        outputArtifact: createArtifactEnvelope(DRAFT, {
-          question: text,
-          answer: `Thanks for asking. (echo) ${text}`
-        })
-      };
-    default:
-      throw new Error(`fake model has no rule for node ${nodeId}`);
-  }
-}
-
-export const fakeModel = {
-  async invoke(input, binding, context) {
-    const started = Date.now();
-    const answer = fakeAnswer(context.nodeId, input.text);
-    return { ...answer, usage: [noTelemetryReceipt(Date.now() - started)] };
-  }
-};
+// One rule per model node. Each receives the node's input payload (here a
+// ticket.v1, { text }) and returns an outcome, or { outcome, outputArtifact }.
+export const fakeModel = fakeModelPort({
+  // "Is this message a question we should answer?"
+  "is-question": ({ text }) => {
+    if (text.trim().endsWith("?")) return "yes";
+    if (/unsubscribe|buy now/i.test(text)) return "no";
+    return "unsure";
+  },
+  // "May this text go to a cloud model?" An approval answers approved or denied.
+  "draft-answer::approval": ({ text }) => (PERSONAL_DATA.test(text) ? "denied" : "approved"),
+  // The "cloud" model writes a draft: the outcome plus the draft.v1 it carries on.
+  "draft-answer": ({ text }) => ({
+    outcome: "drafted",
+    outputArtifact: createArtifactEnvelope(DRAFT, {
+      question: text,
+      answer: `Thanks for asking. (echo) ${text}`
+    })
+  })
+});
 ```
 
 - `is-question`: a message ending in `?` is a question; one that says "buy
@@ -487,6 +505,13 @@ export const fakeModel = {
 - `draft-answer::approval`, the PII screen: an email address or a phone
   number means `denied`, and the text never reaches `draft-answer`.
 - `draft-answer`: echoes the question into a draft.
+
+A fake model has no token counts to report, so `fakeModelPort` attaches
+`unavailableUsageReceipt()`: trust `unavailable`, charging 1 token and 1
+micro-USD. That is the least such a receipt may charge; a receipt without
+telemetry may never charge 0, so a missing count never looks free. A real
+model that reports its token counts returns a different receipt
+([step 11](#11-optional-a-real-model)).
 
 ## 6. Connect and admit units
 
@@ -516,7 +541,11 @@ through the graph:
 ```js
 // admit.mjs: publish the graph and admit one unit (a message) into it.
 //   node --env-file=.env admit.mjs <unit-id> "<text>"
-import { createArtifactEnvelope, graphDefinitionRef } from "@scshafe/switchyard";
+import {
+  TurnEvidenceConflictError,
+  createArtifactEnvelope,
+  graphDefinitionRef
+} from "@scshafe/switchyard";
 
 import { openStores } from "./db.mjs";
 import { TICKET, graph } from "./graph.mjs";
@@ -529,16 +558,24 @@ if (unitId === undefined || text === undefined) {
 
 const { pool, graphStore, unitStore } = openStores();
 try {
-  // Publishing the same sealed graph again is a no-op.
+  // Publishing the same sealed graph again changes nothing.
   await graphStore.publishGraph(graph);
-  const { created, entryQueue } = await unitStore.admitUnit({
+  const { entryQueue } = await unitStore.admitUnit({
     unitId,
     graph: graphDefinitionRef(graph),
     seedArtifact: createArtifactEnvelope(TICKET, { text }),
+    // When the unit entered. Part of its admission, which never changes.
     admittedAt: new Date().toISOString(),
     principalId: "admitter"
   });
-  console.log(`${created ? "admitted" : "already admitted"} ${unitId}: queued at ${entryQueue.nodeId}`);
+  console.log(`admitted ${unitId}: queued at ${entryQueue.nodeId}`);
+} catch (error) {
+  // A unit id is admitted once. Running this again with the same id makes a
+  // new admittedAt (and maybe other text), which conflicts with the stored
+  // admission.
+  if (!(error instanceof TurnEvidenceConflictError)) throw error;
+  console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  process.exitCode = 1;
 } finally {
   await pool.end();
 }
@@ -564,11 +601,34 @@ admitted u5: queued at is-question
 
 Nothing has run yet. Each unit is waiting in the queue of the entry node.
 
+A unit's admission (its id, graph, message, `admittedAt` and who admitted
+it) is evidence and never changes. Run the first line again:
+
+```sh
+node --env-file=.env admit.mjs u1 "What are your opening hours?"
+```
+
+```
+u1 is already admitted; admit the message under a new unit id
+```
+
+`admitUnit` treats a second admission of the same id as a replay only when
+every field is identical, and then returns `created: false` instead of
+queueing the unit twice. That is for a program that retries the very same
+admission, for example after a lost connection, with the `admittedAt` it
+recorded the first time. This script stamps the time when it runs, so a
+second run is a different admission, and the store refuses it
+(`TurnEvidenceConflictError`). The script turns that into the message above.
+Faking a fixed `admittedAt` to make the replay work would record a false
+admission time, so the guide does not.
+
 ## 7. Watch from the database
 
 Create `watch.sql`. It uses the views switchyard-postgres provides:
 `switchyard.turns` has one row per visit of a unit to a node, with its
 status (`queued`, `leased`, `settled` or `failed`) and outcome.
+
+<!-- postgres-0.2.0: status, queue and output views replace the hand-written queries below. -->
 
 <!-- file: watch.sql -->
 ```sql
@@ -673,37 +733,41 @@ All five units wait at `is-question`, first come first served.
 The worker claims queued turns and runs them. A turn is claimed by a
 **principal**, the identity a node runs as (`local-model`, `cloud-model`,
 `worker` in `graph.mjs`), and a claim takes a batch of units waiting at the
-same node. The worker asks for each principal in turn, runs the batch through
-the ports, and repeats. Switchyard 2.2.0 gives you the pieces
-(`runNextUnitTurns`) but not the loop; this file is the loop.
+same node. `runWorker` asks for each principal in turn, runs the batch
+through the ports, reports each turn, and repeats; it sleeps a second when
+nothing is queued.
 
 Create `worker.mjs`:
 
 <!-- file: worker.mjs -->
 ```js
-// worker.mjs: the worker loop. It claims queued turns for every worker
-// principal in the graph, runs them through the ports, and repeats.
+// worker.mjs: the worker. It claims queued turns for every principal that
+// runs code or model nodes, runs them through the ports, and repeats.
 //   node --env-file=.env worker.mjs               keep polling (Ctrl-C stops)
 //   node --env-file=.env worker.mjs --until-idle  stop when nothing is queued
-import { setTimeout as sleep } from "node:timers/promises";
-
 import {
+  SWITCHYARD_REWORK_CONTRACT,
   codeNodePortByNode,
   createArtifactEnvelope,
-  runNextUnitTurns,
-  withApprovalReviewPorts
+  latestReviewNotes,
+  runWorker,
+  withApprovalReviewPorts,
+  workerPrincipals
 } from "@scshafe/switchyard";
 
 import { openStores } from "./db.mjs";
 import { REPLY, graph } from "./graph.mjs";
 import { fakeModel } from "./models.mjs";
 
-// Code bodies, one per code node. A review rejection runs the same body
-// again at "compose-reply::rework", with the reviewer's notes in its input.
+// The body of compose-reply. It receives a draft.v1, { question, answer },
+// and returns its outcome with the reply.v1 it produced. After a rejected
+// review it runs again at compose-reply::rework, whose input is a
+// switchyard.rework.v1 record: the original draft.v1 in input.payload, plus
+// every rejected round with the reviewer's notes.
 async function composeReply(input, context) {
-  const rework = context.nodeId === "compose-reply::rework";
+  const rework = context.inputArtifact.contractId === SWITCHYARD_REWORK_CONTRACT;
   const draft = rework ? input.input.payload : input;
-  const notes = rework ? input.history.at(-1).feedback?.payload.notes : undefined;
+  const notes = rework ? latestReviewNotes(input) : undefined;
   const lines = ["Hello,", "", draft.answer];
   if (notes) lines.push("", `(Revised after review: ${notes})`);
   lines.push("", "-- The team");
@@ -719,7 +783,7 @@ if (process.env.MODEL_BASE_URL) {
 }
 
 // withApprovalReviewPorts builds the records that reviewers and rework
-// rounds see. Without it, reviewed nodes fail closed.
+// rounds receive. Without it, reviewed nodes fail closed.
 const ports = withApprovalReviewPorts(
   {
     code: codeNodePortByNode({
@@ -731,59 +795,47 @@ const ports = withApprovalReviewPorts(
   { graphs: [graph] }
 );
 
-// Every principal that runs code, model or agent nodes. Human nodes wait for
-// decide.mjs instead.
-const principals = [
-  ...new Set(
-    graph.nodes
-      .filter((node) => node.kind === "code" || node.kind === "model" || node.kind === "agent")
-      .map((node) => node.principal.id)
-  )
-];
+function report({ claim, result }) {
+  const where = `${claim.unitId.padEnd(8)} ${claim.nodeId.padEnd(24)}`;
+  if (result.status === "rejected") {
+    console.error(`${where} error:`, result.reason);
+  } else if (result.value.status === "succeeded") {
+    console.log(`${where} -> ${result.value.completion.outcome}`);
+  } else {
+    console.log(`${where} failed: ${result.value.errorCode}`);
+  }
+}
 
-const untilIdle = process.argv.includes("--until-idle");
 const stop = new AbortController();
 process.once("SIGINT", () => stop.abort());
 
 const { pool, unitStore } = openStores();
-console.log(`worker: principals ${principals.join(", ")}`);
+console.log(`worker: principals ${workerPrincipals([graph]).join(", ")}`);
 try {
-  while (!stop.signal.aborted) {
-    let ran = 0;
-    for (const principalId of principals) {
-      const settled = await runNextUnitTurns({
-        store: unitStore,
-        principalId,
-        leaseOwner: `worker-${process.pid}`,
-        ports,
-        batch: 8
-      });
-      for (const { claim, result } of settled) {
-        ran += 1;
-        const where = `${claim.unitId.padEnd(8)} ${claim.nodeId.padEnd(24)}`;
-        if (result.status === "rejected") {
-          console.error(`${where} error:`, result.reason);
-        } else if (result.value.status === "succeeded") {
-          console.log(`${where} -> ${result.value.completion.outcome}`);
-        } else {
-          console.log(`${where} failed: ${result.value.errorCode}`);
-        }
-      }
-    }
-    if (ran > 0) continue;
-    if (untilIdle) break;
-    await sleep(1_000, undefined, { signal: stop.signal }).catch(() => {});
-  }
+  await runWorker({
+    store: unitStore,
+    ports,
+    graphs: [graph],
+    leaseOwner: `worker-${process.pid}`,
+    untilIdle: process.argv.includes("--until-idle"),
+    signal: stop.signal,
+    onSettled: report
+  });
 } finally {
   await pool.end();
 }
 ```
 
-`withApprovalReviewPorts` matters: it wraps your ports so that the reviewer
-sees the node's input and output together, and so that a rework round
-receives the reviewer's notes. `codeNodePortByNode` sends each code node's
-turn to its own function; `compose-reply` and `compose-reply::rework` share
-one. `real-model.mjs` only comes into play in step 11.
+`composeReply` is the code of `compose-reply`. Its first run receives the
+draft itself; a rework run receives a `switchyard.rework.v1` record that
+wraps the draft and the reviewer's notes, so the body checks which contract
+it got. [What a node receives and returns](#what-a-node-receives-and-returns)
+lists these shapes. `withApprovalReviewPorts` matters: it wraps your ports so
+that the reviewer sees the node's input and output together, and so that a
+rework round receives the reviewer's notes. `codeNodePortByNode` sends each
+code node's turn to its own function; `compose-reply` and
+`compose-reply::rework` share one. `real-model.mjs` only comes into play in
+step 11.
 
 Run it until nothing is left to do:
 
@@ -799,12 +851,12 @@ u3       is-question              -> unsure
 u4       is-question              -> no
 u5       is-question              -> yes
 u1       draft-answer::approval   -> approved
-u2       draft-answer::approval   -> denied
 u5       draft-answer::approval   -> approved
+u2       draft-answer::approval   -> denied
 u1       draft-answer             -> drafted
 u5       draft-answer             -> drafted
-u5       compose-reply            -> composed
 u1       compose-reply            -> composed
+u5       compose-reply            -> composed
 ```
 
 Lines from the same batch may come out in a different order on your machine.
@@ -834,17 +886,17 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u1      |   1 | is-question            | settled | yes      |            |        1
  u1      |   6 | draft-answer::approval | settled | approved |            |        1
  u1      |  10 | draft-answer           | settled | drafted  |            |        1
- u1      |  13 | compose-reply          | settled | composed |            |        1
+ u1      |  12 | compose-reply          | settled | composed |            |        1
  u1      |  14 | compose-reply::review  | queued  |          |            |        0
  u2      |   2 | is-question            | settled | yes      |            |        1
- u2      |   7 | draft-answer::approval | settled | denied   |            |        1
+ u2      |   9 | draft-answer::approval | settled | denied   |            |        1
  u3      |   3 | is-question            | settled | unsure   |            |        1
- u3      |   9 | is-question.escalate-1 | queued  |          |            |        0
+ u3      |   7 | is-question.escalate-1 | queued  |          |            |        0
  u4      |   4 | is-question            | settled | no       |            |        1
  u5      |   5 | is-question            | settled | yes      |            |        1
  u5      |   8 | draft-answer::approval | settled | approved |            |        1
  u5      |  11 | draft-answer           | settled | drafted  |            |        1
- u5      |  12 | compose-reply          | settled | composed |            |        1
+ u5      |  13 | compose-reply          | settled | composed |            |        1
  u5      |  15 | compose-reply::review  | queued  |          |            |        0
 (15 rows)
 
@@ -869,7 +921,8 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 (0 rows)
 ```
 
-Your `seq` numbers may differ. What happened to each unit:
+Your `seq` numbers may differ, and so may the order (and `position`) of
+units that settled in the same batch. What happened to each unit:
 
 - **u1, u5**: a question, cleared by the PII screen, drafted, composed. Both
   now wait in the review queue; `position` is their place in it.
@@ -881,12 +934,15 @@ Your `seq` numbers may differ. What happened to each unit:
 ## 9. Be the person
 
 People answer at `human` nodes. switchyard-postgres lists the waiting turns
-and records decisions; at approval and review nodes switchyard maps your
-answer (`accepted`, `rejected`) to what the node stores
-(`accepted:composed`, `rework`, `rejected`) with
-`approvalReviewHumanDecision`.
+and records decisions. `humanNodeAnswers` says what a person may answer at a
+node, and `approvalReviewHumanDecision` checks the answer and turns it into
+what the node stores: at a review, `accepted` becomes `accepted:composed`,
+and `rejected` becomes `rework` (with your notes) before the last round and
+`rejected` in it.
 
 Create `decide.mjs`:
+
+<!-- postgres-0.2.0: humanDecisions.record accepts the person's answer itself, and listPending keeps the node's answer order; the approvalReviewHumanDecision step can then go. -->
 
 <!-- file: decide.mjs -->
 ```js
@@ -894,8 +950,9 @@ Create `decide.mjs`:
 //   node --env-file=.env decide.mjs
 //   node --env-file=.env decide.mjs <unit-id> <answer> ["notes"]
 import {
+  SWITCHYARD_REVIEW_REQUEST_CONTRACT,
   approvalReviewHumanDecision,
-  approvalReviewRole,
+  humanNodeAnswers,
   reviewNotes
 } from "@scshafe/switchyard";
 
@@ -904,19 +961,13 @@ import { graph } from "./graph.mjs";
 
 const actorId = process.env.ACTOR ?? "alice";
 
-// What a person answers at a node. Approval and review nodes store other
-// outcomes (e.g. "accepted:composed"); approvalReviewHumanDecision maps them.
-function answersFor(turn) {
-  const role = approvalReviewRole(graph, turn.nodeId);
-  if (role?.role === "approval") return ["approved", "denied"];
-  if (role?.role === "review") return ["accepted", "rejected"];
-  return turn.outcomes;
-}
-
-// What the person is looking at: the text, or the reply under review.
+// What the person is looking at. A review node receives a
+// switchyard.review-request.v1 record: the round, the node's input, and the
+// output under review (here a reply.v1, { body }). The other human node here,
+// is-question.escalate-1, receives the message itself, a ticket.v1.
 function subjectOf(turn) {
   const payload = turn.inputArtifact.payload;
-  if (turn.inputArtifact.contractId === "switchyard.review-request.v1") {
+  if (turn.inputArtifact.contractId === SWITCHYARD_REVIEW_REQUEST_CONTRACT) {
     return `round ${payload.round} of ${payload.maxRounds}:\n${payload.output.payload.body}`;
   }
   return payload.text;
@@ -929,7 +980,8 @@ try {
   if (unitId === undefined) {
     if (pending.length === 0) console.log("nothing is waiting for a person");
     for (const turn of pending) {
-      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${answersFor(turn).join(" | ")}`);
+      const answers = humanNodeAnswers(graph, turn.nodeId);
+      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${answers.join(" | ")}`);
       console.log(`  ${subjectOf(turn).replaceAll("\n", "\n  ")}`);
     }
   } else {
@@ -938,14 +990,16 @@ try {
     if (turn.graph.digest !== graph.graphDigest) {
       throw new Error(`unit ${unitId} runs another version of the graph`);
     }
-    // Shape the answer for this node, then record it. The engine checks it
-    // against the node's outcomes and routes the unit on.
+    // Check the answer and shape it for this node: at a review, "rejected"
+    // is stored as "rework" (or "rejected" in the last round) and carries
+    // the notes; "accepted" as "accepted:composed".
     const decision = approvalReviewHumanDecision(graph, {
       queued: turn,
       outcome: answer,
       ...(notes === undefined ? {} : { outputArtifact: reviewNotes(notes) }),
       actor: { actorId }
     });
+    // Record it. The engine settles the turn and routes the unit on.
     await humanDecisions.record({
       queueId: turn.queueId,
       outcome: decision.outcome,
@@ -966,7 +1020,7 @@ node --env-file=.env decide.mjs
 ```
 
 ```
-u3 at is-question.escalate-1, answers: no | yes
+u3 at is-question.escalate-1, answers: yes | no
   I need to talk to someone about my order
 u1 at compose-reply::review, answers: accepted | rejected
   round 1 of 2:
@@ -999,8 +1053,9 @@ u1 at compose-reply::review: recorded rework
 u5 at compose-reply::review: recorded accepted:composed
 ```
 
-A first rejection is stored as `rework`: `compose-reply` runs again, at
-`compose-reply::rework`, with your note. Run the worker:
+u1's rejection was in round 1 of 2, so it is stored as `rework`, not as the
+end of the unit: `compose-reply` runs again, at `compose-reply::rework`, with
+your note. Run the worker:
 
 ```sh
 node --env-file=.env worker.mjs --until-idle
@@ -1038,8 +1093,8 @@ u3 at compose-reply::review, answers: accepted | rejected
 ```
 
 Accept u1's revised reply. Reject u3's reply, then reject its rework too.
-The second rejection is the last one allowed (`maxRounds: 2`), so it ends the
-unit (`onReject: "terminal"`):
+The second rejection is in the last round (`maxRounds: 2`), so it takes the
+`onReject` route and ends the unit (`"terminal"`):
 
 ```sh
 node --env-file=.env decide.mjs u1 accepted
@@ -1077,14 +1132,14 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u1      |   1 | is-question            | settled | yes               |            |        1
  u1      |   6 | draft-answer::approval | settled | approved          |            |        1
  u1      |  10 | draft-answer           | settled | drafted           |            |        1
- u1      |  13 | compose-reply          | settled | composed          |            |        1
+ u1      |  12 | compose-reply          | settled | composed          |            |        1
  u1      |  14 | compose-reply::review  | settled | rework            | alice      |        1
  u1      |  17 | compose-reply::rework  | settled | composed          |            |        1
  u1      |  20 | compose-reply::review  | settled | accepted:composed | alice      |        1
  u2      |   2 | is-question            | settled | yes               |            |        1
- u2      |   7 | draft-answer::approval | settled | denied            |            |        1
+ u2      |   9 | draft-answer::approval | settled | denied            |            |        1
  u3      |   3 | is-question            | settled | unsure            |            |        1
- u3      |   9 | is-question.escalate-1 | settled | yes               | alice      |        1
+ u3      |   7 | is-question.escalate-1 | settled | yes               | alice      |        1
  u3      |  16 | draft-answer::approval | settled | approved          |            |        1
  u3      |  18 | draft-answer           | settled | drafted           |            |        1
  u3      |  19 | compose-reply          | settled | composed          |            |        1
@@ -1095,7 +1150,7 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u5      |   5 | is-question            | settled | yes               |            |        1
  u5      |   8 | draft-answer::approval | settled | approved          |            |        1
  u5      |  11 | draft-answer           | settled | drafted           |            |        1
- u5      |  12 | compose-reply          | settled | composed          |            |        1
+ u5      |  13 | compose-reply          | settled | composed          |            |        1
  u5      |  15 | compose-reply::review  | settled | accepted:composed | alice      |        1
 (23 rows)
 
@@ -1112,12 +1167,12 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 == Decisions people made
  unit_id |        node_id         |      outcome      | actor_id |         settled_at         
 ---------+------------------------+-------------------+----------+----------------------------
- u3      | is-question.escalate-1 | yes               | alice    | 2026-09-30 05:39:01.447+00
- u1      | compose-reply::review  | rework            | alice    | 2026-09-30 05:39:02.18+00
- u5      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 05:39:02.974+00
- u1      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 05:39:06.966+00
- u3      | compose-reply::review  | rework            | alice    | 2026-09-30 05:39:07.869+00
- u3      | compose-reply::review  | rejected          | alice    | 2026-09-30 05:39:10.055+00
+ u3      | is-question.escalate-1 | yes               | alice    | 2026-09-30 05:57:43.111+00
+ u1      | compose-reply::review  | rework            | alice    | 2026-09-30 05:57:43.837+00
+ u5      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 05:57:44.648+00
+ u1      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 05:57:48.674+00
+ u3      | compose-reply::review  | rework            | alice    | 2026-09-30 05:57:49.583+00
+ u3      | compose-reply::review  | rejected          | alice    | 2026-09-30 05:57:51.811+00
 (6 rows)
 
 == Replies a person accepted
@@ -1142,6 +1197,70 @@ Every unit is finished, each with its whole journey kept: which nodes it
 passed, with which outcome, who decided, and the replies people accepted.
 `settled_at` and `seq` differ from run to run.
 
+## What a node receives and returns
+
+A reference for writing your own bodies and review screens. Every contract id
+below is exported as a constant, and every record shape as a TypeScript type,
+from `@scshafe/switchyard`.
+
+**Any body.** A code body is `(input, context)`; a model port is
+`invoke(input, binding, context)`. `input` is the **payload** of the turn's
+input artifact, already checked: at `is-question` a `ticket.v1`, `{ text }`.
+`context.nodeId` names the node and `context.inputArtifact` is
+`{ contractId, digest }` (no payload). A body returns
+`{ outcome, outputArtifact? }` (type `NodeTurnCompletion`):
+
+- `outcome` is one of the node's outcomes.
+- `outputArtifact` is `createArtifactEnvelope(contractId, payload)`, the
+  data the outcome carries on. If the node declares `outputs` (like
+  `compose-reply`'s `composed: REPLY`), it must be that contract. Leave it
+  out and the node's input is carried on unchanged.
+- A model port also returns `usage: [receipt]`, exactly one:
+  `unavailableUsageReceipt(durationMs)` or `providerReportedUsageReceipt(...)`.
+
+**An approval node** (`X::approval`) receives exactly what `X` would, here
+the `ticket.v1`; there is no wrapper. It answers `approved` or `denied`
+(`APPROVAL_OUTCOMES`) and returns no artifact: both outcomes carry the input
+on, `approved` to `X`.
+
+**A reviewed node's first run** (`X`, here `compose-reply`) receives its own
+input (a `draft.v1`) and returns its own outcome and output (a `reply.v1`).
+`withApprovalReviewPorts` then wraps that into the review request.
+
+**A review node** (`X::review`) receives a review request,
+`SWITCHYARD_REVIEW_REQUEST_CONTRACT` = `"switchyard.review-request.v1"`,
+type `ReviewRequestPayload`:
+
+| field | what it is |
+|---|---|
+| `subject` | `{ nodeId, nodeRef }` of the reviewed node |
+| `round` | the round under review, from 1 |
+| `maxRounds` | the sealed limit (`null` with `onReject: { retry: true }`) |
+| `input` | the reviewed node's original input, an `EmbeddedArtifact` `{ contractId, digest, payload }`; here the `draft.v1` |
+| `outcome` | the reviewed node's outcome this round, e.g. `composed` |
+| `output` | what it produced, an `EmbeddedArtifact`; here `output.payload` is the `reply.v1`, `{ body }` |
+| `history` | the earlier, rejected rounds, oldest first (`ReviewHistoryEntry`: `{ round, outcome, output, feedback }`) |
+
+A reviewer (person or model) answers `accepted` or `rejected`
+(`REVIEWER_OUTCOMES`, or `humanNodeAnswers(graph, nodeId)`), and may attach
+`reviewNotes("...")` (`SWITCHYARD_REVIEW_NOTES_CONTRACT`, `{ notes }`) to a
+rejection. The node stores `accepted:<outcome>` carrying `output` on,
+`rework` carrying a rework record, or, in the last round, `rejected`
+carrying a `switchyard.review-rejected.v1` record (`ReviewRejectedPayload`)
+to the `onReject` route.
+
+**A rework node** (`X::rework`) receives
+`SWITCHYARD_REWORK_CONTRACT` = `"switchyard.rework.v1"`, type
+`ReworkPayload`: `{ subject, round, maxRounds, input, history }`. `round` is
+the round about to run (from 2); `input.payload` is the original input (the
+`draft.v1`); `history.at(-1)` is the round just rejected, with the rejected
+`output` and the reviewer's `feedback`. `latestReviewNotes(input)` reads the
+notes. It returns what `X` returns (a `reply.v1` with `composed`), and
+`withApprovalReviewPorts` turns that into the next round's review request.
+
+In JavaScript you can still name the types for your editor, e.g.
+`/** @param {import("@scshafe/switchyard").ReworkPayload} rework */`.
+
 ## 11. Optional: a real model
 
 The fake model stands where a real one goes. Any OpenAI-compatible server
@@ -1154,7 +1273,12 @@ and reporting the tokens it used:
 // real-model.mjs: the same model port, backed by an OpenAI-compatible server
 // (llama-swap, llama.cpp, vLLM, Ollama, ...). worker.mjs uses it when
 // MODEL_BASE_URL is set, e.g. MODEL_BASE_URL=http://127.0.0.1:8080/v1
-import { ExecutionFailureError, createArtifactEnvelope } from "@scshafe/switchyard";
+import {
+  ExecutionFailureError,
+  createArtifactEnvelope,
+  providerReportedUsageReceipt,
+  unavailableUsageReceipt
+} from "@scshafe/switchyard";
 
 import { DRAFT } from "./graph.mjs";
 
@@ -1188,21 +1312,25 @@ async function chat(model, system, user, signal) {
   }
   if (!response.ok) throw new ExecutionFailureError(`model_http_${response.status}`, true);
   const body = await response.json();
-  const tokensIn = body.usage?.prompt_tokens ?? 0;
-  const tokensOut = body.usage?.completion_tokens ?? 0;
-  return {
-    text: body.choices[0].message.content.trim(),
-    receipt: {
-      schemaVersion: "usage-receipt.v1",
-      trust: "provider_reported",
-      observedInputTokens: tokensIn,
-      observedOutputTokens: tokensOut,
-      chargedTokens: tokensIn + tokensOut,
-      observedCostMicroUsd: null,
+  return { text: body.choices[0].message.content.trim(), usage: body.usage };
+}
+
+// Every model turn returns exactly one usage receipt. When the server reports
+// its token counts, the receipt says so ("provider_reported") and charges
+// their sum; a local server costs nothing in dollars, so the charged cost is
+// 0 (put a hosted API's price there). When it reports nothing, the receipt is
+// "unavailable" and charges the floor, 1 token and 1 micro-USD, so missing
+// counts never look free.
+function receipt(usage, durationMs) {
+  if (Number.isInteger(usage?.prompt_tokens) && Number.isInteger(usage?.completion_tokens)) {
+    return providerReportedUsageReceipt({
+      inputTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens,
       chargedCostMicroUsd: 0,
-      durationMs: 0
-    }
-  };
+      durationMs
+    });
+  }
+  return unavailableUsageReceipt(durationMs);
 }
 
 const word = (text) => text.toLowerCase().match(/\b(yes|no|unsure)\b/)?.[1] ?? "unsure";
@@ -1211,35 +1339,41 @@ export const realModel = {
   async invoke(input, binding, context) {
     const model = MODELS[binding.bindingId];
     const started = Date.now();
-    let outcome;
-    let outputArtifact;
-    let receipt;
+    let reply;
+    let completion;
     if (context.nodeId === "is-question") {
-      const reply = await chat(model, YES_NO,
+      reply = await chat(model, YES_NO,
         `Is this message a question that a support team should answer?\n\n${input.text}`, context.signal);
-      outcome = word(reply.text);
-      receipt = reply.receipt;
+      completion = { outcome: word(reply.text) };
     } else if (context.nodeId === "draft-answer::approval") {
-      const reply = await chat(model, YES_NO,
+      reply = await chat(model, YES_NO,
         `Does this text contain personal data (names, email addresses, phone numbers, addresses, account numbers)?\n\n${input.text}`,
         context.signal);
       // Only a clear "no" lets the text go to the cloud model.
-      outcome = word(reply.text) === "no" ? "approved" : "denied";
-      receipt = reply.receipt;
+      completion = { outcome: word(reply.text) === "no" ? "approved" : "denied" };
     } else if (context.nodeId === "draft-answer") {
-      const reply = await chat(model, "You answer customer messages in two or three friendly sentences.",
+      reply = await chat(model, "You answer customer messages in two or three friendly sentences.",
         input.text, context.signal);
-      outcome = "drafted";
-      outputArtifact = createArtifactEnvelope(DRAFT, { question: input.text, answer: reply.text });
-      receipt = reply.receipt;
+      completion = {
+        outcome: "drafted",
+        outputArtifact: createArtifactEnvelope(DRAFT, { question: input.text, answer: reply.text })
+      };
     } else {
       throw new ExecutionFailureError("no_prompt_for_node", false);
     }
-    receipt.durationMs = Date.now() - started;
-    return { outcome, ...(outputArtifact ? { outputArtifact } : {}), usage: [receipt] };
+    return { ...completion, usage: [receipt(reply.usage, Date.now() - started)] };
   }
 };
 ```
+
+The receipt follows what the server says. If it reports its token counts,
+the receipt is `providerReportedUsageReceipt`: trust `provider_reported`,
+the observed counts, `chargedTokens` their sum (0 only if the server really
+reported 0), and `chargedCostMicroUsd: 0` because a local server costs no
+money; put a hosted API's price there. If the server reports no usage, the
+receipt is `unavailableUsageReceipt`, charging 1 token and 1 micro-USD like
+the fake model. Validation accepts a charge of 0 only on a receipt that
+carries observed counts.
 
 `worker.mjs` uses it when `MODEL_BASE_URL` is set. With a llama-swap on this
 machine that serves `qwen2.5-7b`:
@@ -1255,8 +1389,9 @@ how to reach it. If the server is down or answers with an error, the turn is
 retried (`maxAttempts: 3`) and then fails; `watch.sql` shows it as `failed`
 with the error code.
 
-(This adapter was checked against a stub OpenAI-compatible server; the
-author's llama-swap could not load a model at the time.)
+(This adapter was checked against a stub OpenAI-compatible server, with and
+without reported usage, and against no server at all; the author's
+llama-swap could not load a model at the time.)
 
 ## What just happened
 
@@ -1283,58 +1418,26 @@ author's llama-swap could not load a model at the time.)
   digest changes. Publish that as a new graph version; units already running
   finish on the version they were admitted to.
 
-Where to go next: [the approval and review design](DESIGN-APPROVAL-REVIEW.md),
-the [README](../README.md) for joins, declared outputs and the other helpers,
-and the [switchyard-postgres README](https://github.com/scshafe/switchyard-postgres#readme)
+Where to go next (all in the private repositories):
+[the approval and review design](https://github.com/scshafe/switchyard/blob/main/docs/DESIGN-APPROVAL-REVIEW.md),
+the [switchyard README](https://github.com/scshafe/switchyard/blob/main/README.md)
+for joins, declared outputs and the other helpers, and the
+[switchyard-postgres README](https://github.com/scshafe/switchyard-postgres/blob/main/README.md)
 for the schema and operating notes.
-
-## With switchyard 2.3.0
-
-2.3.0 (not published yet) adds the three helpers this guide had to write
-itself. With it, the model's rules in `models.mjs` become a table, and the
-usage receipt is added for you (`fakeModelPort`; `DRAFT` and
-`PERSONAL_DATA` as before):
-
-```js
-import { createArtifactEnvelope, fakeModelPort } from "@scshafe/switchyard";
-
-export const fakeModel = fakeModelPort({
-  "is-question": ({ text }) =>
-    text.trim().endsWith("?") ? "yes" : /unsubscribe|buy now/i.test(text) ? "no" : "unsure",
-  "draft-answer::approval": ({ text }) => (PERSONAL_DATA.test(text) ? "denied" : "approved"),
-  "draft-answer": ({ text }) => ({
-    outcome: "drafted",
-    outputArtifact: createArtifactEnvelope(DRAFT, { question: text, answer: `Thanks for asking. (echo) ${text}` })
-  })
-});
-```
-
-The worker loop in `worker.mjs` becomes one call (`runWorker` finds the
-principals itself, sleeps when idle, stops on the signal):
-
-```js
-const result = await runWorker({
-  store: unitStore,
-  ports,
-  graphs: [graph],
-  leaseOwner: `worker-${process.pid}`,
-  untilIdle: process.argv.includes("--until-idle"),
-  signal: stop.signal,
-  onSettled: ({ claim, result }) => { /* print one line, as before */ }
-});
-```
-
-And `answersFor` in `decide.mjs` becomes `humanNodeAnswers(graph, turn.nodeId)`.
 
 ## Troubleshooting
 
-These are the errors met while writing this guide.
+These are the errors met while writing and testing this guide, plus the
+access errors a new reader may meet.
 
 - **`ERR_PNPM_FETCH_401 ... Unauthorized`** or **`No authorization header
   was set for the request`** from `pnpm view` or `pnpm add`: pnpm has no
   valid token. Check the `//npm.pkg.github.com/:_authToken=` line in
   `~/.npmrc` (step 1), that the token is a classic one with `read:packages`,
   and that it has not expired.
+- **A 403 (`Forbidden`) or 404 from `npm.pkg.github.com`**: the token is
+  accepted but its account cannot read the package. Ask for read access
+  ([Prerequisites](#prerequisites)), for the account the token belongs to.
 - **`ERR_PNPM_FETCH_404 GET https://registry.npmjs.org/@scshafe%2Fswitchyard`**:
   pnpm asked the public registry. The project `.npmrc` with
   `@scshafe:registry=https://npm.pkg.github.com` is missing or you are in
@@ -1346,8 +1449,8 @@ These are the errors met while writing this guide.
   `-p 127.0.0.1:5433:5432`, and use `5433` in the `migrate` URL and in
   `.env`.
 - **`Conflict. The container name "/first-switchyard-db" is already in use`**:
-  a container from an earlier try exists. `docker rm -f first-switchyard-db`
-  and start again from step 3 (its data goes with it).
+  a container from an earlier try exists. `docker rm -f -v first-switchyard-db`
+  removes it and its data volume; start again from step 3.
 - **`connect ECONNREFUSED 127.0.0.1:5432`** or **`the database system is
   starting up`**: PostgreSQL is not ready yet; run the `until ... pg_isready`
   line.
@@ -1356,21 +1459,35 @@ These are the errors met while writing this guide.
   that check needs a role that can read the schema's tables (the owner or
   `watcher`), which the runtime role cannot. This guide does not call it;
   `migrate` already reports the version.
-- **`TurnEvidenceConflictError: admitUnit: unit u1 conflicts with immutable
-  admission ...`**: that unit id is taken; admissions are immutable. Use a
-  new id.
+  <!-- postgres-0.2.0: assertSchemaCurrent works for the runtime role; drop this entry. -->
+- **`u1 is already admitted; admit the message under a new unit id`** from
+  `admit.mjs`: that unit id is taken (step 6). In your own code the error is
+  `TurnEvidenceConflictError: admitUnit: unit u1 conflicts with immutable
+  admission ... (differs in admittedAt: stored ..., requested ...)`. Its
+  stack names `MemoryUnitStore` even though the unit lives in Postgres:
+  switchyard-postgres loads the unit's rows, runs the operation through
+  switchyard's in-memory store logic, and writes the result back in the same
+  transaction, so the engine's checks and messages are the same for every
+  store.
 - **`unit u3 is not waiting for a person`** from `decide.mjs`: nothing is
   pending for that unit. Run `node --env-file=.env decide.mjs` to see what
   is, or run the worker first.
-- **`NodeTurnCompletionValidationError: ... returned undeclared outcome
-  "bogus"`** from `decide.mjs`: answer with one of the answers the list
-  shows.
+- **`human answer at node compose-reply::review: "accept" is not an answer
+  here; answer one of accepted | rejected`** from `decide.mjs`: a typo.
+  Answer with one of the answers it names (the list `decide.mjs` prints shows
+  them too).
+- **`... returned undeclared outcome "bogus" (its outcomes: ...)`** from a
+  worker turn: your body or model port returned an outcome the node does not
+  have. The message lists the ones it has.
 - **A turn prints `failed: immutable_stage_contract_rejected`** at
   `compose-reply` or `draft-answer`: the ports were not wrapped with
   `withApprovalReviewPorts`, or a body returned an artifact with the wrong
   contract (e.g. `compose-reply` must return a `reply.v1`).
 - **`model node ... must return exactly one usage receipt`**: your own model
   port returned no `usage`, or more than one receipt.
+- **`usage receipt: unavailable receipt must charge at least 1 token`** (or
+  `micro-USD`): a receipt without observed counts charged 0. Use
+  `unavailableUsageReceipt()`.
 - **`Unsupported engine`** from pnpm, or syntax errors from Node: use Node
   22.22+ or 24.18+.
 - **`EACCES`** from `corepack enable pnpm` or `npm install -g pnpm@10`: your
@@ -1380,10 +1497,14 @@ These are the errors met while writing this guide.
 
 ## Clean up
 
+Remove the container **and its data volume** (`-v`; without it the volume
+stays behind, unnamed, in `docker volume ls`), then the project:
+
 ```sh
-docker rm -f first-switchyard-db
+docker rm -f -v first-switchyard-db
 cd .. && rm -rf first-switchyard
 ```
 
+`docker image rm postgres:18` also frees the image, if nothing else uses it.
 Keep your `~/.npmrc` token for the next project, or delete the line and
 revoke the token on GitHub.

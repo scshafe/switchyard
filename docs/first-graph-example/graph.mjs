@@ -99,6 +99,9 @@ export const graph = createGraphDefinition({
       outputs: { composed: REPLY },
       principal: { id: PRINCIPALS.worker },
       turn,
+      // Up to two rounds: a rejection in round 1 sends the draft back to
+      // compose-reply::rework with the reviewer's notes; a rejection in
+      // round 2, the last one, takes the onReject route and ends the unit.
       review: { by: person, onReject: "terminal", maxRounds: 2 }
     }
   ],

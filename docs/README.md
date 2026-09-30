@@ -38,8 +38,12 @@ maps them to the current ones.
 - [Your first switchyard](FIRST-GRAPH.md) builds a project from an empty
   directory: install from GitHub Packages, PostgreSQL in Docker, a
   three-node graph with a binary question, a model approval and a human
-  review, a worker loop, human decisions, and SQL to watch units move. The
-  finished project is in [`first-graph-example/`](first-graph-example/).
+  review, a worker loop, human decisions, and SQL to watch units move. It
+  also documents what approval, review and rework nodes receive and return.
+  The finished project is in [`first-graph-example/`](first-graph-example/).
+- [Proposal: admission replay](PROPOSAL-ADMISSION-REPLAY.md) (not
+  implemented) would let a retried `admitUnit` replay regardless of
+  `admittedAt`.
 
 ## Building pipelines from focused objectives
 

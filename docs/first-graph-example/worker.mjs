@@ -1,26 +1,30 @@
-// worker.mjs: the worker loop. It claims queued turns for every worker
-// principal in the graph, runs them through the ports, and repeats.
+// worker.mjs: the worker. It claims queued turns for every principal that
+// runs code or model nodes, runs them through the ports, and repeats.
 //   node --env-file=.env worker.mjs               keep polling (Ctrl-C stops)
 //   node --env-file=.env worker.mjs --until-idle  stop when nothing is queued
-import { setTimeout as sleep } from "node:timers/promises";
-
 import {
+  SWITCHYARD_REWORK_CONTRACT,
   codeNodePortByNode,
   createArtifactEnvelope,
-  runNextUnitTurns,
-  withApprovalReviewPorts
+  latestReviewNotes,
+  runWorker,
+  withApprovalReviewPorts,
+  workerPrincipals
 } from "@scshafe/switchyard";
 
 import { openStores } from "./db.mjs";
 import { REPLY, graph } from "./graph.mjs";
 import { fakeModel } from "./models.mjs";
 
-// Code bodies, one per code node. A review rejection runs the same body
-// again at "compose-reply::rework", with the reviewer's notes in its input.
+// The body of compose-reply. It receives a draft.v1, { question, answer },
+// and returns its outcome with the reply.v1 it produced. After a rejected
+// review it runs again at compose-reply::rework, whose input is a
+// switchyard.rework.v1 record: the original draft.v1 in input.payload, plus
+// every rejected round with the reviewer's notes.
 async function composeReply(input, context) {
-  const rework = context.nodeId === "compose-reply::rework";
+  const rework = context.inputArtifact.contractId === SWITCHYARD_REWORK_CONTRACT;
   const draft = rework ? input.input.payload : input;
-  const notes = rework ? input.history.at(-1).feedback?.payload.notes : undefined;
+  const notes = rework ? latestReviewNotes(input) : undefined;
   const lines = ["Hello,", "", draft.answer];
   if (notes) lines.push("", `(Revised after review: ${notes})`);
   lines.push("", "-- The team");
@@ -36,7 +40,7 @@ if (process.env.MODEL_BASE_URL) {
 }
 
 // withApprovalReviewPorts builds the records that reviewers and rework
-// rounds see. Without it, reviewed nodes fail closed.
+// rounds receive. Without it, reviewed nodes fail closed.
 const ports = withApprovalReviewPorts(
   {
     code: codeNodePortByNode({
@@ -48,49 +52,32 @@ const ports = withApprovalReviewPorts(
   { graphs: [graph] }
 );
 
-// Every principal that runs code, model or agent nodes. Human nodes wait for
-// decide.mjs instead.
-const principals = [
-  ...new Set(
-    graph.nodes
-      .filter((node) => node.kind === "code" || node.kind === "model" || node.kind === "agent")
-      .map((node) => node.principal.id)
-  )
-];
+function report({ claim, result }) {
+  const where = `${claim.unitId.padEnd(8)} ${claim.nodeId.padEnd(24)}`;
+  if (result.status === "rejected") {
+    console.error(`${where} error:`, result.reason);
+  } else if (result.value.status === "succeeded") {
+    console.log(`${where} -> ${result.value.completion.outcome}`);
+  } else {
+    console.log(`${where} failed: ${result.value.errorCode}`);
+  }
+}
 
-const untilIdle = process.argv.includes("--until-idle");
 const stop = new AbortController();
 process.once("SIGINT", () => stop.abort());
 
 const { pool, unitStore } = openStores();
-console.log(`worker: principals ${principals.join(", ")}`);
+console.log(`worker: principals ${workerPrincipals([graph]).join(", ")}`);
 try {
-  while (!stop.signal.aborted) {
-    let ran = 0;
-    for (const principalId of principals) {
-      const settled = await runNextUnitTurns({
-        store: unitStore,
-        principalId,
-        leaseOwner: `worker-${process.pid}`,
-        ports,
-        batch: 8
-      });
-      for (const { claim, result } of settled) {
-        ran += 1;
-        const where = `${claim.unitId.padEnd(8)} ${claim.nodeId.padEnd(24)}`;
-        if (result.status === "rejected") {
-          console.error(`${where} error:`, result.reason);
-        } else if (result.value.status === "succeeded") {
-          console.log(`${where} -> ${result.value.completion.outcome}`);
-        } else {
-          console.log(`${where} failed: ${result.value.errorCode}`);
-        }
-      }
-    }
-    if (ran > 0) continue;
-    if (untilIdle) break;
-    await sleep(1_000, undefined, { signal: stop.signal }).catch(() => {});
-  }
+  await runWorker({
+    store: unitStore,
+    ports,
+    graphs: [graph],
+    leaseOwner: `worker-${process.pid}`,
+    untilIdle: process.argv.includes("--until-idle"),
+    signal: stop.signal,
+    onSettled: report
+  });
 } finally {
   await pool.end();
 }
