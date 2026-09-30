@@ -7,17 +7,22 @@ deterministic code, and a later step shows where a real one plugs in.
 
 Everything you type is in this guide, in order. The finished project is in
 [`docs/first-graph-example/`](https://github.com/scshafe/switchyard/tree/main/docs/first-graph-example),
-byte for byte the files below. Links to other switchyard files go to the
+byte for byte the files below (without step 11's changes to `graph.mjs`
+and `versions.mjs`). Links to other switchyard files go to the
 GitHub repository `scshafe/switchyard`, which is private: opening them needs
 the same access as installing the packages (see
 [Prerequisites](#prerequisites)).
 
 The guide uses `@scshafe/switchyard` **2.3.0** and
-`@scshafe/switchyard-postgres` **0.1.1**. On switchyard 2.2.0 the helpers
-`runWorker`, `fakeModelPort`, `humanNodeAnswers`, `latestReviewNotes` and
-the usage-receipt helpers do not exist yet;
+`@scshafe/switchyard-postgres` **0.2.0**. On switchyard 2.2.0 the helpers
+`runWorker`, `fakeModelPort`, `latestReviewNotes` and the usage-receipt
+helpers do not exist yet;
 [the 2.2.0 edition of this guide](https://github.com/scshafe/switchyard/blob/ef32068e01d993487a2c7757ab0e68b198f2668b/docs/FIRST-GRAPH.md)
-writes them by hand.
+writes them by hand. switchyard-postgres 0.1.1 has no `recordAnswer`, no
+`unit_status`, `unit_positions` or `unit_outputs` views, and no
+`connectionString` option;
+[the 0.1.1 edition of this guide](https://github.com/scshafe/switchyard/blob/02ae363fca156b72d5fa0146f31f8144da301b33/docs/FIRST-GRAPH.md)
+does without them.
 
 ## What you will build
 
@@ -144,11 +149,10 @@ pnpm view @scshafe/switchyard@2.3.0 version
 ```
 
 If this fails, see [Troubleshooting](#troubleshooting). Now install the
-engine, the Postgres stores, and `pg` (the Postgres client; your code creates
-the connection pool, so it is a direct dependency):
+engine and the Postgres stores:
 
 ```sh
-pnpm add --save-exact @scshafe/switchyard@2.3.0 @scshafe/switchyard-postgres@0.1.1 pg@8.23.0
+pnpm add --save-exact @scshafe/switchyard@2.3.0 @scshafe/switchyard-postgres@0.2.0
 ```
 
 The progress lines vary; the output ends with:
@@ -156,9 +160,13 @@ The progress lines vary; the output ends with:
 ```
 dependencies:
 + @scshafe/switchyard 2.3.0
-+ @scshafe/switchyard-postgres 0.1.1
-+ pg 8.23.0
++ @scshafe/switchyard-postgres 0.2.0
 ```
+
+`pg`, the PostgreSQL client, comes in with `@scshafe/switchyard-postgres`.
+The stores open their own connections, so your code never imports it. (If
+yours ever does, add it to the project too, with `pnpm add pg`: pnpm lets
+code import only the packages its own `package.json` names.)
 
 `package.json` now reads:
 
@@ -174,8 +182,7 @@ dependencies:
   },
   "dependencies": {
     "@scshafe/switchyard": "2.3.0",
-    "@scshafe/switchyard-postgres": "0.1.1",
-    "pg": "8.23.0"
+    "@scshafe/switchyard-postgres": "0.2.0"
   }
 }
 ```
@@ -208,7 +215,7 @@ pnpm exec switchyard-postgres migrate --url postgres://postgres:devpassword@127.
 ```
 
 ```
-{"schema":"switchyard","applied":[1,2,3],"currentVersion":3,"roles":{"runtime":"switchyard_runtime","reader":"switchyard_reader"}}
+{"schema":"switchyard","applied":[1,2,3,4],"currentVersion":4,"roles":{"runtime":"switchyard_runtime","reader":"switchyard_reader"}}
 ```
 
 `migrate` is idempotent: run it again and `applied` is `[]`.
@@ -226,6 +233,12 @@ docker exec first-switchyard-db psql -U postgres \
 CREATE ROLE
 CREATE ROLE
 ```
+
+`app` can do nothing but call the store routines. That is enough for
+`assertSchemaCurrent({ connectionString })` from switchyard-postgres, which
+a long-running service can call at startup to refuse a database whose schema
+is older or newer than the library; `migrate` already told you the version
+here, so the scripts below do not call it.
 
 Create `.env`. Every script reads its connection from here (Node's
 `--env-file` loads it):
@@ -511,25 +524,28 @@ A fake model has no token counts to report, so `fakeModelPort` attaches
 micro-USD. That is the least such a receipt may charge; a receipt without
 telemetry may never charge 0, so a missing count never looks free. A real
 model that reports its token counts returns a different receipt
-([step 11](#11-optional-a-real-model)).
+([step 12](#12-optional-a-real-model)).
 
 ## 6. Connect and admit units
 
-Create `db.mjs`. It opens a pool as the `app` role and builds the three
-stores switchyard-postgres provides:
+Create `db.mjs`. It builds the three stores switchyard-postgres provides:
+`graphStore` (sealed graphs), `unitStore` (units and their turns) and
+`humanDecisions` (what people answer). They share one pool of connections,
+logged in as the `app` role, and `close()` ends it:
 
 <!-- file: db.mjs -->
 ```js
-// db.mjs: one connection pool and the three Postgres stores.
-import pg from "pg";
+// db.mjs: the three Postgres stores, over one connection pool.
 import { createPostgresStores } from "@scshafe/switchyard-postgres";
 
 export function openStores() {
   // APP_DATABASE_URL logs in as a member of switchyard_runtime: it can call
-  // the store routines and nothing else.
-  const pool = new pg.Pool({ connectionString: process.env.APP_DATABASE_URL });
-  pool.on("error", (error) => console.error("idle PostgreSQL client failed", error));
-  return { pool, ...createPostgresStores({ pool }) };
+  // the store routines and nothing else. The stores open their own pool, and
+  // close() ends it.
+  return createPostgresStores({
+    connectionString: process.env.APP_DATABASE_URL,
+    onPoolError: (error) => console.error("idle PostgreSQL client failed", error)
+  });
 }
 ```
 
@@ -542,6 +558,7 @@ through the graph:
 // admit.mjs: publish the graph and admit one unit (a message) into it.
 //   node --env-file=.env admit.mjs <unit-id> "<text>"
 import {
+  GraphPublicationConflictError,
   TurnEvidenceConflictError,
   createArtifactEnvelope,
   graphDefinitionRef
@@ -556,9 +573,10 @@ if (unitId === undefined || text === undefined) {
   process.exit(2);
 }
 
-const { pool, graphStore, unitStore } = openStores();
+const { graphStore, unitStore, close } = openStores();
 try {
-  // Publishing the same sealed graph again changes nothing.
+  // Publishing the same sealed graph again changes nothing. A changed graph
+  // under a version number already published is refused.
   await graphStore.publishGraph(graph);
   const { entryQueue } = await unitStore.admitUnit({
     unitId,
@@ -570,14 +588,20 @@ try {
   });
   console.log(`admitted ${unitId}: queued at ${entryQueue.nodeId}`);
 } catch (error) {
-  // A unit id is admitted once. Running this again with the same id makes a
-  // new admittedAt (and maybe other text), which conflicts with the stored
-  // admission.
-  if (!(error instanceof TurnEvidenceConflictError)) throw error;
-  console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  if (error instanceof GraphPublicationConflictError) {
+    // graph.mjs changed, but its version did not (step 11).
+    console.error(`graph ${graph.graphId} v${graph.version} is already published with other content; bump version in graph.mjs`);
+  } else if (error instanceof TurnEvidenceConflictError) {
+    // A unit id is admitted once. Running this again with the same id makes
+    // a new admittedAt (and maybe other text), which conflicts with the
+    // stored admission.
+    console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  } else {
+    throw error;
+  }
   process.exitCode = 1;
 } finally {
-  await pool.end();
+  await close();
 }
 ```
 
@@ -624,22 +648,31 @@ admission time, so the guide does not.
 
 ## 7. Watch from the database
 
-Create `watch.sql`. It uses the views switchyard-postgres provides:
-`switchyard.turns` has one row per visit of a unit to a node, with its
-status (`queued`, `leased`, `settled` or `failed`) and outcome.
+Create `watch.sql`. It reads the views switchyard-postgres provides, all in
+the schema `switchyard`:
 
-<!-- postgres-0.2.0: status, queue and output views replace the hand-written queries below. -->
+- `unit_status`: one row per unit, with its `status` and, once nothing is
+  left to run, the end it reached (`final_node_id`, `final_outcome`);
+- `unit_positions`: one row per unit waiting at a node, with its place in
+  that node's queue (`queue_position`, 1 is next);
+- `turns`: one row per visit of a unit to a node, with its status
+  (`queued`, `leased`, `settled` or `failed`), outcome and attempts;
+- `human_decisions`: what people decided, in order;
+- `unit_outputs`: every artifact a turn produced, with its `payload` as
+  `jsonb`.
 
 <!-- file: watch.sql -->
 ```sql
 -- watch.sql: run as the read-only role (a member of switchyard_reader).
 
+\echo '== Each unit: its status, and the end it reached'
+SELECT unit_id, status, final_node_id, final_outcome
+FROM switchyard.unit_status
+ORDER BY unit_id;
+
 \echo '== Where every unit is waiting (position 1 = next in that node''s queue)'
-SELECT node_id, unit_id, status,
-       rank() OVER (PARTITION BY node_id ORDER BY enqueue_sequence) AS position,
-       node_kind, principal_id
-FROM switchyard.turns
-WHERE status IN ('queued', 'leased')
+SELECT node_id, unit_id, state, queue_position AS position, node_kind, principal_id
+FROM switchyard.unit_positions
 ORDER BY node_id, position;
 
 \echo '== The journey of each unit: every node it passed through, in order'
@@ -648,32 +681,16 @@ SELECT unit_id, enqueue_sequence AS seq, node_id, status, outcome,
 FROM switchyard.turns
 ORDER BY unit_id, enqueue_sequence;
 
-\echo '== Each unit''s state and its last step'
-SELECT unit_id,
-       CASE WHEN bool_or(status IN ('queued', 'leased')) THEN 'in progress'
-            WHEN bool_or(status = 'failed') THEN 'failed'
-            ELSE 'finished' END AS state,
-       (array_agg(node_id || ' -> ' || coalesce(outcome, error_code, status)
-                  ORDER BY enqueue_sequence DESC))[1] AS last_step
-FROM switchyard.turns
-GROUP BY unit_id
-ORDER BY unit_id;
-
 \echo '== Decisions people made'
 SELECT unit_id, node_id, outcome, actor_id, settled_at
 FROM switchyard.human_decisions
 ORDER BY decision_sequence;
 
 \echo '== Replies a person accepted'
-SELECT settlement.unit_id,
-       artifact.envelope::json #>> '{payload,body}' AS reply
-FROM switchyard.turn_settlements AS settlement
-JOIN switchyard.artifacts AS artifact
-  ON artifact.contract_id = settlement.output_contract_id
- AND artifact.artifact_digest = settlement.output_artifact_digest
-WHERE settlement.node_id = 'compose-reply::review'
-  AND settlement.outcome = 'accepted:composed'
-ORDER BY settlement.settlement_sequence;
+SELECT unit_id, payload ->> 'body' AS reply
+FROM switchyard.unit_outputs
+WHERE node_id = 'compose-reply::review' AND outcome = 'accepted:composed'
+ORDER BY settlement_sequence;
 ```
 
 Run it as `watcher`, the read-only role, with the `psql` inside the
@@ -685,8 +702,18 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 ```
 
 ```
+== Each unit: its status, and the end it reached
+ unit_id | status | final_node_id | final_outcome 
+---------+--------+---------------+---------------
+ u1      | active |               | 
+ u2      | active |               | 
+ u3      | active |               | 
+ u4      | active |               | 
+ u5      | active |               | 
+(5 rows)
+
 == Where every unit is waiting (position 1 = next in that node's queue)
-   node_id   | unit_id | status | position | node_kind | principal_id 
+   node_id   | unit_id | state  | position | node_kind | principal_id 
 -------------+---------+--------+----------+-----------+--------------
  is-question | u1      | queued |        1 | model     | local-model
  is-question | u2      | queued |        2 | model     | local-model
@@ -705,16 +732,6 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u5      |   5 | is-question | queued |         |            |        0
 (5 rows)
 
-== Each unit's state and its last step
- unit_id |    state    |       last_step       
----------+-------------+-----------------------
- u1      | in progress | is-question -> queued
- u2      | in progress | is-question -> queued
- u3      | in progress | is-question -> queued
- u4      | in progress | is-question -> queued
- u5      | in progress | is-question -> queued
-(5 rows)
-
 == Decisions people made
  unit_id | node_id | outcome | actor_id | settled_at 
 ---------+---------+---------+----------+------------
@@ -726,7 +743,8 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 (0 rows)
 ```
 
-All five units wait at `is-question`, first come first served.
+All five units are `active` (they have work queued that is not a person's)
+and wait at `is-question`, first come first served.
 
 ## 8. Run the worker
 
@@ -737,12 +755,30 @@ same node. `runWorker` asks for each principal in turn, runs the batch
 through the ports, reports each turn, and repeats; it sleeps a second when
 nothing is queued.
 
+A unit runs to its end on the graph version it was admitted to, even after
+you publish a changed graph, so the worker needs every version that still has
+units in flight, not only the current one. Create `versions.mjs`, the list
+of those versions. For now there is one; [step 11](#11-change-the-graph)
+adds a second:
+
+<!-- file: versions.mjs -->
+```js
+// versions.mjs: every version of the graph that still has units in flight.
+// A unit runs to its end on the version it was admitted to, so the worker
+// needs all of these, not only the current one. Step 11 adds a version.
+import { graph } from "./graph.mjs";
+
+// The current version (the one admit.mjs admits to) first.
+export const graphs = [graph];
+```
+
 Create `worker.mjs`:
 
 <!-- file: worker.mjs -->
 ```js
 // worker.mjs: the worker. It claims queued turns for every principal that
-// runs code or model nodes, runs them through the ports, and repeats.
+// runs code or model nodes, runs them through the ports, and repeats. It
+// runs units of every graph version in versions.mjs.
 //   node --env-file=.env worker.mjs               keep polling (Ctrl-C stops)
 //   node --env-file=.env worker.mjs --until-idle  stop when nothing is queued
 import {
@@ -756,8 +792,9 @@ import {
 } from "@scshafe/switchyard";
 
 import { openStores } from "./db.mjs";
-import { REPLY, graph } from "./graph.mjs";
+import { REPLY } from "./graph.mjs";
 import { fakeModel } from "./models.mjs";
+import { graphs } from "./versions.mjs";
 
 // The body of compose-reply. It receives a draft.v1, { question, answer },
 // and returns its outcome with the reply.v1 it produced. After a rejected
@@ -783,7 +820,8 @@ if (process.env.MODEL_BASE_URL) {
 }
 
 // withApprovalReviewPorts builds the records that reviewers and rework
-// rounds receive. Without it, reviewed nodes fail closed.
+// rounds receive. Without it, reviewed nodes fail closed; so do the reviewed
+// nodes of a graph version it was not given.
 const ports = withApprovalReviewPorts(
   {
     code: codeNodePortByNode({
@@ -792,7 +830,7 @@ const ports = withApprovalReviewPorts(
     }),
     model
   },
-  { graphs: [graph] }
+  { graphs }
 );
 
 function report({ claim, result }) {
@@ -809,20 +847,24 @@ function report({ claim, result }) {
 const stop = new AbortController();
 process.once("SIGINT", () => stop.abort());
 
-const { pool, unitStore } = openStores();
-console.log(`worker: principals ${workerPrincipals([graph]).join(", ")}`);
+const { unitStore, close } = openStores();
+const versions = graphs.map((graph) => `${graph.graphId} v${graph.version}`).join(", ");
+console.log(`worker: ${versions}; principals ${workerPrincipals(graphs).join(", ")}`);
 try {
   await runWorker({
     store: unitStore,
     ports,
-    graphs: [graph],
+    // Every version with units in flight. On switchyard 2.3.0 the worker
+    // also claims units of versions missing here, and their reviewed nodes
+    // (compose-reply, compose-reply::rework) then fail for good.
+    graphs,
     leaseOwner: `worker-${process.pid}`,
     untilIdle: process.argv.includes("--until-idle"),
     signal: stop.signal,
     onSettled: report
   });
 } finally {
-  await pool.end();
+  await close();
 }
 ```
 
@@ -832,10 +874,12 @@ wraps the draft and the reviewer's notes, so the body checks which contract
 it got. [What a node receives and returns](#what-a-node-receives-and-returns)
 lists these shapes. `withApprovalReviewPorts` matters: it wraps your ports so
 that the reviewer sees the node's input and output together, and so that a
-rework round receives the reviewer's notes. `codeNodePortByNode` sends each
-code node's turn to its own function; `compose-reply` and
+rework round receives the reviewer's notes. It does that only for the graph
+versions it is given, so the worker passes it the same `graphs` as
+`runWorker` (whose principals it claims for). `codeNodePortByNode` sends
+each code node's turn to its own function; `compose-reply` and
 `compose-reply::rework` share one. `real-model.mjs` only comes into play in
-step 11.
+step 12.
 
 Run it until nothing is left to do:
 
@@ -844,19 +888,19 @@ node --env-file=.env worker.mjs --until-idle
 ```
 
 ```
-worker: principals local-model, cloud-model, worker
+worker: first-switchyard v1; principals local-model, cloud-model, worker
 u1       is-question              -> yes
 u2       is-question              -> yes
 u3       is-question              -> unsure
 u4       is-question              -> no
 u5       is-question              -> yes
 u1       draft-answer::approval   -> approved
-u5       draft-answer::approval   -> approved
 u2       draft-answer::approval   -> denied
+u5       draft-answer::approval   -> approved
 u1       draft-answer             -> drafted
 u5       draft-answer             -> drafted
-u1       compose-reply            -> composed
 u5       compose-reply            -> composed
+u1       compose-reply            -> composed
 ```
 
 Lines from the same batch may come out in a different order on your machine.
@@ -872,8 +916,18 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 ```
 
 ```
+== Each unit: its status, and the end it reached
+ unit_id |     status     |     final_node_id      | final_outcome 
+---------+----------------+------------------------+---------------
+ u1      | awaiting_human |                        | 
+ u2      | completed      | draft-answer::approval | denied
+ u3      | awaiting_human |                        | 
+ u4      | completed      | is-question            | no
+ u5      | awaiting_human |                        | 
+(5 rows)
+
 == Where every unit is waiting (position 1 = next in that node's queue)
-        node_id         | unit_id | status | position | node_kind | principal_id 
+        node_id         | unit_id | state  | position | node_kind | principal_id 
 ------------------------+---------+--------+----------+-----------+--------------
  compose-reply::review  | u1      | queued |        1 | human     | console
  compose-reply::review  | u5      | queued |        2 | human     | console
@@ -886,29 +940,19 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u1      |   1 | is-question            | settled | yes      |            |        1
  u1      |   6 | draft-answer::approval | settled | approved |            |        1
  u1      |  10 | draft-answer           | settled | drafted  |            |        1
- u1      |  12 | compose-reply          | settled | composed |            |        1
+ u1      |  13 | compose-reply          | settled | composed |            |        1
  u1      |  14 | compose-reply::review  | queued  |          |            |        0
  u2      |   2 | is-question            | settled | yes      |            |        1
- u2      |   9 | draft-answer::approval | settled | denied   |            |        1
+ u2      |   7 | draft-answer::approval | settled | denied   |            |        1
  u3      |   3 | is-question            | settled | unsure   |            |        1
- u3      |   7 | is-question.escalate-1 | queued  |          |            |        0
+ u3      |   8 | is-question.escalate-1 | queued  |          |            |        0
  u4      |   4 | is-question            | settled | no       |            |        1
  u5      |   5 | is-question            | settled | yes      |            |        1
- u5      |   8 | draft-answer::approval | settled | approved |            |        1
+ u5      |   9 | draft-answer::approval | settled | approved |            |        1
  u5      |  11 | draft-answer           | settled | drafted  |            |        1
- u5      |  13 | compose-reply          | settled | composed |            |        1
+ u5      |  12 | compose-reply          | settled | composed |            |        1
  u5      |  15 | compose-reply::review  | queued  |          |            |        0
 (15 rows)
-
-== Each unit's state and its last step
- unit_id |    state    |            last_step             
----------+-------------+----------------------------------
- u1      | in progress | compose-reply::review -> queued
- u2      | finished    | draft-answer::approval -> denied
- u3      | in progress | is-question.escalate-1 -> queued
- u4      | finished    | is-question -> no
- u5      | in progress | compose-reply::review -> queued
-(5 rows)
 
 == Decisions people made
  unit_id | node_id | outcome | actor_id | settled_at 
@@ -931,33 +975,31 @@ units that settled in the same batch. What happened to each unit:
 - **u3**: the small model was unsure, so it waits for a person.
 - **u4**: not a question; finished at the first node.
 
+`awaiting_human` means everything the unit has open waits for a person.
+`completed` means nothing is left to run and the unit reached one of the
+graph's ends, whichever one: `final_node_id` and `final_outcome` say which.
+
 ## 9. Be the person
 
 People answer at `human` nodes. switchyard-postgres lists the waiting turns
-and records decisions. `humanNodeAnswers` says what a person may answer at a
-node, and `approvalReviewHumanDecision` checks the answer and turns it into
-what the node stores: at a review, `accepted` becomes `accepted:composed`,
-and `rejected` becomes `rework` (with your notes) before the last round and
-`rejected` in it.
+(`listPending`), each with the `answers` a person may give there, and records
+what the person answered (`recordAnswer`). `recordAnswer` checks the answer
+and turns it into what the node stores: at a review, `accepted` becomes
+`accepted:composed`, and `rejected` becomes `rework` (with your notes)
+before the last round and `rejected` in it. A wrong answer throws
+`InvalidHumanAnswerError`, which lists the right ones, and records nothing.
 
 Create `decide.mjs`:
-
-<!-- postgres-0.2.0: humanDecisions.record accepts the person's answer itself, and listPending keeps the node's answer order; the approvalReviewHumanDecision step can then go. -->
 
 <!-- file: decide.mjs -->
 ```js
 // decide.mjs: list the turns waiting for a person, or answer one.
 //   node --env-file=.env decide.mjs
 //   node --env-file=.env decide.mjs <unit-id> <answer> ["notes"]
-import {
-  SWITCHYARD_REVIEW_REQUEST_CONTRACT,
-  approvalReviewHumanDecision,
-  humanNodeAnswers,
-  reviewNotes
-} from "@scshafe/switchyard";
+import { SWITCHYARD_REVIEW_REQUEST_CONTRACT } from "@scshafe/switchyard";
+import { InvalidHumanAnswerError } from "@scshafe/switchyard-postgres";
 
 import { openStores } from "./db.mjs";
-import { graph } from "./graph.mjs";
 
 const actorId = process.env.ACTOR ?? "alice";
 
@@ -974,42 +1016,47 @@ function subjectOf(turn) {
 }
 
 const [unitId, answer, notes] = process.argv.slice(2);
-const { pool, humanDecisions } = openStores();
+const { humanDecisions, close } = openStores();
 try {
-  const pending = await humanDecisions.listPending({ limit: 1_000 });
   if (unitId === undefined) {
+    const pending = await humanDecisions.listPending({ limit: 1_000 });
     if (pending.length === 0) console.log("nothing is waiting for a person");
     for (const turn of pending) {
-      const answers = humanNodeAnswers(graph, turn.nodeId);
-      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${answers.join(" | ")}`);
+      // turn.answers: what a person may answer here, in the node's order.
+      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${turn.answers.join(" | ")}`);
       console.log(`  ${subjectOf(turn).replaceAll("\n", "\n  ")}`);
     }
   } else {
-    const turn = pending.find((candidate) => candidate.unitId === unitId);
-    if (turn === undefined) throw new Error(`unit ${unitId} is not waiting for a person`);
-    if (turn.graph.digest !== graph.graphDigest) {
-      throw new Error(`unit ${unitId} runs another version of the graph`);
+    // In this graph a unit waits for a person at one node at a time.
+    const [turn] = await humanDecisions.listPending({ unitId });
+    if (turn === undefined) {
+      console.error(`${unitId} is not waiting for a person; run decide.mjs alone to see who is`);
+      process.exitCode = 1;
+    } else if (answer === undefined) {
+      console.error(`${unitId} at ${turn.nodeId}: give an answer, one of ${turn.answers.join(" | ")}`);
+      process.exitCode = 1;
+    } else {
+      // Record the answer. The store checks it against turn.answers and
+      // stores what the node records: at a review, "accepted" as
+      // "accepted:composed", "rejected" as "rework" with the notes (or
+      // "rejected" in the last round). The engine then settles the turn and
+      // routes the unit on.
+      const recorded = await humanDecisions.recordAnswer({
+        queueId: turn.queueId,
+        answer,
+        ...(notes === undefined ? {} : { notes }),
+        actorId
+      });
+      console.log(`${unitId} at ${turn.nodeId}: recorded ${recorded.outcome}`);
     }
-    // Check the answer and shape it for this node: at a review, "rejected"
-    // is stored as "rework" (or "rejected" in the last round) and carries
-    // the notes; "accepted" as "accepted:composed".
-    const decision = approvalReviewHumanDecision(graph, {
-      queued: turn,
-      outcome: answer,
-      ...(notes === undefined ? {} : { outputArtifact: reviewNotes(notes) }),
-      actor: { actorId }
-    });
-    // Record it. The engine settles the turn and routes the unit on.
-    await humanDecisions.record({
-      queueId: turn.queueId,
-      outcome: decision.outcome,
-      ...(decision.outputArtifact === undefined ? {} : { outputArtifact: decision.outputArtifact }),
-      actorId
-    });
-    console.log(`${unitId} at ${turn.nodeId}: recorded ${decision.outcome}`);
   }
+} catch (error) {
+  // A typo, or notes with an answer that takes none. Nothing was recorded.
+  if (!(error instanceof InvalidHumanAnswerError)) throw error;
+  console.error(error.message);
+  process.exitCode = 1;
 } finally {
-  await pool.end();
+  await close();
 }
 ```
 
@@ -1062,7 +1109,7 @@ node --env-file=.env worker.mjs --until-idle
 ```
 
 ```
-worker: principals local-model, cloud-model, worker
+worker: first-switchyard v1; principals local-model, cloud-model, worker
 u3       draft-answer::approval   -> approved
 u3       draft-answer             -> drafted
 u1       compose-reply::rework    -> composed
@@ -1107,7 +1154,7 @@ node --env-file=.env decide.mjs
 ```
 u1 at compose-reply::review: recorded accepted:composed
 u3 at compose-reply::review: recorded rework
-worker: principals local-model, cloud-model, worker
+worker: first-switchyard v1; principals local-model, cloud-model, worker
 u3       compose-reply::rework    -> composed
 u3 at compose-reply::review: recorded rejected
 nothing is waiting for a person
@@ -1121,9 +1168,19 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 ```
 
 ```
+== Each unit: its status, and the end it reached
+ unit_id |  status   |     final_node_id      |   final_outcome   
+---------+-----------+------------------------+-------------------
+ u1      | completed | compose-reply::review  | accepted:composed
+ u2      | completed | draft-answer::approval | denied
+ u3      | completed | compose-reply::review  | rejected
+ u4      | completed | is-question            | no
+ u5      | completed | compose-reply::review  | accepted:composed
+(5 rows)
+
 == Where every unit is waiting (position 1 = next in that node's queue)
- node_id | unit_id | status | position | node_kind | principal_id 
----------+---------+--------+----------+-----------+--------------
+ node_id | unit_id | state | position | node_kind | principal_id 
+---------+---------+-------+----------+-----------+--------------
 (0 rows)
 
 == The journey of each unit: every node it passed through, in order
@@ -1132,14 +1189,14 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u1      |   1 | is-question            | settled | yes               |            |        1
  u1      |   6 | draft-answer::approval | settled | approved          |            |        1
  u1      |  10 | draft-answer           | settled | drafted           |            |        1
- u1      |  12 | compose-reply          | settled | composed          |            |        1
+ u1      |  13 | compose-reply          | settled | composed          |            |        1
  u1      |  14 | compose-reply::review  | settled | rework            | alice      |        1
  u1      |  17 | compose-reply::rework  | settled | composed          |            |        1
  u1      |  20 | compose-reply::review  | settled | accepted:composed | alice      |        1
  u2      |   2 | is-question            | settled | yes               |            |        1
- u2      |   9 | draft-answer::approval | settled | denied            |            |        1
+ u2      |   7 | draft-answer::approval | settled | denied            |            |        1
  u3      |   3 | is-question            | settled | unsure            |            |        1
- u3      |   7 | is-question.escalate-1 | settled | yes               | alice      |        1
+ u3      |   8 | is-question.escalate-1 | settled | yes               | alice      |        1
  u3      |  16 | draft-answer::approval | settled | approved          |            |        1
  u3      |  18 | draft-answer           | settled | drafted           |            |        1
  u3      |  19 | compose-reply          | settled | composed          |            |        1
@@ -1148,31 +1205,21 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
  u3      |  23 | compose-reply::review  | settled | rejected          | alice      |        1
  u4      |   4 | is-question            | settled | no                |            |        1
  u5      |   5 | is-question            | settled | yes               |            |        1
- u5      |   8 | draft-answer::approval | settled | approved          |            |        1
+ u5      |   9 | draft-answer::approval | settled | approved          |            |        1
  u5      |  11 | draft-answer           | settled | drafted           |            |        1
- u5      |  13 | compose-reply          | settled | composed          |            |        1
+ u5      |  12 | compose-reply          | settled | composed          |            |        1
  u5      |  15 | compose-reply::review  | settled | accepted:composed | alice      |        1
 (23 rows)
-
-== Each unit's state and its last step
- unit_id |  state   |                 last_step                  
----------+----------+--------------------------------------------
- u1      | finished | compose-reply::review -> accepted:composed
- u2      | finished | draft-answer::approval -> denied
- u3      | finished | compose-reply::review -> rejected
- u4      | finished | is-question -> no
- u5      | finished | compose-reply::review -> accepted:composed
-(5 rows)
 
 == Decisions people made
  unit_id |        node_id         |      outcome      | actor_id |         settled_at         
 ---------+------------------------+-------------------+----------+----------------------------
- u3      | is-question.escalate-1 | yes               | alice    | 2026-09-30 05:57:43.111+00
- u1      | compose-reply::review  | rework            | alice    | 2026-09-30 05:57:43.837+00
- u5      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 05:57:44.648+00
- u1      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 05:57:48.674+00
- u3      | compose-reply::review  | rework            | alice    | 2026-09-30 05:57:49.583+00
- u3      | compose-reply::review  | rejected          | alice    | 2026-09-30 05:57:51.811+00
+ u3      | is-question.escalate-1 | yes               | alice    | 2026-09-30 06:26:10.942+00
+ u1      | compose-reply::review  | rework            | alice    | 2026-09-30 06:26:11.241+00
+ u5      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 06:26:11.546+00
+ u1      | compose-reply::review  | accepted:composed | alice    | 2026-09-30 06:26:12.703+00
+ u3      | compose-reply::review  | rework            | alice    | 2026-09-30 06:26:13.002+00
+ u3      | compose-reply::review  | rejected          | alice    | 2026-09-30 06:26:13.679+00
 (6 rows)
 
 == Replies a person accepted
@@ -1193,9 +1240,10 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 (2 rows)
 ```
 
-Every unit is finished, each with its whole journey kept: which nodes it
-passed, with which outcome, who decided, and the replies people accepted.
-`settled_at` and `seq` differ from run to run.
+Every unit is `completed`, and `final_outcome` says how each one ended. Its
+whole journey is kept: which nodes it passed, with which outcome, who
+decided, and the replies people accepted. `settled_at` and `seq` differ from
+run to run.
 
 ## What a node receives and returns
 
@@ -1206,9 +1254,26 @@ from `@scshafe/switchyard`.
 **Any body.** A code body is `(input, context)`; a model port is
 `invoke(input, binding, context)`. `input` is the **payload** of the turn's
 input artifact, already checked: at `is-question` a `ticket.v1`, `{ text }`.
-`context.nodeId` names the node and `context.inputArtifact` is
-`{ contractId, digest }` (no payload). A body returns
-`{ outcome, outputArtifact? }` (type `NodeTurnCompletion`):
+`context` (type `WorkerNodeTurnContext`) says which turn this is:
+
+| field | what it is |
+|---|---|
+| `nodeId`, `nodeRef` | the node, e.g. `compose-reply::rework` |
+| `unitId`, `queueId` | the unit, and this visit of it to the node |
+| `graph` | `{ graphId, version, digest }` of the version the unit runs on |
+| `inputArtifact` | `{ contractId, digest }` of the input (no payload) |
+| `attemptIndex` | 1 on the first try, 2 on the first retry, up to `maxAttempts` |
+| `attemptNumber`, `idempotencyKey` | this attempt's identity; a provider call can use the key to deduplicate |
+| `configuration` | the node's sealed configuration, when the graph declares one |
+| `signal` | an `AbortSignal`, only when the turn is run with one |
+
+`runWorker` does not hand its own `signal` to bodies: Ctrl-C stops it
+between passes and lets claimed turns finish. So under `worker.mjs`,
+`context.signal` is `undefined`; `real-model.mjs` still passes it to
+`fetch`, which accepts `undefined`, so the same port works under a runner
+that does pass one (`runNextUnitTurns({ ..., signal })`).
+
+A body returns `{ outcome, outputArtifact? }` (type `NodeTurnCompletion`):
 
 - `outcome` is one of the node's outcomes.
 - `outputArtifact` is `createArtifactEnvelope(contractId, payload)`, the
@@ -1242,9 +1307,12 @@ type `ReviewRequestPayload`:
 | `history` | the earlier, rejected rounds, oldest first (`ReviewHistoryEntry`: `{ round, outcome, output, feedback }`) |
 
 A reviewer (person or model) answers `accepted` or `rejected`
-(`REVIEWER_OUTCOMES`, or `humanNodeAnswers(graph, nodeId)`), and may attach
-`reviewNotes("...")` (`SWITCHYARD_REVIEW_NOTES_CONTRACT`, `{ notes }`) to a
-rejection. The node stores `accepted:<outcome>` carrying `output` on,
+(`REVIEWER_OUTCOMES`; for a person, `listPending` gives them as the turn's
+`answers`, and `humanNodeAnswers(graph, nodeId)` reads them from the graph),
+and may attach notes to a rejection: `recordAnswer`'s `notes`, which it
+records as `reviewNotes("...")` (`SWITCHYARD_REVIEW_NOTES_CONTRACT`,
+`{ notes }`); a model reviewer returns `reviewNotes("...")` as its
+`outputArtifact`. The node stores `accepted:<outcome>` carrying `output` on,
 `rework` carrying a rework record, or, in the last round, `rejected`
 carrying a `switchyard.review-rejected.v1` record (`ReviewRejectedPayload`)
 to the `onReject` route.
@@ -1261,7 +1329,172 @@ notes. It returns what `X` returns (a `reply.v1` with `composed`), and
 In JavaScript you can still name the types for your editor, e.g.
 `/** @param {import("@scshafe/switchyard").ReworkPayload} rework */`.
 
-## 11. Optional: a real model
+## 11. Change the graph
+
+A published graph version never changes: every unit admitted to it keeps
+running on exactly that sealed graph. To change the graph, you give it a new
+`version` and publish that. Units already admitted finish on their own
+version, so the worker keeps every version that still has units in flight.
+
+First leave a unit in flight on version 1: admit a message and run the
+worker, so that its reply waits for review:
+
+```sh
+node --env-file=.env admit.mjs u6 "Can I change my delivery address?"
+node --env-file=.env worker.mjs --until-idle
+```
+
+```
+admitted u6: queued at is-question
+worker: first-switchyard v1; principals local-model, cloud-model, worker
+u6       is-question              -> yes
+u6       draft-answer::approval   -> approved
+u6       draft-answer             -> drafted
+u6       compose-reply            -> composed
+```
+
+Now change the graph. Keep version 1 as it is, in a file of its own:
+
+```sh
+cp graph.mjs graph-v1.mjs
+```
+
+Never edit `graph-v1.mjs`: the worker needs it to seal to exactly the graph
+published as version 1, digest and all.
+
+In `graph.mjs`, bump the graph's `version` (the one next to `graphId`, not
+the binding's) and give the reply a third review round. Change these two
+lines (`-` the line as it is, `+` as it becomes):
+
+```diff
+   graphId: "first-switchyard",
+-  version: 1,
++  version: 2,
+```
+
+```diff
+-      review: { by: person, onReject: "terminal", maxRounds: 2 }
++      review: { by: person, onReject: "terminal", maxRounds: 3 }
+```
+
+Forget the first one and `admit.mjs` refuses the changed graph: version 1 is
+already published, with other content:
+
+```
+graph first-switchyard v1 is already published with other content; bump version in graph.mjs
+```
+
+Then add version 1 to `versions.mjs`, so that the worker still runs u6.
+Replace the file with:
+
+```js
+// versions.mjs: every version of the graph that still has units in flight.
+// A unit runs to its end on the version it was admitted to, so the worker
+// needs all of these, not only the current one. Step 11 adds a version.
+import { graph } from "./graph.mjs";
+import { graph as v1 } from "./graph-v1.mjs";
+
+// The current version (the one admit.mjs admits to) first.
+export const graphs = [graph, v1];
+```
+
+Admit a new message. `admit.mjs` publishes version 2 and admits the unit to
+it; new units always go to the current `graph.mjs`:
+
+```sh
+node --env-file=.env admit.mjs u7 "Where is my parcel?"
+```
+
+```
+admitted u7: queued at is-question
+```
+
+Send u6's reply back with a note, and run the worker. u6 is reworked on
+version 1, u7 runs on version 2:
+
+```sh
+node --env-file=.env decide.mjs u6 rejected "Mention the form on our website."
+node --env-file=.env worker.mjs --until-idle
+node --env-file=.env decide.mjs
+```
+
+```
+u6 at compose-reply::review: recorded rework
+worker: first-switchyard v2, first-switchyard v1; principals local-model, cloud-model, worker
+u7       is-question              -> yes
+u6       compose-reply::rework    -> composed
+u7       draft-answer::approval   -> approved
+u7       draft-answer             -> drafted
+u7       compose-reply            -> composed
+u6 at compose-reply::review, answers: accepted | rejected
+  round 2 of 2:
+  Hello,
+  
+  Thanks for asking. (echo) Can I change my delivery address?
+  
+  (Revised after review: Mention the form on our website.)
+  
+  -- The team
+u7 at compose-reply::review, answers: accepted | rejected
+  round 1 of 3:
+  Hello,
+  
+  Thanks for asking. (echo) Where is my parcel?
+  
+  -- The team
+```
+
+u6 is in round 2 of 2, as version 1 says; u7 is in round 1 of 3. Accept
+both, and look at which version each unit ran on:
+
+```sh
+node --env-file=.env decide.mjs u6 accepted
+node --env-file=.env decide.mjs u7 accepted
+docker exec -e PGPASSWORD=watcher first-switchyard-db \
+  psql -h 127.0.0.1 -U watcher -d postgres \
+  -c "SELECT unit_id, graph_version, status, final_outcome FROM switchyard.unit_status ORDER BY unit_id;"
+```
+
+```
+u6 at compose-reply::review: recorded accepted:composed
+u7 at compose-reply::review: recorded accepted:composed
+ unit_id | graph_version |  status   |   final_outcome   
+---------+---------------+-----------+-------------------
+ u1      |             1 | completed | accepted:composed
+ u2      |             1 | completed | denied
+ u3      |             1 | completed | rejected
+ u4      |             1 | completed | no
+ u5      |             1 | completed | accepted:composed
+ u6      |             1 | completed | accepted:composed
+ u7      |             2 | completed | accepted:composed
+(7 rows)
+```
+
+Had `versions.mjs` still listed only version 2, this worker (on switchyard
+2.3.0) would still have claimed u6's rework, run it with ports that do not
+know version 1, and failed it for good with
+`immutable_stage_contract_rejected` (see [Troubleshooting](#troubleshooting)).
+
+A version can leave `versions.mjs` once none of its units is open. Units
+waiting for a person count: after the person answers, the worker runs them
+again (a rework, or the next node). This counts them:
+
+```sh
+docker exec -e PGPASSWORD=watcher first-switchyard-db \
+  psql -h 127.0.0.1 -U watcher -d postgres -tA \
+  -c "SELECT count(*) FROM switchyard.unit_status WHERE graph_version = 1 AND status IN ('active', 'awaiting_human');"
+```
+
+```
+0
+```
+
+At 0 you may set `graphs` back to `[graph]` and delete `graph-v1.mjs`; a
+unit admitted to version 1 later would need it back (only a program that
+still admits to version 1 would do that). Keeping old versions listed costs
+nothing.
+
+## 12. Optional: a real model
 
 The fake model stands where a real one goes. Any OpenAI-compatible server
 works (llama-swap, llama.cpp's server, vLLM, Ollama, a hosted API).
@@ -1375,6 +1608,32 @@ receipt is `unavailableUsageReceipt`, charging 1 token and 1 micro-USD like
 the fake model. Validation accepts a charge of 0 only on a receipt that
 carries observed counts.
 
+`realModel` has one prompt per model node of this graph and fails any other
+node with `no_prompt_for_node`, for good (the error is not retryable). So
+when you add a model node, give it a prompt here as well as a rule in
+`models.mjs`: another `binaryQuestion` (its node id, answering `yes`, `no`
+or `unsure`), or a model reviewer. With
+`review: { by: { kind: "model", binding: BINDINGS.small, principal: { id: PRINCIPALS.local } }, ... }`
+on `compose-reply`, the node `compose-reply::review` is a model node that
+receives the review request and answers `accepted` or `rejected`, with notes
+for a rejection. Its branch in `invoke` could read (import `reviewNotes` from
+`@scshafe/switchyard`):
+
+```js
+    } else if (context.nodeId === "compose-reply::review") {
+      // The review request: the reply under review is input.output.payload.
+      reply = await chat(model, "Answer with exactly one word: accepted or rejected.",
+        `Is this reply to a customer polite and on topic?\n\n${input.output.payload.body}`,
+        context.signal);
+      completion = /\baccepted\b/i.test(reply.text)
+        ? { outcome: "accepted" }
+        : { outcome: "rejected", outputArtifact: reviewNotes("Please make the reply more polite and on topic.") };
+    } else {
+```
+
+`withApprovalReviewPorts` turns that answer into what the review node
+stores, as it does for a person.
+
 `worker.mjs` uses it when `MODEL_BASE_URL` is set. With a llama-swap on this
 machine that serves `qwen2.5-7b`:
 
@@ -1386,8 +1645,9 @@ MODEL_BASE_URL=http://127.0.0.1:8080/v1 SMALL_MODEL=qwen2.5-7b node --env-file=.
 `BIG_MODEL` picks the model for `draft-answer`. The graph did not change: a
 binding in `graph.mjs` names a model by id and digest, and the port decides
 how to reach it. If the server is down or answers with an error, the turn is
-retried (`maxAttempts: 3`) and then fails; `watch.sql` shows it as `failed`
-with the error code.
+retried (`maxAttempts: 3`) and then fails (`failed: model_unreachable`
+from the worker). `watch.sql` then shows the unit and that turn as `failed`;
+[When a unit fails](#when-a-unit-fails) shows how to find out why.
 
 (This adapter was checked against a stub OpenAI-compatible server, with and
 without reported usage, and against no server at all; the author's
@@ -1415,8 +1675,12 @@ llama-swap could not load a model at the time.)
   `binaryQuestion` gives it exactly that, and sends `unsure` to someone who
   can decide (a bigger model, a person, or both in order).
 - **The graph is sealed.** Change a node, an edge or a model binding and the
-  digest changes. Publish that as a new graph version; units already running
-  finish on the version they were admitted to.
+  digest changes, so it is a new graph version: bump `version` and publish
+  it (step 11). A published version never changes, and a unit finishes on
+  the version it was admitted to. That takes a worker that still has the
+  version: `versions.mjs` lists every version with units in flight, and the
+  worker passes that list to both `runWorker` and `withApprovalReviewPorts`.
+  Keep a version there until none of its units is open.
 
 Where to go next (all in the private repositories):
 [the approval and review design](https://github.com/scshafe/switchyard/blob/main/docs/DESIGN-APPROVAL-REVIEW.md),
@@ -1424,6 +1688,59 @@ the [switchyard README](https://github.com/scshafe/switchyard/blob/main/README.m
 for joins, declared outputs and the other helpers, and the
 [switchyard-postgres README](https://github.com/scshafe/switchyard-postgres/blob/main/README.md)
 for the schema and operating notes.
+
+## When a unit fails
+
+A turn fails for good when its body throws an error that is not retryable,
+or a retryable one `maxAttempts` times. The worker prints
+`failed: <error code>`; in `watch.sql` the turn's `status` is `failed`, and
+once nothing else of the unit is open, so is the unit's. Nothing routes on
+from a failed turn.
+
+switchyard 2.3.0 and switchyard-postgres 0.2.0 have **no way to retry or
+retire a failed unit**. Evidence is append-only, and the runtime role cannot
+change a row: the failed turn stays failed, and the unit stays in the record
+as `failed`. It holds no queue place and needs no clean-up. To try the
+message again, fix the cause (a rule, a prompt, `versions.mjs`), then admit
+the same text under a new unit id, e.g. `u6-retry`; it starts from the entry
+node of the current version.
+
+This lists the failed units, where and why they failed, and their text:
+
+<!-- file: failed.sql -->
+```sql
+-- failed.sql: the units that failed, where and why, and the text they had.
+-- Run as the read-only role (a member of switchyard_reader).
+SELECT status.unit_id, status.graph_version AS version, failure.node_id,
+       failure.error_code, failure.error_message,
+       seed.envelope::jsonb #>> '{payload,text}' AS text
+FROM switchyard.unit_status AS status
+JOIN switchyard.turn_failures AS failure
+  ON failure.unit_id = status.unit_id AND failure.terminal
+JOIN switchyard.units AS unit ON unit.unit_id = status.unit_id
+JOIN switchyard.artifacts AS seed
+  ON seed.contract_id = unit.seed_contract_id
+ AND seed.artifact_digest = unit.seed_artifact_digest
+WHERE status.status = 'failed'
+ORDER BY failure.failed_at;
+```
+
+```sh
+docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
+  psql -h 127.0.0.1 -U watcher -d postgres < failed.sql
+```
+
+```
+ unit_id | version | node_id | error_code | error_message | text 
+---------+---------+---------+------------+---------------+------
+(0 rows)
+```
+
+None failed in this guide. `error_message` is the failure's message, e.g.
+`node compose-reply::rework completion: node compose-reply::rework outcome
+"composed" must carry switchyard.review-request.v1 (got reply.v1)`. For some
+failures on switchyard 2.3.0 it only repeats the code
+(see [Troubleshooting](#troubleshooting)).
 
 ## Troubleshooting
 
@@ -1442,8 +1759,6 @@ access errors a new reader may meet.
   pnpm asked the public registry. The project `.npmrc` with
   `@scshafe:registry=https://npm.pkg.github.com` is missing or you are in
   another directory.
-- **`Cannot find package 'pg' imported from .../db.mjs`**: `pg` is not a
-  direct dependency. `pnpm add --save-exact pg@8.23.0`.
 - **`Bind for 127.0.0.1:5432 failed: port is already allocated`**: another
   PostgreSQL uses the port. Start the container with
   `-p 127.0.0.1:5433:5432`, and use `5433` in the `migrate` URL and in
@@ -1454,12 +1769,10 @@ access errors a new reader may meet.
 - **`connect ECONNREFUSED 127.0.0.1:5432`** or **`the database system is
   starting up`**: PostgreSQL is not ready yet; run the `until ... pg_isready`
   line.
-- **`permission denied for table schema_migrations`**: something called
-  `assertSchemaCurrent` from switchyard-postgres as the `app` role. In 0.1.1
-  that check needs a role that can read the schema's tables (the owner or
-  `watcher`), which the runtime role cannot. This guide does not call it;
-  `migrate` already reports the version.
-  <!-- postgres-0.2.0: assertSchemaCurrent works for the runtime role; drop this entry. -->
+- **`SwitchyardPostgresConfigError: createPostgresStores requires a pool or
+  a connectionString`**: `APP_DATABASE_URL` is not set. Run the scripts as
+  `node --env-file=.env ...`, from the project directory, with the `.env`
+  of step 3.
 - **`u1 is already admitted; admit the message under a new unit id`** from
   `admit.mjs`: that unit id is taken (step 6). In your own code the error is
   `TurnEvidenceConflictError: admitUnit: unit u1 conflicts with immutable
@@ -1469,20 +1782,52 @@ access errors a new reader may meet.
   switchyard's in-memory store logic, and writes the result back in the same
   transaction, so the engine's checks and messages are the same for every
   store.
-- **`unit u3 is not waiting for a person`** from `decide.mjs`: nothing is
-  pending for that unit. Run `node --env-file=.env decide.mjs` to see what
-  is, or run the worker first.
-- **`human answer at node compose-reply::review: "accept" is not an answer
-  here; answer one of accepted | rejected`** from `decide.mjs`: a typo.
-  Answer with one of the answers it names (the list `decide.mjs` prints shows
-  them too).
+- **`graph first-switchyard v1 is already published with other content;
+  bump version in graph.mjs`** from `admit.mjs`: you changed `graph.mjs`
+  but not its `version`. In your own code the error is
+  `GraphPublicationConflictError: publishGraph: graph first-switchyard@1 is
+  already published with digest ...; requested digest ... conflicts with
+  immutable evidence`. Bump `version` and keep the old version for the
+  worker ([step 11](#11-change-the-graph)).
+- **`u3 is not waiting for a person; run decide.mjs alone to see who is`**
+  from `decide.mjs`: nothing is pending for that unit id (or there is no
+  such unit). Run `node --env-file=.env decide.mjs` to see what is, or run
+  the worker first. **`u3 at is-question.escalate-1: give an answer, one of
+  yes | no`**: the answer argument is missing.
+- **`"accept" is not an answer here (node compose-reply::review of unit u1;
+  valid answers: accepted, rejected)`** from `decide.mjs`: a typo. Nothing
+  was recorded; answer with one of the answers it names (the list
+  `decide.mjs` prints shows them too). **`notes go only with "rejected"`**
+  means a note came with another answer: only a rejection carries notes.
 - **`... returned undeclared outcome "bogus" (its outcomes: ...)`** from a
   worker turn: your body or model port returned an outcome the node does not
   have. The message lists the ones it has.
 - **A turn prints `failed: immutable_stage_contract_rejected`** at
-  `compose-reply` or `draft-answer`: the ports were not wrapped with
-  `withApprovalReviewPorts`, or a body returned an artifact with the wrong
-  contract (e.g. `compose-reply` must return a `reply.v1`).
+  `compose-reply`, `compose-reply::rework` or a model reviewer
+  (`compose-reply::review`): what the node returned was not turned into a
+  review record. `error_message` in `switchyard.turn_failures`
+  ([When a unit fails](#when-a-unit-fails)) says what it should have
+  carried, e.g. `outcome "composed" must carry
+  switchyard.review-request.v1 (got reply.v1)`. The usual cause is a graph
+  change: the unit is on a version that `versions.mjs` no longer lists, so
+  `withApprovalReviewPorts` did not wrap its turn (switchyard 2.3.0 still
+  claims such units). Keep every version with open units in `versions.mjs`
+  ([step 11](#11-change-the-graph)). Otherwise the ports were not wrapped
+  with `withApprovalReviewPorts` at all, or a body returned an artifact
+  with the wrong contract (e.g. `compose-reply` must return a `reply.v1`).
+  The failed unit stays failed; admit its text again.
+- **A turn prints `failed: immutable_configuration_rejected`** at a model
+  node: most often `fakeModelPort` has no rule for that node, e.g. a node
+  you just added. Add a rule under its node id in `models.mjs` (for a
+  `binaryQuestion` the id you gave it; for a model approver or reviewer
+  `X::approval` or `X::review`). On switchyard 2.3.0 this failure carries
+  nothing but the code: the worker's output, `result.value.errorCode`,
+  `turns.error_code` and even `turn_failures.error_message` all say
+  `immutable_configuration_rejected`. The same code also comes from a body
+  that throws an `Error` whose message mentions a schema, contract, digest
+  or binding; `error_message` then holds that message.
+- **`failed: no_prompt_for_node`** with `MODEL_BASE_URL` set: `realModel`
+  has no prompt for that node ([step 12](#12-optional-a-real-model)).
 - **`model node ... must return exactly one usage receipt`**: your own model
   port returned no `usage`, or more than one receipt.
 - **`usage receipt: unavailable receipt must charge at least 1 token`** (or

@@ -1,6 +1,7 @@
 // admit.mjs: publish the graph and admit one unit (a message) into it.
 //   node --env-file=.env admit.mjs <unit-id> "<text>"
 import {
+  GraphPublicationConflictError,
   TurnEvidenceConflictError,
   createArtifactEnvelope,
   graphDefinitionRef
@@ -15,9 +16,10 @@ if (unitId === undefined || text === undefined) {
   process.exit(2);
 }
 
-const { pool, graphStore, unitStore } = openStores();
+const { graphStore, unitStore, close } = openStores();
 try {
-  // Publishing the same sealed graph again changes nothing.
+  // Publishing the same sealed graph again changes nothing. A changed graph
+  // under a version number already published is refused.
   await graphStore.publishGraph(graph);
   const { entryQueue } = await unitStore.admitUnit({
     unitId,
@@ -29,12 +31,18 @@ try {
   });
   console.log(`admitted ${unitId}: queued at ${entryQueue.nodeId}`);
 } catch (error) {
-  // A unit id is admitted once. Running this again with the same id makes a
-  // new admittedAt (and maybe other text), which conflicts with the stored
-  // admission.
-  if (!(error instanceof TurnEvidenceConflictError)) throw error;
-  console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  if (error instanceof GraphPublicationConflictError) {
+    // graph.mjs changed, but its version did not (step 11).
+    console.error(`graph ${graph.graphId} v${graph.version} is already published with other content; bump version in graph.mjs`);
+  } else if (error instanceof TurnEvidenceConflictError) {
+    // A unit id is admitted once. Running this again with the same id makes
+    // a new admittedAt (and maybe other text), which conflicts with the
+    // stored admission.
+    console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  } else {
+    throw error;
+  }
   process.exitCode = 1;
 } finally {
-  await pool.end();
+  await close();
 }
