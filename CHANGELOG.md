@@ -46,6 +46,12 @@ Additive. No graph, digest, runner, store or wire change.
   - `admitUnit`'s `TurnEvidenceConflictError` names the admission fields
     that differ (graph, seed artifact, `admittedAt`, `principalId`) and says
     that only an identical admission replays as `created: false`.
+- `MemoryUnitStore` compiles each unit's sealed graph once per graph object
+  instead of once per queue, attempt and settlement row (a graph with
+  approval or review settings is resealed on every compile). switchyard-
+  postgres rebuilds this state on every operation, so the guide's first
+  worker run drops from about 5 s to 1.5 s of CPU. `admitUnit` keeps its
+  own validated copy of the loaded graph.
 - `docs/FIRST-GRAPH.md`, "Your first switchyard": from an empty directory to
   a unit moving through a three-node graph in PostgreSQL, on 2.3.0 and
   switchyard-postgres 0.1.1, with the project in

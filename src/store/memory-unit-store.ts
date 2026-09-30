@@ -868,7 +868,7 @@ function validateSnapshotJoinProgress(
   const unitId = assertEvidenceString(raw.unitId, `${label}.unitId`);
   const nodeId = assertIdentifier(raw.nodeId, `${label}.nodeId`);
   const graph = state.unitGraphs.get(unitId);
-  const node = graph === undefined ? undefined : compileGraph(graph).nodesById[nodeId];
+  const node = graph === undefined ? undefined : compiledUnitGraph(graph).nodesById[nodeId];
   if (node?.join === undefined) throw new Error(`${label}: references a node without a join`);
   const require = raw.require;
   if (
@@ -1053,7 +1053,7 @@ function validateSnapshotEnvelopeJoins(state: MemoryState, label: string): void 
     // Hydration already validated and compiled these frozen graphs. Ordinary
     // graphs need no additional envelope-provenance compilation or traversal.
     if (!graph.nodes.some((node) => node.join?.compose === "envelope")) continue;
-    const compiled = compileGraph(graph);
+    const compiled = compiledUnitGraph(graph);
     const records = state.journey.get(unitId) ?? [];
     for (const node of compiled.nodes) {
       if (node.join?.compose !== "envelope") continue;
@@ -1325,7 +1325,7 @@ function hydrateMemoryState(value: unknown): MemoryState {
     const raw = snapshotRecord(entry, ["unitId", "graph"], ["unitId", "graph"], entryLabel);
     const unitId = assertEvidenceString(raw.unitId, `${entryLabel}.unitId`);
     const graph = validateGraphDefinition(raw.graph);
-    compileGraph(graph);
+    compiledUnitGraph(graph);
     putUnique(state.unitGraphs, unitId, graph, `${label}.unitGraphs`);
     const identity = `${graph.graphId}\0${graph.version}`;
     const priorDigest = graphIdentities.get(identity);
@@ -1385,7 +1385,7 @@ function hydrateMemoryState(value: unknown): MemoryState {
       throw new Error(`${label}.queues[${index}]: references unknown unit ${queue.unitId}`);
     }
     assertGraphRefEqual(queue.graph, unit.graph, `${label}.queues[${index}]`);
-    const node = compileGraph(graph).nodesById[queue.nodeId];
+    const node = compiledUnitGraph(graph).nodesById[queue.nodeId];
     if (node === undefined || !sameNodeRef(queue.nodeRef, node.ref)) {
       throw new Error(`${label}.queues[${index}]: node reference conflicts with sealed graph`);
     }
@@ -1861,9 +1861,23 @@ function sameOrdered(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+// unitGraphs holds only graphs this store validated (deep-frozen clones), and
+// clones of the state share them, so their compilation is cached by identity
+// instead of resealing the graph once per queue, attempt and settlement row.
+const compiledUnitGraphs = new WeakMap<GraphDefinition, CompiledGraph>();
+
+function compiledUnitGraph(graph: GraphDefinition): CompiledGraph {
+  let compiled = compiledUnitGraphs.get(graph);
+  if (compiled === undefined) {
+    compiled = compileGraph(graph);
+    compiledUnitGraphs.set(graph, compiled);
+  }
+  return compiled;
+}
+
 function nodeForQueue(state: MemoryState, queue: UnitQueueOccurrence): SwitchyardNode {
   const graph = state.unitGraphs.get(queue.unitId);
-  const node = graph === undefined ? undefined : compileGraph(graph).nodesById[queue.nodeId];
+  const node = graph === undefined ? undefined : compiledUnitGraph(graph).nodesById[queue.nodeId];
   if (graph === undefined || node === undefined) {
     throw new Error(`MemoryUnitStore invariant: queue ${queue.queueId} has no sealed graph/node`);
   }
@@ -1991,13 +2005,15 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
     const seedArtifact = validateArtifactEnvelope(raw.seedArtifact);
     const admittedAt = assertCanonicalTimestamp(raw.admittedAt, "admitUnit input.admittedAt");
     const principalId = assertIdentifier(raw.principalId, "admitUnit input.principalId");
-    const graph = await this.#graphStore.loadGraph(graphRef);
-    if (graph === undefined) {
+    const loaded = await this.#graphStore.loadGraph(graphRef);
+    if (loaded === undefined) {
       throw new Error(
         `admitUnit: graph ${graphRef.id}@${graphRef.version} (${graphRef.digest}) is not published`
       );
     }
-    const compiled = compileGraph(graph);
+    // The unit keeps this store's own validated, frozen copy of its graph.
+    const graph = validateGraphDefinition(loaded);
+    const compiled = compiledUnitGraph(graph);
     const entry = compiled.nodesById[compiled.entry]!;
     if (seedArtifact.contractId !== entry.input) {
       throw new Error(
@@ -2872,7 +2888,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
     if (graph === undefined) {
       throw new Error(`MemoryUnitStore invariant: unit ${input.unitId} has no graph`);
     }
-    const compiled = compileGraph(graph);
+    const compiled = compiledUnitGraph(graph);
     const graphRef = graphDefinitionRef(graph);
     const plannedJoins = new Map(input.state.joins);
     const plannedQueues: UnitQueueOccurrence[] = [];
