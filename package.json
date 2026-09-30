@@ -1,6 +1,6 @@
 {
   "name": "@scshafe/switchyard",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",

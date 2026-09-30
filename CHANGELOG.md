@@ -7,6 +7,59 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
+## 2.3.0 — unreleased (W4: first-run helpers)
+
+Additive. No graph, digest, runner, store or wire change.
+
+- `runWorker({ store, ports, leaseOwner, graphs | principals, batch?, idleMs?,
+  untilIdle?, signal?, onSettled? })` is the polling worker loop every host
+  wrote around `runNextUnitTurns`: it claims a batch for each worker
+  principal in turn, reports each settlement, sleeps when a pass claims
+  nothing, and returns on `signal` (between passes; claimed turns finish) or,
+  with `untilIdle`, after the first empty pass. `workerPrincipals(graphs)`
+  lists the principals of a graph's code, model and agent nodes.
+- `fakeModelPort(rules)` is a deterministic `ModelNodePort` for first runs
+  and tests: per node an outcome, a completion or a function of the input,
+  with the required usage receipt attached. `unavailableUsageReceipt(ms)` is
+  that receipt (trust `unavailable`, charging the policy floor).
+- `providerReportedUsageReceipt({ inputTokens, outputTokens,
+  chargedCostMicroUsd, durationMs? })` is the receipt for a model turn whose
+  provider reported its token counts (trust `provider_reported`, charged
+  tokens = their sum; a local server may charge 0 micro-USD). A turn with no
+  reported usage uses `unavailableUsageReceipt`, never zeros.
+- `humanNodeAnswers(graph, nodeId)` gives the answers a person gives at a
+  node (`approved | denied` at an approval, `accepted | rejected` at a
+  review, the node's outcomes elsewhere), to pair with
+  `approvalReviewHumanDecision`.
+- `latestReviewNotes(record)` reads the reviewer's latest `reviewNotes`
+  from a `switchyard.rework.v1` (or review-request) record, so a rework body
+  does not dig through `history`. The record types `ReviewRequestPayload`,
+  `ReworkPayload`, `ReviewHistoryEntry` and `EmbeddedArtifact` and the
+  contract-id constants were already exported; the guide now documents them.
+- Clearer errors on a first run (messages only; codes, classes and stored
+  identities unchanged):
+  - `approvalReviewHumanDecision` checks a person's answer against
+    `humanNodeAnswers` first: `human answer at node compose-reply::review:
+    "accept" is not an answer here; answer one of accepted | rejected`
+    (before, a mistyped review answer was reported as a node "body result").
+  - Every "returned undeclared outcome" error lists the node's outcomes.
+  - `admitUnit`'s `TurnEvidenceConflictError` names the admission fields
+    that differ (graph, seed artifact, `admittedAt`, `principalId`) and says
+    that only an identical admission replays as `created: false`.
+- `MemoryUnitStore` compiles each unit's sealed graph once per graph object
+  instead of once per queue, attempt and settlement row (a graph with
+  approval or review settings is resealed on every compile). switchyard-
+  postgres rebuilds this state on every operation, so the guide's first
+  worker run drops from about 5 s to 1.5 s of CPU. `admitUnit` keeps its
+  own validated copy of the loaded graph.
+- `docs/FIRST-GRAPH.md`, "Your first switchyard": from an empty directory to
+  a unit moving through a three-node graph in PostgreSQL, on 2.3.0 and
+  switchyard-postgres 0.1.1, with the project in
+  `docs/first-graph-example/` (kept equal to the guide by a test). It
+  documents what approval, review and rework nodes receive and return.
+  `docs/PROPOSAL-ADMISSION-REPLAY.md` proposes (does not implement) letting
+  a retried admission replay regardless of `admittedAt`.
+
 ## 2.2.0 — unreleased (W1: approval and review settings)
 
 Additive. Graphs without the new settings seal and run exactly as in 2.1.0,

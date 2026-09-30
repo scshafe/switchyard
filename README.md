@@ -17,6 +17,11 @@ no compatibility aliases. [`CHANGELOG.md`](CHANGELOG.md) lists every old and
 new name. There is no compatibility execution path for the retired v1
 traversal engine.
 
+**New here?** [Your first switchyard](docs/FIRST-GRAPH.md) goes from an empty
+directory to watching units move through a three-node graph in PostgreSQL:
+a small-model yes/no check, a model approval in front of a "cloud" model,
+and a person reviewing the result.
+
 ## Install
 
 The package is private and published to GitHub Packages. Map the scope in the
@@ -30,7 +35,7 @@ Authenticate in user-level npm/pnpm config or through `NODE_AUTH_TOKEN` in CI,
 then depend on an exact version:
 
 ```sh
-pnpm add --save-exact @scshafe/switchyard@2.0.0
+pnpm add --save-exact @scshafe/switchyard@2.3.0
 ```
 
 Import specifiers are `@scshafe/switchyard` and
@@ -277,10 +282,23 @@ behavior are authored as nodes and edges.
 - `execute/code-port` provides `codeNodePortByNode`: one code body per node
   behind the kind-keyed worker port; an unregistered node fails terminally
   before any body runs.
+- `execute/worker` provides `runWorker`, the polling worker loop around
+  `runNextUnitTurns` (every worker principal in turn, idle sleep, stop
+  signal, per-turn report), and `workerPrincipals`.
+- `execute/fake-model` provides `fakeModelPort`, a deterministic model port
+  for first runs and tests, and the two receipts a model port usually
+  returns: `unavailableUsageReceipt` (no telemetry, charging the floor) and
+  `providerReportedUsageReceipt` (the provider's token counts).
 - `execute/approval-review` provides `withApprovalReviewPorts`,
-  `approvalReviewHumanDecision`, `applyApprovalReviewCompletion` and
-  `reviewNotes`; `graph/approval-review` names the synthesized ids and roles
-  (`approvalReviewRole`); `graph/binary` provides `binaryQuestion`.
+  `approvalReviewHumanDecision`, `humanNodeAnswers`,
+  `applyApprovalReviewCompletion`, `reviewNotes` and `latestReviewNotes`, and
+  the record types `ReviewRequestPayload`, `ReworkPayload`,
+  `ReviewHistoryEntry` and `EmbeddedArtifact`; `graph/approval-review` names
+  the synthesized ids, roles (`approvalReviewRole`) and contract ids
+  (`SWITCHYARD_REVIEW_REQUEST_CONTRACT`, `SWITCHYARD_REWORK_CONTRACT`, ...);
+  `graph/binary` provides `binaryQuestion`. What each of these nodes
+  receives and returns is in
+  [Your first switchyard, "What a node receives"](docs/FIRST-GRAPH.md#what-a-node-receives-and-returns).
 - `contracts/` provides canonical-JSON SHA-256 digests, artifact envelopes,
   artifact refs, and usage receipts.
 - `model/binding` and `prompt/` provide sealed model/prompt identities.

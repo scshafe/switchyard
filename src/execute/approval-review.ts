@@ -24,6 +24,7 @@ import {
   type SwitchyardNodeRef
 } from "../graph/definition.js";
 import {
+  APPROVAL_OUTCOMES,
   REVIEW_REJECTED_OUTCOME,
   REVIEW_REWORK_OUTCOME,
   REVIEWER_OUTCOMES,
@@ -126,6 +127,24 @@ export function reviewNotes(notes: string): ArtifactEnvelope {
     throw new Error(`review notes: must be a non-blank string of at most ${MAX_REVIEW_NOTES_LENGTH} characters`);
   }
   return createArtifactEnvelope(SWITCHYARD_REVIEW_NOTES_CONTRACT, { notes });
+}
+
+/**
+ * The reviewer's notes from the latest rejected round of a rework (or review)
+ * record: `history.at(-1).feedback.payload.notes` when the reviewer answered
+ * with `reviewNotes(...)`, otherwise `undefined` (no rejected round yet, a
+ * rejection without notes, or feedback of another contract).
+ */
+export function latestReviewNotes(
+  record: Pick<ReworkPayload, "history"> | Pick<ReviewRequestPayload, "history">
+): string | undefined {
+  if (!isPlainObject(record) || !Array.isArray(record.history)) {
+    throw new Error(`latestReviewNotes: expected a review or rework record with a history (got ${typeName(record)})`);
+  }
+  const feedback = (record.history.at(-1) as ReviewHistoryEntry | undefined)?.feedback;
+  if (!isPlainObject(feedback) || feedback.contractId !== SWITCHYARD_REVIEW_NOTES_CONTRACT) return undefined;
+  const payload = feedback.payload;
+  return isPlainObject(payload) && typeof payload.notes === "string" ? payload.notes : undefined;
 }
 
 function embed(artifact: ArtifactEnvelope): EmbeddedArtifact {
@@ -278,15 +297,23 @@ function reviewerBodyNode(subject: SwitchyardNode): SwitchyardNode {
   } as SwitchyardNode;
 }
 
+/** Who answered: a worker body, or a person through `approvalReviewHumanDecision`. */
+type AnswerSource = "body" | "human";
+
+function answerLabel(nodeId: string, source: AnswerSource): string {
+  return source === "human" ? `human answer at node ${nodeId}` : `node ${nodeId} body result`;
+}
+
 function shape(
   role: ApprovalReviewRole,
   inputArtifact: ArtifactEnvelope,
-  completion: unknown
+  completion: unknown,
+  source: AnswerSource = "body"
 ): NodeTurnCompletion | undefined {
   const subject = role.subject;
   const review = Object.hasOwn(subject, "review") ? subject.review : undefined;
   if (role.role === "approval" || review === undefined) return undefined;
-  const label = `node ${role.nodeId} body result`;
+  const label = answerLabel(role.nodeId, source);
   if (role.role === "subject") {
     const input = validateArtifactEnvelope(inputArtifact);
     if (input.contractId !== subject.input) {
@@ -367,13 +394,21 @@ export function applyApprovalReviewCompletion(
   graphRaw: GraphDefinition,
   input: ApplyApprovalReviewInput
 ): NodeTurnCompletion {
+  return applyCompletion(graphRaw, input, "body");
+}
+
+function applyCompletion(
+  graphRaw: GraphDefinition,
+  input: ApplyApprovalReviewInput,
+  source: AnswerSource
+): NodeTurnCompletion {
   const graph = validateGraphDefinition(graphRaw);
   compileGraph(graph);
   const raw = captureCapabilityRecord(input, ["nodeId", "inputArtifact", "completion"], ["nodeId", "inputArtifact", "completion"], "approval/review input");
   const role = approvalReviewRole(graph, raw.nodeId as string);
   const shaped = role === undefined
     ? undefined
-    : shape(role, raw.inputArtifact as ArtifactEnvelope, raw.completion);
+    : shape(role, raw.inputArtifact as ArtifactEnvelope, raw.completion, source);
   return shaped ?? (raw.completion as NodeTurnCompletion);
 }
 
@@ -385,9 +420,11 @@ export interface ApprovalReviewHumanDecisionInput {
 }
 
 /**
- * A person's answer at an approval, review, reviewed or rework node, shaped
- * for `recordHumanNodeDecision`. Approvers answer `approved` / `denied`;
- * reviewers `accepted` / `rejected` (optionally with `reviewNotes(...)`).
+ * A person's answer at a human node, shaped for `recordHumanNodeDecision`.
+ * Approvers answer `approved` / `denied`; reviewers `accepted` / `rejected`
+ * (optionally with `reviewNotes(...)`); any other human node one of its
+ * outcomes (see `humanNodeAnswers`). An answer that is not one of those
+ * throws, naming the answers the node takes.
  */
 export function approvalReviewHumanDecision(
   graph: GraphDefinition,
@@ -401,14 +438,21 @@ export function approvalReviewHumanDecision(
       captureCapabilityDataProperty(raw.queued, key, "human decision input.queued")
     ])
   );
-  const completion = applyApprovalReviewCompletion(graph, {
-    nodeId: queued.nodeId as string,
+  const nodeId = queued.nodeId as string;
+  const answers = humanNodeAnswers(graph, nodeId);
+  if (typeof raw.outcome !== "string" || !answers.includes(raw.outcome)) {
+    throw new Error(
+      `${answerLabel(nodeId, "human")}: ${typeof raw.outcome === "string" ? JSON.stringify(raw.outcome) : typeName(raw.outcome)} is not an answer here; answer one of ${answers.join(" | ")}`
+    );
+  }
+  const completion = applyCompletion(graph, {
+    nodeId,
     inputArtifact: queued.inputArtifact as ArtifactEnvelope,
     completion: {
-      outcome: raw.outcome as string,
+      outcome: raw.outcome,
       ...(raw.outputArtifact === undefined ? {} : { outputArtifact: raw.outputArtifact as ArtifactEnvelope })
     }
-  });
+  }, "human");
   return Object.freeze({
     queueId: queued.queueId as string,
     unitId: queued.unitId as string,
@@ -417,6 +461,25 @@ export function approvalReviewHumanDecision(
     ...(completion.outputArtifact === undefined ? {} : { outputArtifact: completion.outputArtifact }),
     actor: raw.actor as NodeTurnActorAttribution
   });
+}
+
+/**
+ * The answers a person (or a model body) gives at a node, which are not
+ * always the node's sealed outcomes: an approval node is answered
+ * `approved | denied`, a review node `accepted | rejected` (stored as
+ * `accepted:<outcome>`, `rework` or `rejected`), and a reviewed node or its
+ * rework twin with the subject's own outcomes. Any other node is answered
+ * with its outcomes. Pass the answer to `approvalReviewHumanDecision`.
+ */
+export function humanNodeAnswers(graphRaw: GraphDefinition, nodeId: string): readonly string[] {
+  const graph = validateGraphDefinition(graphRaw);
+  const role = approvalReviewRole(graph, nodeId);
+  if (role?.role === "approval") return APPROVAL_OUTCOMES;
+  if (role?.role === "review") return REVIEWER_OUTCOMES;
+  if (role !== undefined) return Object.freeze(reviewedOutcomes(role.subject).slice());
+  const node = graph.nodes.find((candidate) => candidate.nodeId === nodeId);
+  if (node === undefined) throw new Error(`graph ${graph.graphId} has no node ${JSON.stringify(nodeId)}`);
+  return Object.freeze(reviewedOutcomes(node).slice());
 }
 
 export interface ApprovalReviewPortOptions {
