@@ -106,7 +106,10 @@ jobs:
           registry-url: ${{ env.REGISTRY }}
           scope: "@scshafe"
 
+      # @scshafe/graphpaper (dev dependency) is read from GitHub Packages.
       - run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm run verify
 
       - name: Pack and record digests
@@ -171,6 +174,8 @@ jobs:
 
       - name: Rebuild and pack the tag locally
         id: local
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile

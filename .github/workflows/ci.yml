@@ -9,6 +9,9 @@ on:
 
 permissions:
   contents: read
+  # Dev dependency @scshafe/graphpaper comes from GitHub Packages; the package
+  # must grant this repository read access ("Manage Actions access").
+  packages: read
 
 jobs:
   verify:
@@ -32,7 +35,13 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
+          # registry-url + scope write a user-level npmrc ($RUNNER_TEMP) that
+          # maps @scshafe and reads NODE_AUTH_TOKEN.
+          registry-url: https://npm.pkg.github.com
+          scope: "@scshafe"
       - run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm run verify
       - name: Fresh-clone check (install, build and verify a clone of HEAD)
         run: pnpm run test:fresh-clone
