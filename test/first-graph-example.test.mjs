@@ -62,3 +62,27 @@ test("the guide links to the repository absolutely and has no open 0.2.0 markers
   assert.ok(guide.includes("docker rm -f -v first-switchyard-db"), "clean-up removes the data volume");
   assert.ok(!/docker rm -f first-switchyard-db/.test(guide), "every docker rm removes the volume");
 });
+
+test("step 11's edits apply to the example's graph.mjs and versions.mjs exactly", async () => {
+  const guide = await readFile(guideUrl, "utf8");
+  const step = guide.slice(guide.indexOf("## 11. Change the graph"), guide.indexOf("## 12."));
+  let graph = await readFile(new URL("graph.mjs", exampleUrl), "utf8");
+  const diffs = [...step.matchAll(/```diff\n([\s\S]*?)```/g)].map((match) => match[1]);
+  assert.equal(diffs.length, 2);
+  for (const diff of diffs) {
+    const lines = diff.trimEnd().split("\n");
+    const before = lines.filter((line) => line[0] === " " || line[0] === "-").map((line) => line.slice(1)).join("\n");
+    const after = lines.filter((line) => line[0] === " " || line[0] === "+").map((line) => line.slice(1)).join("\n");
+    assert.equal(graph.split(before).length, 2, `graph.mjs holds exactly one ${JSON.stringify(before)}`);
+    graph = graph.replace(before, after);
+  }
+  assert.match(graph, /graphId: "first-switchyard",\n  version: 2,/);
+  const [replacement] = [...step.matchAll(/```js\n([\s\S]*?)```/g)].map((match) => match[1]);
+  const versions = await readFile(new URL("versions.mjs", exampleUrl), "utf8");
+  assert.equal(
+    replacement,
+    versions
+      .replace('import { graph } from "./graph.mjs";\n', 'import { graph } from "./graph.mjs";\nimport { graph as v1 } from "./graph-v1.mjs";\n')
+      .replace("export const graphs = [graph];", "export const graphs = [graph, v1];")
+  );
+});

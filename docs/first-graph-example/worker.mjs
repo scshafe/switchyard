@@ -1,5 +1,6 @@
 // worker.mjs: the worker. It claims queued turns for every principal that
-// runs code or model nodes, runs them through the ports, and repeats.
+// runs code or model nodes, runs them through the ports, and repeats. It
+// runs units of every graph version in versions.mjs.
 //   node --env-file=.env worker.mjs               keep polling (Ctrl-C stops)
 //   node --env-file=.env worker.mjs --until-idle  stop when nothing is queued
 import {
@@ -13,8 +14,9 @@ import {
 } from "@scshafe/switchyard";
 
 import { openStores } from "./db.mjs";
-import { REPLY, graph } from "./graph.mjs";
+import { REPLY } from "./graph.mjs";
 import { fakeModel } from "./models.mjs";
+import { graphs } from "./versions.mjs";
 
 // The body of compose-reply. It receives a draft.v1, { question, answer },
 // and returns its outcome with the reply.v1 it produced. After a rejected
@@ -40,7 +42,8 @@ if (process.env.MODEL_BASE_URL) {
 }
 
 // withApprovalReviewPorts builds the records that reviewers and rework
-// rounds receive. Without it, reviewed nodes fail closed.
+// rounds receive. Without it, reviewed nodes fail closed; so do the reviewed
+// nodes of a graph version it was not given.
 const ports = withApprovalReviewPorts(
   {
     code: codeNodePortByNode({
@@ -49,7 +52,7 @@ const ports = withApprovalReviewPorts(
     }),
     model
   },
-  { graphs: [graph] }
+  { graphs }
 );
 
 function report({ claim, result }) {
@@ -67,12 +70,16 @@ const stop = new AbortController();
 process.once("SIGINT", () => stop.abort());
 
 const { unitStore, close } = openStores();
-console.log(`worker: principals ${workerPrincipals([graph]).join(", ")}`);
+const versions = graphs.map((graph) => `${graph.graphId} v${graph.version}`).join(", ");
+console.log(`worker: ${versions}; principals ${workerPrincipals(graphs).join(", ")}`);
 try {
   await runWorker({
     store: unitStore,
     ports,
-    graphs: [graph],
+    // Every version with units in flight. On switchyard 2.3.0 the worker
+    // also claims units of versions missing here, and their reviewed nodes
+    // (compose-reply, compose-reply::rework) then fail for good.
+    graphs,
     leaseOwner: `worker-${process.pid}`,
     untilIdle: process.argv.includes("--until-idle"),
     signal: stop.signal,

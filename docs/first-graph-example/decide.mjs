@@ -34,18 +34,26 @@ try {
   } else {
     // In this graph a unit waits for a person at one node at a time.
     const [turn] = await humanDecisions.listPending({ unitId });
-    if (turn === undefined) throw new Error(`unit ${unitId} is not waiting for a person`);
-    // Record the answer. The store checks it against turn.answers and stores
-    // what the node records: at a review, "accepted" as "accepted:composed",
-    // "rejected" as "rework" with the notes (or "rejected" in the last
-    // round). The engine then settles the turn and routes the unit on.
-    const recorded = await humanDecisions.recordAnswer({
-      queueId: turn.queueId,
-      answer,
-      ...(notes === undefined ? {} : { notes }),
-      actorId
-    });
-    console.log(`${unitId} at ${turn.nodeId}: recorded ${recorded.outcome}`);
+    if (turn === undefined) {
+      console.error(`${unitId} is not waiting for a person; run decide.mjs alone to see who is`);
+      process.exitCode = 1;
+    } else if (answer === undefined) {
+      console.error(`${unitId} at ${turn.nodeId}: give an answer, one of ${turn.answers.join(" | ")}`);
+      process.exitCode = 1;
+    } else {
+      // Record the answer. The store checks it against turn.answers and
+      // stores what the node records: at a review, "accepted" as
+      // "accepted:composed", "rejected" as "rework" with the notes (or
+      // "rejected" in the last round). The engine then settles the turn and
+      // routes the unit on.
+      const recorded = await humanDecisions.recordAnswer({
+        queueId: turn.queueId,
+        answer,
+        ...(notes === undefined ? {} : { notes }),
+        actorId
+      });
+      console.log(`${unitId} at ${turn.nodeId}: recorded ${recorded.outcome}`);
+    }
   }
 } catch (error) {
   // A typo, or notes with an answer that takes none. Nothing was recorded.

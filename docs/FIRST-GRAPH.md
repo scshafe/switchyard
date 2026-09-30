@@ -7,7 +7,8 @@ deterministic code, and a later step shows where a real one plugs in.
 
 Everything you type is in this guide, in order. The finished project is in
 [`docs/first-graph-example/`](https://github.com/scshafe/switchyard/tree/main/docs/first-graph-example),
-byte for byte the files below. Links to other switchyard files go to the
+byte for byte the files below (without step 11's changes to `graph.mjs`
+and `versions.mjs`). Links to other switchyard files go to the
 GitHub repository `scshafe/switchyard`, which is private: opening them needs
 the same access as installing the packages (see
 [Prerequisites](#prerequisites)).
@@ -523,7 +524,7 @@ A fake model has no token counts to report, so `fakeModelPort` attaches
 micro-USD. That is the least such a receipt may charge; a receipt without
 telemetry may never charge 0, so a missing count never looks free. A real
 model that reports its token counts returns a different receipt
-([step 11](#11-optional-a-real-model)).
+([step 12](#12-optional-a-real-model)).
 
 ## 6. Connect and admit units
 
@@ -557,6 +558,7 @@ through the graph:
 // admit.mjs: publish the graph and admit one unit (a message) into it.
 //   node --env-file=.env admit.mjs <unit-id> "<text>"
 import {
+  GraphPublicationConflictError,
   TurnEvidenceConflictError,
   createArtifactEnvelope,
   graphDefinitionRef
@@ -573,7 +575,8 @@ if (unitId === undefined || text === undefined) {
 
 const { graphStore, unitStore, close } = openStores();
 try {
-  // Publishing the same sealed graph again changes nothing.
+  // Publishing the same sealed graph again changes nothing. A changed graph
+  // under a version number already published is refused.
   await graphStore.publishGraph(graph);
   const { entryQueue } = await unitStore.admitUnit({
     unitId,
@@ -585,11 +588,17 @@ try {
   });
   console.log(`admitted ${unitId}: queued at ${entryQueue.nodeId}`);
 } catch (error) {
-  // A unit id is admitted once. Running this again with the same id makes a
-  // new admittedAt (and maybe other text), which conflicts with the stored
-  // admission.
-  if (!(error instanceof TurnEvidenceConflictError)) throw error;
-  console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  if (error instanceof GraphPublicationConflictError) {
+    // graph.mjs changed, but its version did not (step 11).
+    console.error(`graph ${graph.graphId} v${graph.version} is already published with other content; bump version in graph.mjs`);
+  } else if (error instanceof TurnEvidenceConflictError) {
+    // A unit id is admitted once. Running this again with the same id makes
+    // a new admittedAt (and maybe other text), which conflicts with the
+    // stored admission.
+    console.error(`${unitId} is already admitted; admit the message under a new unit id`);
+  } else {
+    throw error;
+  }
   process.exitCode = 1;
 } finally {
   await close();
@@ -737,8 +746,6 @@ docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
 All five units are `active` (they have work queued that is not a person's)
 and wait at `is-question`, first come first served.
 
-All five units wait at `is-question`, first come first served.
-
 ## 8. Run the worker
 
 The worker claims queued turns and runs them. A turn is claimed by a
@@ -748,12 +755,30 @@ same node. `runWorker` asks for each principal in turn, runs the batch
 through the ports, reports each turn, and repeats; it sleeps a second when
 nothing is queued.
 
+A unit runs to its end on the graph version it was admitted to, even after
+you publish a changed graph, so the worker needs every version that still has
+units in flight, not only the current one. Create `versions.mjs`, the list
+of those versions. For now there is one; [step 11](#11-change-the-graph)
+adds a second:
+
+<!-- file: versions.mjs -->
+```js
+// versions.mjs: every version of the graph that still has units in flight.
+// A unit runs to its end on the version it was admitted to, so the worker
+// needs all of these, not only the current one. Step 11 adds a version.
+import { graph } from "./graph.mjs";
+
+// The current version (the one admit.mjs admits to) first.
+export const graphs = [graph];
+```
+
 Create `worker.mjs`:
 
 <!-- file: worker.mjs -->
 ```js
 // worker.mjs: the worker. It claims queued turns for every principal that
-// runs code or model nodes, runs them through the ports, and repeats.
+// runs code or model nodes, runs them through the ports, and repeats. It
+// runs units of every graph version in versions.mjs.
 //   node --env-file=.env worker.mjs               keep polling (Ctrl-C stops)
 //   node --env-file=.env worker.mjs --until-idle  stop when nothing is queued
 import {
@@ -767,8 +792,9 @@ import {
 } from "@scshafe/switchyard";
 
 import { openStores } from "./db.mjs";
-import { REPLY, graph } from "./graph.mjs";
+import { REPLY } from "./graph.mjs";
 import { fakeModel } from "./models.mjs";
+import { graphs } from "./versions.mjs";
 
 // The body of compose-reply. It receives a draft.v1, { question, answer },
 // and returns its outcome with the reply.v1 it produced. After a rejected
@@ -794,7 +820,8 @@ if (process.env.MODEL_BASE_URL) {
 }
 
 // withApprovalReviewPorts builds the records that reviewers and rework
-// rounds receive. Without it, reviewed nodes fail closed.
+// rounds receive. Without it, reviewed nodes fail closed; so do the reviewed
+// nodes of a graph version it was not given.
 const ports = withApprovalReviewPorts(
   {
     code: codeNodePortByNode({
@@ -803,7 +830,7 @@ const ports = withApprovalReviewPorts(
     }),
     model
   },
-  { graphs: [graph] }
+  { graphs }
 );
 
 function report({ claim, result }) {
@@ -821,12 +848,16 @@ const stop = new AbortController();
 process.once("SIGINT", () => stop.abort());
 
 const { unitStore, close } = openStores();
-console.log(`worker: principals ${workerPrincipals([graph]).join(", ")}`);
+const versions = graphs.map((graph) => `${graph.graphId} v${graph.version}`).join(", ");
+console.log(`worker: ${versions}; principals ${workerPrincipals(graphs).join(", ")}`);
 try {
   await runWorker({
     store: unitStore,
     ports,
-    graphs: [graph],
+    // Every version with units in flight. On switchyard 2.3.0 the worker
+    // also claims units of versions missing here, and their reviewed nodes
+    // (compose-reply, compose-reply::rework) then fail for good.
+    graphs,
     leaseOwner: `worker-${process.pid}`,
     untilIdle: process.argv.includes("--until-idle"),
     signal: stop.signal,
@@ -843,10 +874,12 @@ wraps the draft and the reviewer's notes, so the body checks which contract
 it got. [What a node receives and returns](#what-a-node-receives-and-returns)
 lists these shapes. `withApprovalReviewPorts` matters: it wraps your ports so
 that the reviewer sees the node's input and output together, and so that a
-rework round receives the reviewer's notes. `codeNodePortByNode` sends each
-code node's turn to its own function; `compose-reply` and
+rework round receives the reviewer's notes. It does that only for the graph
+versions it is given, so the worker passes it the same `graphs` as
+`runWorker` (whose principals it claims for). `codeNodePortByNode` sends
+each code node's turn to its own function; `compose-reply` and
 `compose-reply::rework` share one. `real-model.mjs` only comes into play in
-step 11.
+step 12.
 
 Run it until nothing is left to do:
 
@@ -855,7 +888,7 @@ node --env-file=.env worker.mjs --until-idle
 ```
 
 ```
-worker: principals local-model, cloud-model, worker
+worker: first-switchyard v1; principals local-model, cloud-model, worker
 u1       is-question              -> yes
 u2       is-question              -> yes
 u3       is-question              -> unsure
@@ -996,18 +1029,26 @@ try {
   } else {
     // In this graph a unit waits for a person at one node at a time.
     const [turn] = await humanDecisions.listPending({ unitId });
-    if (turn === undefined) throw new Error(`unit ${unitId} is not waiting for a person`);
-    // Record the answer. The store checks it against turn.answers and stores
-    // what the node records: at a review, "accepted" as "accepted:composed",
-    // "rejected" as "rework" with the notes (or "rejected" in the last
-    // round). The engine then settles the turn and routes the unit on.
-    const recorded = await humanDecisions.recordAnswer({
-      queueId: turn.queueId,
-      answer,
-      ...(notes === undefined ? {} : { notes }),
-      actorId
-    });
-    console.log(`${unitId} at ${turn.nodeId}: recorded ${recorded.outcome}`);
+    if (turn === undefined) {
+      console.error(`${unitId} is not waiting for a person; run decide.mjs alone to see who is`);
+      process.exitCode = 1;
+    } else if (answer === undefined) {
+      console.error(`${unitId} at ${turn.nodeId}: give an answer, one of ${turn.answers.join(" | ")}`);
+      process.exitCode = 1;
+    } else {
+      // Record the answer. The store checks it against turn.answers and
+      // stores what the node records: at a review, "accepted" as
+      // "accepted:composed", "rejected" as "rework" with the notes (or
+      // "rejected" in the last round). The engine then settles the turn and
+      // routes the unit on.
+      const recorded = await humanDecisions.recordAnswer({
+        queueId: turn.queueId,
+        answer,
+        ...(notes === undefined ? {} : { notes }),
+        actorId
+      });
+      console.log(`${unitId} at ${turn.nodeId}: recorded ${recorded.outcome}`);
+    }
   }
 } catch (error) {
   // A typo, or notes with an answer that takes none. Nothing was recorded.
@@ -1068,7 +1109,7 @@ node --env-file=.env worker.mjs --until-idle
 ```
 
 ```
-worker: principals local-model, cloud-model, worker
+worker: first-switchyard v1; principals local-model, cloud-model, worker
 u3       draft-answer::approval   -> approved
 u3       draft-answer             -> drafted
 u1       compose-reply::rework    -> composed
@@ -1113,7 +1154,7 @@ node --env-file=.env decide.mjs
 ```
 u1 at compose-reply::review: recorded accepted:composed
 u3 at compose-reply::review: recorded rework
-worker: principals local-model, cloud-model, worker
+worker: first-switchyard v1; principals local-model, cloud-model, worker
 u3       compose-reply::rework    -> composed
 u3 at compose-reply::review: recorded rejected
 nothing is waiting for a person
@@ -1213,9 +1254,26 @@ from `@scshafe/switchyard`.
 **Any body.** A code body is `(input, context)`; a model port is
 `invoke(input, binding, context)`. `input` is the **payload** of the turn's
 input artifact, already checked: at `is-question` a `ticket.v1`, `{ text }`.
-`context.nodeId` names the node and `context.inputArtifact` is
-`{ contractId, digest }` (no payload). A body returns
-`{ outcome, outputArtifact? }` (type `NodeTurnCompletion`):
+`context` (type `WorkerNodeTurnContext`) says which turn this is:
+
+| field | what it is |
+|---|---|
+| `nodeId`, `nodeRef` | the node, e.g. `compose-reply::rework` |
+| `unitId`, `queueId` | the unit, and this visit of it to the node |
+| `graph` | `{ graphId, version, digest }` of the version the unit runs on |
+| `inputArtifact` | `{ contractId, digest }` of the input (no payload) |
+| `attemptIndex` | 1 on the first try, 2 on the first retry, up to `maxAttempts` |
+| `attemptNumber`, `idempotencyKey` | this attempt's identity; a provider call can use the key to deduplicate |
+| `configuration` | the node's sealed configuration, when the graph declares one |
+| `signal` | an `AbortSignal`, only when the turn is run with one |
+
+`runWorker` does not hand its own `signal` to bodies: Ctrl-C stops it
+between passes and lets claimed turns finish. So under `worker.mjs`,
+`context.signal` is `undefined`; `real-model.mjs` still passes it to
+`fetch`, which accepts `undefined`, so the same port works under a runner
+that does pass one (`runNextUnitTurns({ ..., signal })`).
+
+A body returns `{ outcome, outputArtifact? }` (type `NodeTurnCompletion`):
 
 - `outcome` is one of the node's outcomes.
 - `outputArtifact` is `createArtifactEnvelope(contractId, payload)`, the
@@ -1271,7 +1329,172 @@ notes. It returns what `X` returns (a `reply.v1` with `composed`), and
 In JavaScript you can still name the types for your editor, e.g.
 `/** @param {import("@scshafe/switchyard").ReworkPayload} rework */`.
 
-## 11. Optional: a real model
+## 11. Change the graph
+
+A published graph version never changes: every unit admitted to it keeps
+running on exactly that sealed graph. To change the graph, you give it a new
+`version` and publish that. Units already admitted finish on their own
+version, so the worker keeps every version that still has units in flight.
+
+First leave a unit in flight on version 1: admit a message and run the
+worker, so that its reply waits for review:
+
+```sh
+node --env-file=.env admit.mjs u6 "Can I change my delivery address?"
+node --env-file=.env worker.mjs --until-idle
+```
+
+```
+admitted u6: queued at is-question
+worker: first-switchyard v1; principals local-model, cloud-model, worker
+u6       is-question              -> yes
+u6       draft-answer::approval   -> approved
+u6       draft-answer             -> drafted
+u6       compose-reply            -> composed
+```
+
+Now change the graph. Keep version 1 as it is, in a file of its own:
+
+```sh
+cp graph.mjs graph-v1.mjs
+```
+
+Never edit `graph-v1.mjs`: the worker needs it to seal to exactly the graph
+published as version 1, digest and all.
+
+In `graph.mjs`, bump the graph's `version` (the one next to `graphId`, not
+the binding's) and give the reply a third review round. Change these two
+lines (`-` the line as it is, `+` as it becomes):
+
+```diff
+   graphId: "first-switchyard",
+-  version: 1,
++  version: 2,
+```
+
+```diff
+-      review: { by: person, onReject: "terminal", maxRounds: 2 }
++      review: { by: person, onReject: "terminal", maxRounds: 3 }
+```
+
+Forget the first one and `admit.mjs` refuses the changed graph: version 1 is
+already published, with other content:
+
+```
+graph first-switchyard v1 is already published with other content; bump version in graph.mjs
+```
+
+Then add version 1 to `versions.mjs`, so that the worker still runs u6.
+Replace the file with:
+
+```js
+// versions.mjs: every version of the graph that still has units in flight.
+// A unit runs to its end on the version it was admitted to, so the worker
+// needs all of these, not only the current one. Step 11 adds a version.
+import { graph } from "./graph.mjs";
+import { graph as v1 } from "./graph-v1.mjs";
+
+// The current version (the one admit.mjs admits to) first.
+export const graphs = [graph, v1];
+```
+
+Admit a new message. `admit.mjs` publishes version 2 and admits the unit to
+it; new units always go to the current `graph.mjs`:
+
+```sh
+node --env-file=.env admit.mjs u7 "Where is my parcel?"
+```
+
+```
+admitted u7: queued at is-question
+```
+
+Send u6's reply back with a note, and run the worker. u6 is reworked on
+version 1, u7 runs on version 2:
+
+```sh
+node --env-file=.env decide.mjs u6 rejected "Mention the form on our website."
+node --env-file=.env worker.mjs --until-idle
+node --env-file=.env decide.mjs
+```
+
+```
+u6 at compose-reply::review: recorded rework
+worker: first-switchyard v2, first-switchyard v1; principals local-model, cloud-model, worker
+u7       is-question              -> yes
+u6       compose-reply::rework    -> composed
+u7       draft-answer::approval   -> approved
+u7       draft-answer             -> drafted
+u7       compose-reply            -> composed
+u6 at compose-reply::review, answers: accepted | rejected
+  round 2 of 2:
+  Hello,
+  
+  Thanks for asking. (echo) Can I change my delivery address?
+  
+  (Revised after review: Mention the form on our website.)
+  
+  -- The team
+u7 at compose-reply::review, answers: accepted | rejected
+  round 1 of 3:
+  Hello,
+  
+  Thanks for asking. (echo) Where is my parcel?
+  
+  -- The team
+```
+
+u6 is in round 2 of 2, as version 1 says; u7 is in round 1 of 3. Accept
+both, and look at which version each unit ran on:
+
+```sh
+node --env-file=.env decide.mjs u6 accepted
+node --env-file=.env decide.mjs u7 accepted
+docker exec -e PGPASSWORD=watcher first-switchyard-db \
+  psql -h 127.0.0.1 -U watcher -d postgres \
+  -c "SELECT unit_id, graph_version, status, final_outcome FROM switchyard.unit_status ORDER BY unit_id;"
+```
+
+```
+u6 at compose-reply::review: recorded accepted:composed
+u7 at compose-reply::review: recorded accepted:composed
+ unit_id | graph_version |  status   |   final_outcome   
+---------+---------------+-----------+-------------------
+ u1      |             1 | completed | accepted:composed
+ u2      |             1 | completed | denied
+ u3      |             1 | completed | rejected
+ u4      |             1 | completed | no
+ u5      |             1 | completed | accepted:composed
+ u6      |             1 | completed | accepted:composed
+ u7      |             2 | completed | accepted:composed
+(7 rows)
+```
+
+Had `versions.mjs` still listed only version 2, this worker (on switchyard
+2.3.0) would still have claimed u6's rework, run it with ports that do not
+know version 1, and failed it for good with
+`immutable_stage_contract_rejected` (see [Troubleshooting](#troubleshooting)).
+
+A version can leave `versions.mjs` once none of its units is open. Units
+waiting for a person count: after the person answers, the worker runs them
+again (a rework, or the next node). This counts them:
+
+```sh
+docker exec -e PGPASSWORD=watcher first-switchyard-db \
+  psql -h 127.0.0.1 -U watcher -d postgres -tA \
+  -c "SELECT count(*) FROM switchyard.unit_status WHERE graph_version = 1 AND status IN ('active', 'awaiting_human');"
+```
+
+```
+0
+```
+
+At 0 you may set `graphs` back to `[graph]` and delete `graph-v1.mjs`; a
+unit admitted to version 1 later would need it back (only a program that
+still admits to version 1 would do that). Keeping old versions listed costs
+nothing.
+
+## 12. Optional: a real model
 
 The fake model stands where a real one goes. Any OpenAI-compatible server
 works (llama-swap, llama.cpp's server, vLLM, Ollama, a hosted API).
@@ -1385,6 +1608,32 @@ receipt is `unavailableUsageReceipt`, charging 1 token and 1 micro-USD like
 the fake model. Validation accepts a charge of 0 only on a receipt that
 carries observed counts.
 
+`realModel` has one prompt per model node of this graph and fails any other
+node with `no_prompt_for_node`, for good (the error is not retryable). So
+when you add a model node, give it a prompt here as well as a rule in
+`models.mjs`: another `binaryQuestion` (its node id, answering `yes`, `no`
+or `unsure`), or a model reviewer. With
+`review: { by: { kind: "model", binding: BINDINGS.small, principal: { id: PRINCIPALS.local } }, ... }`
+on `compose-reply`, the node `compose-reply::review` is a model node that
+receives the review request and answers `accepted` or `rejected`, with notes
+for a rejection. Its branch in `invoke` could read (import `reviewNotes` from
+`@scshafe/switchyard`):
+
+```js
+    } else if (context.nodeId === "compose-reply::review") {
+      // The review request: the reply under review is input.output.payload.
+      reply = await chat(model, "Answer with exactly one word: accepted or rejected.",
+        `Is this reply to a customer polite and on topic?\n\n${input.output.payload.body}`,
+        context.signal);
+      completion = /\baccepted\b/i.test(reply.text)
+        ? { outcome: "accepted" }
+        : { outcome: "rejected", outputArtifact: reviewNotes("Please make the reply more polite and on topic.") };
+    } else {
+```
+
+`withApprovalReviewPorts` turns that answer into what the review node
+stores, as it does for a person.
+
 `worker.mjs` uses it when `MODEL_BASE_URL` is set. With a llama-swap on this
 machine that serves `qwen2.5-7b`:
 
@@ -1398,7 +1647,7 @@ binding in `graph.mjs` names a model by id and digest, and the port decides
 how to reach it. If the server is down or answers with an error, the turn is
 retried (`maxAttempts: 3`) and then fails (`failed: model_unreachable`
 from the worker). `watch.sql` then shows the unit and that turn as `failed`;
-the `error_code` column of `switchyard.turns` says why.
+[When a unit fails](#when-a-unit-fails) shows how to find out why.
 
 (This adapter was checked against a stub OpenAI-compatible server, with and
 without reported usage, and against no server at all; the author's
@@ -1426,8 +1675,12 @@ llama-swap could not load a model at the time.)
   `binaryQuestion` gives it exactly that, and sends `unsure` to someone who
   can decide (a bigger model, a person, or both in order).
 - **The graph is sealed.** Change a node, an edge or a model binding and the
-  digest changes. Publish that as a new graph version; units already running
-  finish on the version they were admitted to.
+  digest changes, so it is a new graph version: bump `version` and publish
+  it (step 11). A published version never changes, and a unit finishes on
+  the version it was admitted to. That takes a worker that still has the
+  version: `versions.mjs` lists every version with units in flight, and the
+  worker passes that list to both `runWorker` and `withApprovalReviewPorts`.
+  Keep a version there until none of its units is open.
 
 Where to go next (all in the private repositories):
 [the approval and review design](https://github.com/scshafe/switchyard/blob/main/docs/DESIGN-APPROVAL-REVIEW.md),
@@ -1435,6 +1688,59 @@ the [switchyard README](https://github.com/scshafe/switchyard/blob/main/README.m
 for joins, declared outputs and the other helpers, and the
 [switchyard-postgres README](https://github.com/scshafe/switchyard-postgres/blob/main/README.md)
 for the schema and operating notes.
+
+## When a unit fails
+
+A turn fails for good when its body throws an error that is not retryable,
+or a retryable one `maxAttempts` times. The worker prints
+`failed: <error code>`; in `watch.sql` the turn's `status` is `failed`, and
+once nothing else of the unit is open, so is the unit's. Nothing routes on
+from a failed turn.
+
+switchyard 2.3.0 and switchyard-postgres 0.2.0 have **no way to retry or
+retire a failed unit**. Evidence is append-only, and the runtime role cannot
+change a row: the failed turn stays failed, and the unit stays in the record
+as `failed`. It holds no queue place and needs no clean-up. To try the
+message again, fix the cause (a rule, a prompt, `versions.mjs`), then admit
+the same text under a new unit id, e.g. `u6-retry`; it starts from the entry
+node of the current version.
+
+This lists the failed units, where and why they failed, and their text:
+
+<!-- file: failed.sql -->
+```sql
+-- failed.sql: the units that failed, where and why, and the text they had.
+-- Run as the read-only role (a member of switchyard_reader).
+SELECT status.unit_id, status.graph_version AS version, failure.node_id,
+       failure.error_code, failure.error_message,
+       seed.envelope::jsonb #>> '{payload,text}' AS text
+FROM switchyard.unit_status AS status
+JOIN switchyard.turn_failures AS failure
+  ON failure.unit_id = status.unit_id AND failure.terminal
+JOIN switchyard.units AS unit ON unit.unit_id = status.unit_id
+JOIN switchyard.artifacts AS seed
+  ON seed.contract_id = unit.seed_contract_id
+ AND seed.artifact_digest = unit.seed_artifact_digest
+WHERE status.status = 'failed'
+ORDER BY failure.failed_at;
+```
+
+```sh
+docker exec -i -e PGPASSWORD=watcher first-switchyard-db \
+  psql -h 127.0.0.1 -U watcher -d postgres < failed.sql
+```
+
+```
+ unit_id | version | node_id | error_code | error_message | text 
+---------+---------+---------+------------+---------------+------
+(0 rows)
+```
+
+None failed in this guide. `error_message` is the failure's message, e.g.
+`node compose-reply::rework completion: node compose-reply::rework outcome
+"composed" must carry switchyard.review-request.v1 (got reply.v1)`. For some
+failures on switchyard 2.3.0 it only repeats the code
+(see [Troubleshooting](#troubleshooting)).
 
 ## Troubleshooting
 
@@ -1476,9 +1782,18 @@ access errors a new reader may meet.
   switchyard's in-memory store logic, and writes the result back in the same
   transaction, so the engine's checks and messages are the same for every
   store.
-- **`unit u3 is not waiting for a person`** from `decide.mjs`: nothing is
-  pending for that unit. Run `node --env-file=.env decide.mjs` to see what
-  is, or run the worker first.
+- **`graph first-switchyard v1 is already published with other content;
+  bump version in graph.mjs`** from `admit.mjs`: you changed `graph.mjs`
+  but not its `version`. In your own code the error is
+  `GraphPublicationConflictError: publishGraph: graph first-switchyard@1 is
+  already published with digest ...; requested digest ... conflicts with
+  immutable evidence`. Bump `version` and keep the old version for the
+  worker ([step 11](#11-change-the-graph)).
+- **`u3 is not waiting for a person; run decide.mjs alone to see who is`**
+  from `decide.mjs`: nothing is pending for that unit id (or there is no
+  such unit). Run `node --env-file=.env decide.mjs` to see what is, or run
+  the worker first. **`u3 at is-question.escalate-1: give an answer, one of
+  yes | no`**: the answer argument is missing.
 - **`"accept" is not an answer here (node compose-reply::review of unit u1;
   valid answers: accepted, rejected)`** from `decide.mjs`: a typo. Nothing
   was recorded; answer with one of the answers it names (the list
@@ -1488,9 +1803,31 @@ access errors a new reader may meet.
   worker turn: your body or model port returned an outcome the node does not
   have. The message lists the ones it has.
 - **A turn prints `failed: immutable_stage_contract_rejected`** at
-  `compose-reply` or `draft-answer`: the ports were not wrapped with
-  `withApprovalReviewPorts`, or a body returned an artifact with the wrong
-  contract (e.g. `compose-reply` must return a `reply.v1`).
+  `compose-reply`, `compose-reply::rework` or a model reviewer
+  (`compose-reply::review`): what the node returned was not turned into a
+  review record. `error_message` in `switchyard.turn_failures`
+  ([When a unit fails](#when-a-unit-fails)) says what it should have
+  carried, e.g. `outcome "composed" must carry
+  switchyard.review-request.v1 (got reply.v1)`. The usual cause is a graph
+  change: the unit is on a version that `versions.mjs` no longer lists, so
+  `withApprovalReviewPorts` did not wrap its turn (switchyard 2.3.0 still
+  claims such units). Keep every version with open units in `versions.mjs`
+  ([step 11](#11-change-the-graph)). Otherwise the ports were not wrapped
+  with `withApprovalReviewPorts` at all, or a body returned an artifact
+  with the wrong contract (e.g. `compose-reply` must return a `reply.v1`).
+  The failed unit stays failed; admit its text again.
+- **A turn prints `failed: immutable_configuration_rejected`** at a model
+  node: most often `fakeModelPort` has no rule for that node, e.g. a node
+  you just added. Add a rule under its node id in `models.mjs` (for a
+  `binaryQuestion` the id you gave it; for a model approver or reviewer
+  `X::approval` or `X::review`). On switchyard 2.3.0 this failure carries
+  nothing but the code: the worker's output, `result.value.errorCode`,
+  `turns.error_code` and even `turn_failures.error_message` all say
+  `immutable_configuration_rejected`. The same code also comes from a body
+  that throws an `Error` whose message mentions a schema, contract, digest
+  or binding; `error_message` then holds that message.
+- **`failed: no_prompt_for_node`** with `MODEL_BASE_URL` set: `realModel`
+  has no prompt for that node ([step 12](#12-optional-a-real-model)).
 - **`model node ... must return exactly one usage receipt`**: your own model
   port returned no `usage`, or more than one receipt.
 - **`usage receipt: unavailable receipt must charge at least 1 token`** (or
