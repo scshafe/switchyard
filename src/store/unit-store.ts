@@ -41,7 +41,7 @@ export {
 } from "../execute/turn-evidence.js";
 
 export const SWITCHYARD_UNIT_SCHEMA_VERSION =
-  "mission-pipeline-unit.v2" as const;
+  "switchyard-unit.v2" as const;
 export {
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
   SWITCHYARD_ENGINE_PRINCIPAL_ID

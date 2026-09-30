@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://mission-pipeline.local/agent/agent-step-result.v1.schema.json",
+  "$id": "https://switchyard.local/agent/agent-step-result.v1.schema.json",
   "title": "AgentStepResult v1",
   "description": "What an AgentStepExecutor returns for one agent step. `usage` is a REQUIRED array of usage-receipt.v1 (design critique finding 3: required-receipts-array wins — it fixes the silent-zero drift both repos carried). It MAY be empty ONLY for status infra_error (the invocation never usably reached a provider); any status that reached a provider records receipts, each floor-enforced by the usage-receipt validator. `output` is present exactly for status completed.",
   "type": "object",

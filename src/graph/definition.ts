@@ -31,10 +31,10 @@ export type SwitchyardNodeKind = (typeof SWITCHYARD_NODE_KINDS)[number];
 
 /** Engine-only identity; authored nodes can never claim synthetic authority. */
 export const SWITCHYARD_ENGINE_PRINCIPAL_ID =
-  "mission_pipeline.engine" as const;
+  "switchyard.engine" as const;
 /** Output contract emitted by an engine-synthesized unsatisfiable join. */
 export const JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT =
-  "mission-pipeline.join-unsatisfiable.v1" as const;
+  "switchyard.join-unsatisfiable.v1" as const;
 
 export const NODE_TURN_IDEMPOTENCY = "per (unitId, nodeId, attemptNumber)" as const;
 export const NODE_TURN_RETRY_TAXONOMY = "retryable vs terminal, as v1 durable-stage" as const;

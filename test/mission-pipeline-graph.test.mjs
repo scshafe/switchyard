@@ -731,7 +731,7 @@ test("N3 guard bites: authored nodes cannot claim the reserved engine principal"
   reserved.nodes[0].principal.id = SWITCHYARD_ENGINE_PRINCIPAL_ID;
   assert.throws(
     () => sealAndCompile(reserved),
-    /Graph node filter cannot use reserved engine principal mission_pipeline\.engine/
+    /Graph node filter cannot use reserved engine principal switchyard\.engine/
   );
 });
 

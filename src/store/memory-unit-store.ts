@@ -227,7 +227,7 @@ export interface MemoryUnitStoreOptions {
 }
 
 export const MEMORY_UNIT_STORE_STATE_SNAPSHOT_SCHEMA_VERSION =
-  "mission-pipeline-memory-unit-store-state.v1" as const;
+  "switchyard-memory-unit-store-state.v1" as const;
 
 export interface MemoryUnitStoreStateSnapshot {
   readonly schemaVersion: typeof MEMORY_UNIT_STORE_STATE_SNAPSHOT_SCHEMA_VERSION;
