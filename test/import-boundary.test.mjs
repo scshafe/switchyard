@@ -65,6 +65,10 @@ test("v2 graph core transitively depends only on contracts and validation primit
     "src/graph/edge.ts",
     "src/graph/definition.ts",
     "src/graph/compile.ts",
+    "src/graph/budget.ts",
+    "src/graph/goals.ts",
+    "src/graph/display.ts",
+    "src/graph/diff.ts",
     "src/contracts/artifact.ts",
     "src/contracts/digest.ts",
     "src/internal/guards.ts",
@@ -116,6 +120,7 @@ test("v2 graph core transitively depends only on contracts and validation primit
 
 test("v2 turn core cannot reach v1 traversal/store/gate or host provider modules", () => {
   const allowedFiles = new Set([
+    "src/execute/declared-failures.ts",
     "src/execute/failure.ts",
     "src/execute/ports.ts",
     "src/execute/turn.ts",

@@ -63,6 +63,10 @@ try {
     import * as root from "@scshafe/switchyard";
     import { createGraphDefinition } from "@scshafe/switchyard/graph/definition";
     import { compileGraph } from "@scshafe/switchyard/graph/compile";
+    import { projectGraphDisplay } from "@scshafe/switchyard/graph/display";
+    import { graphDefinitionDiff } from "@scshafe/switchyard/graph/diff";
+    import { createJoinInputArtifact, validateJoinInputArtifact } from "@scshafe/switchyard/store/join-input";
+    import { withDeclaredFailureOutcomes } from "@scshafe/switchyard/execute/declared-failures";
     import { nodeTurnIdempotencyKey } from "@scshafe/switchyard/execute/turn";
     import { runClaimedUnitTurn } from "@scshafe/switchyard/execute/unit-runner";
     import { validateModelStageBinding } from "@scshafe/switchyard/model/binding";
@@ -98,8 +102,23 @@ try {
     if (root.compileGraph !== compileGraph || typeof runClaimedUnitTurn !== "function") {
       throw new Error("v2 root export mismatch");
     }
+    const display = projectGraphDisplay(compileGraph(graph));
+    const diff = graphDefinitionDiff(graph, graph);
+    if (display.graph.digest !== graph.graphDigest || !diff.empty
+      || diff.sealed.digest !== graph.graphDigest || diff.candidate.digest !== graph.graphDigest
+      || root.projectGraphDisplay !== projectGraphDisplay || root.graphDefinitionDiff !== graphDefinitionDiff
+      || "requireCompiledGraph" in root) {
+      throw new Error("packed graph projection export or identity mismatch");
+    }
     if (typeof nodeTurnIdempotencyKey !== "function" || typeof validateModelStageBinding !== "function") {
       throw new Error("v2 execution/model export missing");
+    }
+    if (root.createJoinInputArtifact !== createJoinInputArtifact
+      || root.validateJoinInputArtifact !== validateJoinInputArtifact
+      || root.withDeclaredFailureOutcomes !== withDeclaredFailureOutcomes
+      || root.JOIN_INPUT_ARTIFACT_CONTRACT !== "switchyard.join-input.v1"
+      || "declaredFailureRecoveryUsage" in root || "isDeclaredFailureUnresolved" in root) {
+      throw new Error("P7/P8 public export boundary mismatch");
     }
     if (AGENT_STEP_REQUEST_SCHEMA_VERSION !== "agent-step-request.v1" || typeof compileGateFlow !== "function") {
       throw new Error("agent/gate helper export missing");
@@ -143,6 +162,14 @@ try {
       GRAPH_VALIDATION_LIMITS,
       compileGraph,
       createGraphDefinition,
+      projectGraphDisplay,
+      graphDefinitionDiff,
+      createJoinInputArtifact,
+      validateJoinInputArtifact,
+      withDeclaredFailureOutcomes,
+      JOIN_INPUT_ARTIFACT_CONTRACT,
+      type JoinInputPayload,
+      type DeclaredFailureModelPort,
       nodeExecutionFingerprint,
       nodeTurnIdempotencyKey,
       recordHumanNodeDecision,
@@ -152,6 +179,8 @@ try {
       type CompiledGraph,
       type GraphDefinition,
       type GraphDefinitionDraft,
+      type GraphDisplayProjection,
+      type GraphDefinitionDiff,
       type SwitchyardNode,
       type ModelBindingResolver,
       type OutcomePredicate,
@@ -177,6 +206,17 @@ try {
     const draft = undefined as unknown as GraphDefinitionDraft;
     const graph = undefined as unknown as GraphDefinition;
     const compiled = undefined as unknown as CompiledGraph;
+    const display: GraphDisplayProjection = projectGraphDisplay(compiled);
+    const diff: GraphDefinitionDiff = graphDefinitionDiff(graph, graph);
+    const joinInput: JoinInputPayload = validateJoinInputArtifact(graph,
+      createJoinInputArtifact(graph, { unitId: "fixture", nodeId: "join", accepted: [] })).payload;
+    const modelFailurePort = undefined as unknown as DeclaredFailureModelPort;
+    // @ts-expect-error model failure recovery requires an explicit receipt policy
+    withDeclaredFailureOutcomes(modelFailurePort, { kind: "model", outcomes: {}, artifact: () => { throw new Error("fixture"); } });
+    // @ts-expect-error composition is a closed optional vocabulary
+    const wrongJoin: import("@scshafe/switchyard").SwitchyardJoin = { inbound: ["edge"], require: "all", compose: "merge" };
+    void joinInput;
+    void JOIN_INPUT_ARTIFACT_CONTRACT;
     const node = undefined as unknown as SwitchyardNode;
     const outcomes = undefined as unknown as OutcomeVocabulary;
     const predicate = undefined as unknown as OutcomePredicate;
@@ -189,6 +229,10 @@ try {
     const executor = undefined as unknown as AgentStepExecutor;
     // @ts-expect-error sealed graph arrays are readonly
     graph.nodes.push(node);
+    // @ts-expect-error display topology is readonly
+    display.nodes[0].depth = 1;
+    // @ts-expect-error definition diff arrays are readonly
+    diff.nodes.pop();
     // @ts-expect-error node bodies receive no store capability
     context.store.prepareTurnAttempt({});
     // @ts-expect-error execution stores cannot admit units

@@ -1,6 +1,6 @@
 {
   "name": "@scshafe/switchyard",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
@@ -46,22 +46,25 @@
   },
   "sideEffects": false,
   "scripts": {
-    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "build": "pnpm run clean && tsc -p tsconfig.json && tsc -p packages/switchyard-graphpaper/tsconfig.json",
     "clean": "node scripts/clean.mjs",
     "test": "node --test test/*.test.mjs",
     "test:v1-deletion": "node scripts/check-v1-deletion.mjs",
     "test:payload": "node scripts/check-package-payload.mjs",
     "test:release-artifact": "node scripts/check-release-artifact.mjs",
     "test:install": "node scripts/check-pack-install.mjs",
+    "test:graphpaper-sdk": "node scripts/check-graphpaper-sdk.mjs",
     "test:fresh-clone": "node scripts/check-fresh-clone.mjs",
-    "check": "pnpm run test:v1-deletion && pnpm run build && pnpm run test && pnpm run test:payload && pnpm run test:release-artifact && pnpm run test:install",
+    "check": "pnpm run test:v1-deletion && pnpm run build && pnpm run test && pnpm run test:payload && pnpm run test:release-artifact && pnpm run test:install && pnpm run test:graphpaper-sdk",
     "verify": "pnpm run clean && pnpm run check",
     "prepack": "pnpm run build",
     "prepublishOnly": "pnpm run verify",
     "release:manifest": "node scripts/write-release-manifest.mjs"
   },
   "devDependencies": {
+    "@scshafe/graphpaper": "0.5.2",
     "@types/node": "^22.15.0",
+    "elkjs": "0.10.2",
     "typescript": "^5.8.3"
   }
 }

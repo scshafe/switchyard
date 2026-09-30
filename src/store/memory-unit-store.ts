@@ -16,7 +16,7 @@ import {
   type ArtifactEnvelope,
   type ArtifactRef
 } from "../contracts/artifact.js";
-import { digest } from "../contracts/digest.js";
+import { canonicalJson, digest } from "../contracts/digest.js";
 import { validateUsageReceipt, type UsageReceipt } from "../contracts/usage-receipt.js";
 import { compileGraph, type CompiledGraph } from "../graph/compile.js";
 import { snapshotGraphValidationData } from "../graph/limits.js";
@@ -82,6 +82,7 @@ import {
 import type { GraphStore } from "./graph-store.js";
 import { validateGraphDefinitionRef } from "./graph-store.js";
 import { MemoryGraphStore } from "./memory-graph-store.js";
+import { createJoinInputArtifact, validateJoinInputArtifact } from "./join-input.js";
 import {
   evaluateJoinThreshold,
   matchingOutcomeEdges
@@ -1045,6 +1046,217 @@ function validateSnapshotOutboxEvent(value: unknown, label: string): UnitOutboxE
   }, label);
 }
 
+/** Envelope inputs are derived evidence, never trusted just because re-sealed. */
+function validateSnapshotEnvelopeJoins(state: MemoryState, label: string): void {
+  for (const [unitId, graph] of state.unitGraphs) {
+    // Hydration already validated and compiled these frozen graphs. Ordinary
+    // graphs need no additional envelope-provenance compilation or traversal.
+    if (!graph.nodes.some((node) => node.join?.compose === "envelope")) continue;
+    const compiled = compileGraph(graph);
+    const records = state.journey.get(unitId) ?? [];
+    for (const node of compiled.nodes) {
+      if (node.join?.compose !== "envelope") continue;
+      const progress = state.joins.get(joinKey(unitId, node.nodeId));
+      const queues = [...state.queues.values()].filter((queue) =>
+        queue.unitId === unitId && queue.nodeId === node.nodeId
+      );
+      if (progress === undefined) {
+        if (queues.length > 0 || records.some((record) =>
+          record.kind === "turn_settled"
+          || record.kind === "join_unsatisfiable"
+          || (record.kind === "turn_failed" && record.terminal)
+        )) throw new Error(`${label}: envelope join lacks retained progress`);
+        continue;
+      }
+      const accepted = progress.inbound.flatMap((entry) => entry.state === "offered" ? [entry.offer] : []);
+      const recordedAccepted = records.flatMap((record) =>
+        record.kind !== "turn_settled" && record.kind !== "join_unsatisfiable" ? [] : record.routing.flatMap((effect) =>
+          effect.kind !== "join_offer" || effect.targetNodeId !== node.nodeId || effect.disposition !== "accepted" ? [] : [{
+            edgeId: effect.edgeId,
+            sourceNodeId: record.nodeId,
+            ...(record.kind === "turn_settled" ? { sourceQueueId: record.queueId } : {}),
+            sourceEvidenceDigest: record.kind === "turn_settled" ? record.settlementDigest : record.syntheticOutcomeDigest,
+            artifact: effect.artifact,
+            offeredAt: record.settledAt
+          }]
+        )
+      );
+      if (
+        recordedAccepted.length !== accepted.length
+        || recordedAccepted.some((offer) => !accepted.some((item) => canonicalJson(item) === canonicalJson(offer)))
+      ) {
+        throw new Error(`${label}: envelope join accepted progress differs from journey offers`);
+      }
+      const acceptedSequences: number[] = [];
+      const embedded = accepted.map((offer) => {
+        const edge = compiled.edgesById[offer.edgeId];
+        const source = compiled.nodesById[offer.sourceNodeId];
+        if (edge?.from !== offer.sourceNodeId || source === undefined) {
+          throw new Error(`${label}: envelope join offer source conflicts with sealed edge`);
+        }
+        const retained = state.artifacts.get(artifactKey(offer.artifact));
+        if (retained === undefined) {
+          throw new Error(`${label}: envelope join offer artifact is not retained`);
+        }
+        // Retention dedupes by contract/digest. Each offer preserves its own
+        // optional bytes field even when another wrapper was retained first.
+        const offeredArtifact = validateArtifactEnvelope({ ...offer.artifact, payload: retained.payload });
+        let evidence: UnitTurnJourneyRecord | JoinUnsatisfiableJourneyRecord | undefined;
+        if (offer.sourceQueueId !== undefined) {
+          const sourceQueue = state.queues.get(offer.sourceQueueId);
+          const settlement = state.settlements.get(offer.sourceQueueId);
+          if (
+            sourceQueue?.unitId !== unitId
+            || sourceQueue.nodeId !== offer.sourceNodeId
+            || !sameNodeRef(sourceQueue.nodeRef, source.ref)
+            || settlement?.unitId !== unitId
+            || settlement.nodeId !== offer.sourceNodeId
+            || settlement.settlementDigest !== offer.sourceEvidenceDigest
+            || settlement.settledAt !== offer.offeredAt
+          ) {
+            throw new Error(`${label}: envelope join source queue/settlement provenance mismatch`);
+          }
+          const effective = settlement.completion.outputArtifact ?? sourceQueue.inputArtifact;
+          if (
+            canonicalJson(artifactRef(effective)) !== canonicalJson(offer.artifact)
+            || canonicalJson(effective.payload) !== canonicalJson(retained.payload)
+            || !matchingOutcomeEdges([edge], settlement.completion.outcome, settlement.completion.outputArtifact).length
+          ) {
+            throw new Error(`${label}: envelope join offer differs from source completion/routing`);
+          }
+          evidence = records.find((record): record is UnitTurnJourneyRecord =>
+            record.kind === "turn_settled"
+            && record.queueId === offer.sourceQueueId
+            && record.nodeId === offer.sourceNodeId
+            && record.settlementDigest === offer.sourceEvidenceDigest
+          );
+        } else {
+          evidence = records.find((record): record is JoinUnsatisfiableJourneyRecord =>
+            record.kind === "join_unsatisfiable"
+            && record.nodeId === offer.sourceNodeId
+            && record.syntheticOutcomeDigest === offer.sourceEvidenceDigest
+          );
+          if (
+            source.join === undefined
+            || retained.contractId !== JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT
+            || evidence === undefined
+            || canonicalJson(evidence.artifact) !== canonicalJson(offer.artifact)
+            || !matchingOutcomeEdges([edge], "join_unsatisfiable", retained).length
+          ) {
+            throw new Error(`${label}: envelope join synthetic source provenance mismatch`);
+          }
+          const sourceProgress = state.joins.get(joinKey(unitId, source.nodeId));
+          const sourceAccepted = sourceProgress?.inbound.flatMap((entry) => entry.state === "offered" ? [entry.offer] : []) ?? [];
+          const sourceImpossible = sourceProgress?.inbound.flatMap((entry) => entry.state === "impossible" ? [entry.impossible] : []) ?? [];
+          const expectedSyntheticPayload = {
+            schemaVersion: JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
+            unitId,
+            graph: compiled.graph,
+            nodeId: source.nodeId,
+            require: source.join.require,
+            accepted: sourceAccepted,
+            impossible: sourceImpossible,
+            causeEvidenceDigest: evidence.causeEvidenceDigest,
+            resolvedAt: evidence.settledAt
+          };
+          if (
+            sourceProgress?.status !== "unsatisfiable"
+            || canonicalJson(retained.payload) !== canonicalJson(expectedSyntheticPayload)
+            || evidence.syntheticOutcomeDigest !== digest({
+              unitId,
+              graphDigest: graph.graphDigest,
+              nodeId: source.nodeId,
+              outcome: "join_unsatisfiable",
+              accepted: sourceAccepted.map((item) => item.edgeId),
+              impossible: sourceImpossible.map((item) => item.edgeId),
+              causeEvidenceDigest: evidence.causeEvidenceDigest,
+              resolvedAt: evidence.settledAt,
+              artifactDigest: retained.digest
+            })
+          ) {
+            throw new Error(`${label}: envelope join synthetic artifact identity mismatch`);
+          }
+        }
+        if (
+          evidence === undefined
+          || evidence.settledAt !== offer.offeredAt
+          || !evidence.routing.some((effect) =>
+            effect.kind === "join_offer"
+            && effect.targetNodeId === node.nodeId
+            && effect.edgeId === offer.edgeId
+            && effect.disposition === "accepted"
+            && canonicalJson(effect.artifact) === canonicalJson(offer.artifact)
+          )
+        ) {
+          throw new Error(`${label}: envelope join offer lacks accepted journey evidence`);
+        }
+        acceptedSequences.push(evidence.sequence);
+        return { ...offer, artifact: offeredArtifact };
+      });
+      const threshold = evaluateJoinThreshold(node.join.require, progress.inbound.map(({ edgeId, state: edgeState }) => ({ edgeId, state: edgeState })));
+      if (progress.status !== "queued") {
+        if (
+          queues.length > 0
+          || threshold.thresholdSatisfied
+          || (progress.status === "unsatisfiable") !== threshold.unsatisfiable
+        ) {
+          throw new Error(`${label}: unresolved envelope join conflicts with retained queues/threshold`);
+        }
+        continue;
+      }
+      const queue = state.queues.get(progress.queueId!);
+      const expectedProvenance = {
+        joinNodeId: node.nodeId,
+        selectedEdgeId: accepted[0]?.edgeId,
+        accepted
+      };
+      if (
+        !threshold.thresholdSatisfied
+        || queues.length !== 1
+        || queue === undefined
+        || queue.join === undefined
+        || progress.selectedEdgeId !== accepted[0]?.edgeId
+        || canonicalJson(queue.join) !== canonicalJson(expectedProvenance)
+        || canonicalJson(queue.inboundEdgeIds) !== canonicalJson(accepted.map((offer) => offer.edgeId))
+      ) {
+        throw new Error(`${label}: envelope join queue/progress provenance mismatch`);
+      }
+      const resolution = records.find((record) =>
+        record.kind !== "unit_admitted" && record.routing.some((effect) =>
+          effect.kind === "join_queued"
+          && effect.targetNodeId === node.nodeId
+          && effect.queueId === queue.queueId
+          && effect.enqueueSequence === queue.enqueueSequence
+          && effect.selectedEdgeId === progress.selectedEdgeId
+          && canonicalJson(effect.acceptedEdgeIds) === canonicalJson(queue.inboundEdgeIds)
+        )
+      );
+      const resolutionDigest = resolution?.kind === "turn_settled"
+        ? resolution.settlementDigest
+        : resolution?.kind === "join_unsatisfiable" ? resolution.syntheticOutcomeDigest : undefined;
+      if (
+        resolution === undefined
+        || resolutionDigest !== queue.sourceEvidenceDigest
+        || (resolution.kind !== "turn_settled" && resolution.kind !== "join_unsatisfiable")
+        || resolution.settledAt !== queue.queuedAt
+        || acceptedSequences.some((sequence) => sequence > resolution.sequence)
+      ) {
+        throw new Error(`${label}: envelope join queue lacks matching resolution evidence`);
+      }
+      const actual = validateJoinInputArtifact(graph, queue.inputArtifact);
+      const expected = createJoinInputArtifact(graph, { unitId, nodeId: node.nodeId, accepted: embedded });
+      const retainedInput = state.artifacts.get(artifactKey(actual));
+      if (
+        canonicalJson(actual) !== canonicalJson(expected)
+        || retainedInput === undefined
+        || canonicalJson(retainedInput) !== canonicalJson(expected)
+      ) {
+        throw new Error(`${label}: envelope join input differs from retained accepted provenance`);
+      }
+    }
+  }
+}
+
 function validateSnapshotDeadLetter(value: unknown, label: string): UnitDeadLetterRecord {
   const keys = [
     "deadLetterId", "unitId", "queueId", "nodeId", "attemptNumber", "attemptIndex",
@@ -1436,6 +1648,8 @@ function hydrateMemoryState(value: unknown): MemoryState {
       }
     }
   }
+
+  validateSnapshotEnvelopeJoins(state, label);
 
   const outboxIds = new Set<string>();
   snapshotArray(snapshot.outbox, `${label}.outbox`).forEach((entry, index) => {
@@ -2740,6 +2954,22 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
           `MemoryUnitStore invariant: join ${node.nodeId} selected missing artifact ${selected.artifact.digest}`
         );
       }
+      const inputArtifact = node.join.compose === "envelope"
+        ? createJoinInputArtifact(graph, {
+            unitId: input.unitId,
+            nodeId: node.nodeId,
+            accepted: accepted.map((offer) => {
+              const artifact = artifactByRef(offer.artifact);
+              if (artifact === undefined) {
+                throw new Error(`MemoryUnitStore invariant: join ${node.nodeId} accepted missing artifact ${offer.artifact.digest}`);
+              }
+              return { ...offer, artifact: validateArtifactEnvelope({ ...offer.artifact, payload: artifact.payload }) };
+            })
+          })
+        : selectedArtifact;
+      if (node.join.compose === "envelope") {
+        plannedArtifacts.set(artifactKey(inputArtifact), inputArtifact);
+      }
       const provenance = deepFrozenClone({
         joinNodeId: node.nodeId,
         selectedEdgeId: selected.edgeId,
@@ -2747,7 +2977,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
       }, `join ${node.nodeId} queue provenance`);
       const queue = addQueue(
         node,
-        selectedArtifact,
+        inputArtifact,
         at,
         sourceEvidenceDigest,
         accepted.map((offer) => offer.edgeId),
@@ -2847,7 +3077,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
             }, `join ${target.nodeId} duplicate offer effect`));
             continue;
           }
-          if (event.effectiveArtifact.contractId !== target.input) {
+          if (target.join.compose !== "envelope" && event.effectiveArtifact.contractId !== target.input) {
             throw new Error(
               `routing join target node ${target.nodeId} input contract mismatch on edge ${edgeId}: expected ${target.input}, got ${event.effectiveArtifact.contractId}`
             );

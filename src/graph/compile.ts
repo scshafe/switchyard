@@ -1,7 +1,10 @@
 // graph/compile.ts — compile a sealed v2 graph to frozen executor indexes.
 
 import {
+  declaredNodeOutput,
+  declaredNodeOutputs,
   graphDefinitionRef,
+  JOIN_INPUT_ARTIFACT_CONTRACT,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
   SWITCHYARD_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
@@ -27,6 +30,19 @@ export interface CompiledGraph {
   readonly outboundByNode: Readonly<Record<string, readonly Edge[]>>;
 }
 
+// The compiled shape omits description, so it cannot authenticate its digest
+// after a JSON round trip. Keep provenance private rather than trusting a
+// caller-supplied digest next to otherwise plausible topology.
+const compiledGraphs = new WeakSet<object>();
+
+/** @internal Accept only this compiler's validated, immutable results. */
+export function requireCompiledGraph(value: unknown): CompiledGraph {
+  if (value === null || typeof value !== "object" || !compiledGraphs.has(value)) {
+    throw new Error("graph display: requires a compileGraph result; recompile the sealed GraphDefinition");
+  }
+  return value as CompiledGraph;
+}
+
 function pairKey(nodeId: string, outcome: string): string {
   return `${nodeId}\u0000${outcome}`;
 }
@@ -47,6 +63,17 @@ function frozenRecord<T>(entries: readonly (readonly [string, T])[]): Readonly<R
     });
   }
   return Object.freeze(record);
+}
+
+/** Declared outputs compare as maps: same outcomes, same contracts, any order. */
+export function sameDeclaredOutputs(
+  left: Readonly<Record<string, string>> | undefined,
+  right: Readonly<Record<string, string>> | undefined
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((outcome) => Object.hasOwn(right, outcome) && right[outcome] === left[outcome]);
 }
 
 function validateBindingRules(node: SwitchyardNode): void {
@@ -110,6 +137,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
       }
       if (
         predicateOutcomes(edge.when).includes("join_unsatisfiable")
+        && targetNode.join?.compose !== "envelope"
         && targetNode.input !== JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT
       ) {
         throw new Error(
@@ -123,6 +151,19 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
         throw new Error(
           `Graph edge ${edge.edgeId} from node ${edge.from} references undeclared outcome ${JSON.stringify(outcome)}`
         );
+      }
+      // Envelope joins accept heterogeneous sealed artifacts and synthesize
+      // their own reserved input; all other targets consume the carried contract.
+      const emitted = declaredNodeOutput(source, outcome);
+      if (emitted === undefined) continue;
+      for (const target of edge.to) {
+        const targetNode = nodesById[target]!;
+        if (targetNode.join?.compose === "envelope") continue;
+        if (targetNode.input !== emitted) {
+          throw new Error(
+            `Graph edge ${edge.edgeId} carries outcome ${JSON.stringify(outcome)} from node ${edge.from} as ${emitted}, but target node ${target} accepts ${targetNode.input}`
+          );
+        }
       }
     }
   }
@@ -146,6 +187,9 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
   for (const node of definition.nodes) {
     validateBindingRules(node);
     const join = Object.hasOwn(node, "join") ? node.join : undefined;
+    if (join?.compose === "envelope" && node.input !== JOIN_INPUT_ARTIFACT_CONTRACT) {
+      throw new Error(`Join node ${node.nodeId} with compose "envelope" requires ${JOIN_INPUT_ARTIFACT_CONTRACT} as its input contract (got ${node.input})`);
+    }
     if (join === undefined && node.outcomes.outcomes.includes("join_unsatisfiable")) {
       throw new Error(
         `Graph non-join node ${node.nodeId} cannot declare engine-reserved outcome "join_unsatisfiable"`
@@ -163,10 +207,11 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     }
   }
 
-  // A node ref identifies one definition signature. Principal, binding, turn,
-  // nodeId, and join are graph-instance configuration; dispatch kind, input
-  // contract, and outcome vocabulary are definition-bound. Pure compilation
-  // proves this within a graph; publish stores enforce it across graphs.
+  // A node ref identifies one definition signature. Principal, binding,
+  // configuration, turn, nodeId, and join are graph-instance configuration;
+  // dispatch kind, input contract, outcome vocabulary, and declared output
+  // contracts are definition-bound. Pure compilation proves this within a
+  // graph; publish stores enforce it across graphs.
   const definitionByRef = new Map<string, SwitchyardNode>();
   for (const node of definition.nodes) {
     const key = refKey(node);
@@ -192,6 +237,11 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     ) {
       throw new Error(
         `Node definition ${node.ref.id}@${node.ref.version} is reused with a different outcome vocabulary; outcome changes require a new node version`
+      );
+    }
+    if (!sameDeclaredOutputs(declaredNodeOutputs(existing), declaredNodeOutputs(node))) {
+      throw new Error(
+        `Node definition ${node.ref.id}@${node.ref.version} is reused with different output contracts; change the node version`
       );
     }
   }
@@ -292,7 +342,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
 
   // Every definition component/ref is already a detached deep-frozen snapshot;
   // the newly derived arrays and prototype-free records are frozen above.
-  return Object.freeze({
+  const compiled = Object.freeze({
     graph: graphDefinitionRef(definition),
     entry: definition.entry,
     nodes: definition.nodes,
@@ -303,4 +353,6 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     inboundByNode,
     outboundByNode
   });
+  compiledGraphs.add(compiled);
+  return compiled;
 }

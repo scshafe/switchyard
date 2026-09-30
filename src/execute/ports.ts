@@ -20,9 +20,12 @@ import {
   type UsageReceipt
 } from "../contracts/usage-receipt.js";
 import {
+  declaredNodeOutput,
+  validateSwitchyardNodeConfigurationRef,
   type GraphDefinitionRef,
   type SwitchyardNode,
   type SwitchyardNodeBindingRef,
+  type SwitchyardNodeConfigurationRef,
   type SwitchyardNodeKind,
   type SwitchyardNodeRef
 } from "../graph/definition.js";
@@ -61,6 +64,8 @@ export interface WorkerNodeTurnContext {
   readonly idempotencyKey: string;
   /** Content identity only; the validated payload is the port's first argument. */
   readonly inputArtifact: ArtifactRef;
+  /** The sealed configuration this node runs under, when the graph declares one. */
+  readonly configuration?: SwitchyardNodeConfigurationRef;
   readonly signal?: AbortSignal;
 }
 
@@ -399,6 +404,19 @@ export function validateNodeTurnCompletion<K extends SwitchyardNodeKind>(
         `${label}: callback node ${node.nodeId} must return outputArtifact for the admitted event`
       );
     }
+    // A declared output contract binds the artifact this outcome carries
+    // onward: the returned artifact, or the input carried forward when none
+    // is returned. Settlement re-checks every target's input; this check keeps
+    // the host's own declaration honest before the completion is cached.
+    const declared = declaredNodeOutput(node, outcome);
+    if (declared !== undefined) {
+      const carried = outputArtifact === undefined ? node.input : outputArtifact.contractId;
+      if (carried !== declared) {
+        throw new Error(
+          `${label}: node ${node.nodeId} outcome ${JSON.stringify(outcome)} must carry ${declared} (got ${carried}${outputArtifact === undefined ? ", the input carried forward" : ""})`
+        );
+      }
+    }
 
     return deepFrozenClone(
       {
@@ -432,9 +450,12 @@ const CONTEXT_KEYS = [
   "attemptIndex",
   "idempotencyKey",
   "inputArtifact",
+  "configuration",
   "signal"
 ] as const;
-const CONTEXT_REQUIRED_KEYS = CONTEXT_KEYS.filter((key) => key !== "signal");
+const CONTEXT_REQUIRED_KEYS = CONTEXT_KEYS.filter(
+  (key) => key !== "signal" && key !== "configuration"
+);
 const GRAPH_REF_KEYS = new Set(["id", "version", "digest"]);
 const NODE_REF_KEYS = new Set(["id", "version"]);
 
@@ -496,6 +517,21 @@ export function snapshotWorkerNodeTurnContext(
       ? { bytes: validatedInputArtifact.bytes }
       : {})
   });
+  let configuration: SwitchyardNodeConfigurationRef | undefined;
+  if (Object.hasOwn(raw, "configuration")) {
+    if (raw.configuration === undefined) {
+      throw new Error(`${label}.configuration is present but undefined (omit the key instead)`);
+    }
+    const validated = validateSwitchyardNodeConfigurationRef(
+      raw.configuration,
+      `${label}.configuration`
+    );
+    configuration = frozenNullRecord({
+      id: validated.id,
+      version: validated.version,
+      digest: validated.digest
+    });
+  }
   const context: WorkerNodeTurnContext = frozenNullRecord({
     graph: snapshotGraphRef(raw.graph, `${label}.graph`),
     queueId: assertEvidenceString(raw.queueId, `${label}.queueId`),
@@ -506,6 +542,7 @@ export function snapshotWorkerNodeTurnContext(
     attemptIndex: assertSafePositiveInt(raw.attemptIndex, `${label}.attemptIndex`),
     idempotencyKey: assertSha256Hex(raw.idempotencyKey, `${label}.idempotencyKey`),
     inputArtifact,
+    ...(configuration === undefined ? {} : { configuration }),
     ...(signal === undefined ? {} : { signal: signal as AbortSignal })
   });
   return context;

@@ -1,0 +1,1318 @@
+{
+  "filter-chain": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "fixture.filter-chain",
+      "version": 1,
+      "digest": "cb9b863ed7fad5edf9e5c9a5eb408c441b367f08dcfb7be95ab143b00fa9e55a"
+    },
+    "entry": "filter",
+    "nodes": [
+      {
+        "nodeId": "filter",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.filter",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "pass",
+          "drop"
+        ],
+        "maxAttempts": 2,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "normalize",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.normalize",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "ok"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "sink",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.sink",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "done"
+        ],
+        "maxAttempts": 2,
+        "depth": 2,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "filter",
+        "to": "normalize",
+        "outcomes": [
+          "pass"
+        ],
+        "edgeIds": [
+          "filter-pass"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "normalize",
+        "to": "sink",
+        "outcomes": [
+          "ok"
+        ],
+        "edgeIds": [
+          "normalize-ok"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "filter",
+        "outcome": "drop"
+      },
+      {
+        "nodeId": "sink",
+        "outcome": "done"
+      }
+    ],
+    "joins": []
+  },
+  "outcome-router": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "fixture.outcome-router",
+      "version": 1,
+      "digest": "7e8eacc9dbcc86f480e0b1439ed819ee64c8f18c18335c65b1393d7e71b108b3"
+    },
+    "entry": "classify",
+    "nodes": [
+      {
+        "nodeId": "classify",
+        "kind": "model",
+        "ref": {
+          "id": "fixture.classify",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "jobs",
+          "receipts",
+          "noise"
+        ],
+        "binding": {
+          "kind": "model",
+          "bindingId": "fixture.model.binding",
+          "version": 1,
+          "bindingDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "maxAttempts": 2,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "jobs",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.jobs",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "accepted"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "receipts",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.receipts",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "accepted"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "classify",
+        "to": "jobs",
+        "outcomes": [
+          "jobs"
+        ],
+        "edgeIds": [
+          "route-jobs"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "classify",
+        "to": "receipts",
+        "outcomes": [
+          "receipts"
+        ],
+        "edgeIds": [
+          "route-receipts"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "classify",
+        "outcome": "noise"
+      },
+      {
+        "nodeId": "jobs",
+        "outcome": "accepted"
+      },
+      {
+        "nodeId": "receipts",
+        "outcome": "accepted"
+      }
+    ],
+    "joins": []
+  },
+  "escalation-ladder": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "fixture.escalation-ladder",
+      "version": 1,
+      "digest": "12ee176f3a36576476b9701469c280bad19fafa2c4aa104ca8c7fbb8f22f7769"
+    },
+    "entry": "triage",
+    "nodes": [
+      {
+        "nodeId": "triage",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.triage",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "resolved",
+          "escalate"
+        ],
+        "maxAttempts": 2,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "review-tier-1",
+        "kind": "human",
+        "ref": {
+          "id": "fixture.review-tier-1",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "resolved",
+          "escalate"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": true
+      },
+      {
+        "nodeId": "tier-1-timer",
+        "kind": "callback",
+        "ref": {
+          "id": "fixture.tier-1-timer",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "elapsed",
+          "operator-fired"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": true
+      },
+      {
+        "nodeId": "tier-1-race",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.tier-1-race",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "resolved",
+          "escalate",
+          "join_unsatisfiable"
+        ],
+        "join": {
+          "inbound": [
+            "tier-1-decision",
+            "tier-1-timeout"
+          ],
+          "require": {
+            "nOf": 1
+          }
+        },
+        "maxAttempts": 2,
+        "depth": 2,
+        "marks": false
+      },
+      {
+        "nodeId": "review-tier-2",
+        "kind": "human",
+        "ref": {
+          "id": "fixture.review-tier-2",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "resolved",
+          "rejected"
+        ],
+        "maxAttempts": 2,
+        "depth": 3,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "triage",
+        "to": "review-tier-1",
+        "outcomes": [
+          "escalate"
+        ],
+        "edgeIds": [
+          "triage-escalate"
+        ],
+        "conditional": false,
+        "fanOut": [
+          {
+            "edgeId": "triage-escalate",
+            "coTargets": [
+              "tier-1-timer"
+            ],
+            "outcomes": [
+              "escalate"
+            ]
+          }
+        ]
+      },
+      {
+        "from": "triage",
+        "to": "tier-1-timer",
+        "outcomes": [
+          "escalate"
+        ],
+        "edgeIds": [
+          "triage-escalate"
+        ],
+        "conditional": false,
+        "fanOut": [
+          {
+            "edgeId": "triage-escalate",
+            "coTargets": [
+              "review-tier-1"
+            ],
+            "outcomes": [
+              "escalate"
+            ]
+          }
+        ]
+      },
+      {
+        "from": "review-tier-1",
+        "to": "tier-1-race",
+        "outcomes": [
+          "resolved",
+          "escalate"
+        ],
+        "edgeIds": [
+          "tier-1-decision"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "tier-1-timer",
+        "to": "tier-1-race",
+        "outcomes": [
+          "elapsed",
+          "operator-fired"
+        ],
+        "edgeIds": [
+          "tier-1-timeout"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "tier-1-race",
+        "to": "review-tier-2",
+        "outcomes": [
+          "escalate"
+        ],
+        "edgeIds": [
+          "race-escalates"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "triage",
+        "outcome": "resolved"
+      },
+      {
+        "nodeId": "tier-1-race",
+        "outcome": "resolved"
+      },
+      {
+        "nodeId": "tier-1-race",
+        "outcome": "join_unsatisfiable"
+      },
+      {
+        "nodeId": "review-tier-2",
+        "outcome": "resolved"
+      },
+      {
+        "nodeId": "review-tier-2",
+        "outcome": "rejected"
+      }
+    ],
+    "joins": [
+      {
+        "nodeId": "tier-1-race",
+        "require": {
+          "nOf": 1
+        },
+        "inbound": [
+          "tier-1-decision",
+          "tier-1-timeout"
+        ]
+      }
+    ]
+  },
+  "human-in-the-middle": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "fixture.human-in-the-middle",
+      "version": 1,
+      "digest": "39903b7b158ed546c3c8b7bebce099155828a3986f7d4a3cf210ed3f27f11020"
+    },
+    "entry": "draft",
+    "nodes": [
+      {
+        "nodeId": "draft",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.draft",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "proposed"
+        ],
+        "maxAttempts": 2,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "approve",
+        "kind": "human",
+        "ref": {
+          "id": "fixture.approve",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "approved",
+          "rejected"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "publish",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.publish",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "published"
+        ],
+        "maxAttempts": 2,
+        "depth": 2,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "draft",
+        "to": "approve",
+        "outcomes": [
+          "proposed"
+        ],
+        "edgeIds": [
+          "draft-proposed"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "approve",
+        "to": "publish",
+        "outcomes": [
+          "approved"
+        ],
+        "edgeIds": [
+          "approval-granted"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "approve",
+        "outcome": "rejected"
+      },
+      {
+        "nodeId": "publish",
+        "outcome": "published"
+      }
+    ],
+    "joins": []
+  },
+  "join": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "fixture.join",
+      "version": 1,
+      "digest": "ff7483988a6add97126155a3f324de37dd10d008031b7614e3a0696ea2e2a3f6"
+    },
+    "entry": "start",
+    "nodes": [
+      {
+        "nodeId": "start",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.start",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "ready"
+        ],
+        "maxAttempts": 2,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "branch-a",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.branch-a",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "done"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "branch-b",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.branch-b",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "done"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "join",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.join",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "joined",
+          "join_unsatisfiable"
+        ],
+        "join": {
+          "inbound": [
+            "branch-a-to-join",
+            "branch-b-to-join"
+          ],
+          "require": "all"
+        },
+        "maxAttempts": 2,
+        "depth": 2,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "start",
+        "to": "branch-a",
+        "outcomes": [
+          "ready"
+        ],
+        "edgeIds": [
+          "fan-out"
+        ],
+        "conditional": false,
+        "fanOut": [
+          {
+            "edgeId": "fan-out",
+            "coTargets": [
+              "branch-b"
+            ],
+            "outcomes": [
+              "ready"
+            ]
+          }
+        ]
+      },
+      {
+        "from": "start",
+        "to": "branch-b",
+        "outcomes": [
+          "ready"
+        ],
+        "edgeIds": [
+          "fan-out"
+        ],
+        "conditional": false,
+        "fanOut": [
+          {
+            "edgeId": "fan-out",
+            "coTargets": [
+              "branch-a"
+            ],
+            "outcomes": [
+              "ready"
+            ]
+          }
+        ]
+      },
+      {
+        "from": "branch-a",
+        "to": "join",
+        "outcomes": [
+          "done"
+        ],
+        "edgeIds": [
+          "branch-a-to-join"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "branch-b",
+        "to": "join",
+        "outcomes": [
+          "done"
+        ],
+        "edgeIds": [
+          "branch-b-to-join"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "join",
+        "outcome": "joined"
+      },
+      {
+        "nodeId": "join",
+        "outcome": "join_unsatisfiable"
+      }
+    ],
+    "joins": [
+      {
+        "nodeId": "join",
+        "require": "all",
+        "inbound": [
+          "branch-a-to-join",
+          "branch-b-to-join"
+        ]
+      }
+    ]
+  },
+  "shadow-lane": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "fixture.shadow-lane",
+      "version": 1,
+      "digest": "2b453a8a80b5b0357b2dfc7d1db1cffa05221e6021262af0ff3d59d1860e0a1e"
+    },
+    "entry": "classify",
+    "nodes": [
+      {
+        "nodeId": "classify",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.classify",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "routed"
+        ],
+        "maxAttempts": 2,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "primary",
+        "kind": "code",
+        "ref": {
+          "id": "fixture.primary",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "done"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "shadow",
+        "kind": "agent",
+        "ref": {
+          "id": "fixture.shadow",
+          "version": 1
+        },
+        "input": "unit-artifact.v1",
+        "outcomes": [
+          "observed"
+        ],
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "classify",
+        "to": "primary",
+        "outcomes": [
+          "routed"
+        ],
+        "edgeIds": [
+          "primary-route"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "classify",
+        "to": "shadow",
+        "outcomes": [
+          "routed"
+        ],
+        "edgeIds": [
+          "shadow-high-risk"
+        ],
+        "conditional": true,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "primary",
+        "outcome": "done"
+      },
+      {
+        "nodeId": "shadow",
+        "outcome": "observed"
+      }
+    ],
+    "joins": []
+  },
+  "support-triage": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "example.support-triage",
+      "version": 1,
+      "digest": "7f06a0fa6ec1fa1ddb1a156bc1ec647fb63dca17634e7608dfb5680675aad8c3"
+    },
+    "entry": "normalize",
+    "nodes": [
+      {
+        "nodeId": "normalize",
+        "kind": "code",
+        "ref": {
+          "id": "triage.normalize",
+          "version": 1
+        },
+        "input": "support-ticket.v1",
+        "outcomes": [
+          "ready",
+          "malformed"
+        ],
+        "outputs": {
+          "ready": "triage-context.v1",
+          "malformed": "support-ticket.v1"
+        },
+        "maxAttempts": 1,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "outage-signal",
+        "kind": "model",
+        "ref": {
+          "id": "triage.outage-signal",
+          "version": 1
+        },
+        "input": "triage-context.v1",
+        "outcomes": [
+          "yes",
+          "no",
+          "uncertain"
+        ],
+        "outputs": {
+          "yes": "outage-signal.v1",
+          "no": "outage-signal.v1",
+          "uncertain": "triage-escalation.v1"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "triage.outage-signal",
+          "version": 1,
+          "bindingDigest": "bc1e7cac904ff499d950ab1764975ff00a5036650e2d672a62f3918f6d0324b4"
+        },
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "ground-evidence",
+        "kind": "code",
+        "ref": {
+          "id": "triage.ground-evidence",
+          "version": 1
+        },
+        "input": "outage-signal.v1",
+        "outcomes": [
+          "grounded",
+          "ungrounded"
+        ],
+        "outputs": {
+          "grounded": "grounded-evidence.v1",
+          "ungrounded": "triage-escalation.v1"
+        },
+        "maxAttempts": 1,
+        "depth": 2,
+        "marks": false
+      },
+      {
+        "nodeId": "outage-verify",
+        "kind": "model",
+        "ref": {
+          "id": "triage.outage-verify",
+          "version": 1
+        },
+        "input": "grounded-evidence.v1",
+        "outcomes": [
+          "confirmed",
+          "unsupported",
+          "uncertain"
+        ],
+        "outputs": {
+          "confirmed": "outage-verification.v1",
+          "unsupported": "outage-verification.v1",
+          "uncertain": "triage-escalation.v1"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "triage.outage-verify",
+          "version": 1,
+          "bindingDigest": "a0e8bef7cd6e90ce59b01b641926e29c2f8ae5f29060892ca3b086f13d673dd7"
+        },
+        "maxAttempts": 2,
+        "depth": 3,
+        "marks": false
+      },
+      {
+        "nodeId": "blast-radius",
+        "kind": "model",
+        "ref": {
+          "id": "triage.blast-radius",
+          "version": 1
+        },
+        "input": "outage-verification.v1",
+        "outcomes": [
+          "many",
+          "single",
+          "uncertain"
+        ],
+        "outputs": {
+          "many": "blast-radius.v1",
+          "single": "blast-radius.v1",
+          "uncertain": "blast-radius.v1"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "triage.blast-radius",
+          "version": 1,
+          "bindingDigest": "9c15bd2260b8eb2e33eaf28b1c5ab81ddcd60a0bb5da155e9eb964951df77e92"
+        },
+        "maxAttempts": 2,
+        "depth": 4,
+        "marks": true
+      },
+      {
+        "nodeId": "assemble",
+        "kind": "code",
+        "ref": {
+          "id": "triage.assemble",
+          "version": 1
+        },
+        "input": "blast-radius.v1",
+        "outcomes": [
+          "proposed",
+          "invalid"
+        ],
+        "outputs": {
+          "proposed": "escalation-proposal.v1",
+          "invalid": "triage-escalation.v1"
+        },
+        "configuration": {
+          "id": "triage.priority-policy",
+          "version": 1,
+          "digest": "c5a546af47627e5e039168825b63fc0ebc71de51a1fd22674a91623035af966a"
+        },
+        "maxAttempts": 1,
+        "depth": 5,
+        "marks": false
+      },
+      {
+        "nodeId": "summarize",
+        "kind": "model",
+        "ref": {
+          "id": "triage.summarize",
+          "version": 1
+        },
+        "input": "escalation-proposal.v1",
+        "outcomes": [
+          "summarized",
+          "unusable"
+        ],
+        "outputs": {
+          "summarized": "dispatch-packet.v1",
+          "unusable": "dispatch-packet.v1"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "triage.dispatch-summary",
+          "version": 1,
+          "bindingDigest": "a5c32c63f1a26cb538c7e609863a4e0fa541463fc5cceb6c720cddef893feee7"
+        },
+        "maxAttempts": 2,
+        "depth": 6,
+        "marks": true
+      },
+      {
+        "nodeId": "dispatch-review",
+        "kind": "human",
+        "ref": {
+          "id": "triage.dispatch-review",
+          "version": 1
+        },
+        "input": "dispatch-packet.v1",
+        "outcomes": [
+          "approved",
+          "rejected"
+        ],
+        "maxAttempts": 1,
+        "depth": 7,
+        "marks": false
+      },
+      {
+        "nodeId": "triage-review",
+        "kind": "human",
+        "ref": {
+          "id": "triage.triage-review",
+          "version": 1
+        },
+        "input": "triage-escalation.v1",
+        "outcomes": [
+          "escalate",
+          "standard"
+        ],
+        "maxAttempts": 1,
+        "depth": 6,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "normalize",
+        "to": "outage-signal",
+        "outcomes": [
+          "ready"
+        ],
+        "edgeIds": [
+          "normalize-ready"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "outage-signal",
+        "to": "ground-evidence",
+        "outcomes": [
+          "yes"
+        ],
+        "edgeIds": [
+          "signal-yes"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "outage-signal",
+        "to": "triage-review",
+        "outcomes": [
+          "uncertain"
+        ],
+        "edgeIds": [
+          "signal-uncertain"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "ground-evidence",
+        "to": "outage-verify",
+        "outcomes": [
+          "grounded"
+        ],
+        "edgeIds": [
+          "evidence-grounded"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "ground-evidence",
+        "to": "triage-review",
+        "outcomes": [
+          "ungrounded"
+        ],
+        "edgeIds": [
+          "evidence-ungrounded"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "outage-verify",
+        "to": "blast-radius",
+        "outcomes": [
+          "confirmed"
+        ],
+        "edgeIds": [
+          "verify-confirmed"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "outage-verify",
+        "to": "triage-review",
+        "outcomes": [
+          "uncertain"
+        ],
+        "edgeIds": [
+          "verify-uncertain"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "blast-radius",
+        "to": "assemble",
+        "outcomes": [
+          "many",
+          "single",
+          "uncertain"
+        ],
+        "edgeIds": [
+          "blast-radius-assemble"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "assemble",
+        "to": "summarize",
+        "outcomes": [
+          "proposed"
+        ],
+        "edgeIds": [
+          "assemble-proposed"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "assemble",
+        "to": "triage-review",
+        "outcomes": [
+          "invalid"
+        ],
+        "edgeIds": [
+          "assemble-invalid"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "summarize",
+        "to": "dispatch-review",
+        "outcomes": [
+          "summarized",
+          "unusable"
+        ],
+        "edgeIds": [
+          "summarize-dispatch"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "normalize",
+        "outcome": "malformed"
+      },
+      {
+        "nodeId": "outage-signal",
+        "outcome": "no"
+      },
+      {
+        "nodeId": "outage-verify",
+        "outcome": "unsupported"
+      },
+      {
+        "nodeId": "dispatch-review",
+        "outcome": "approved"
+      },
+      {
+        "nodeId": "dispatch-review",
+        "outcome": "rejected"
+      },
+      {
+        "nodeId": "triage-review",
+        "outcome": "escalate"
+      },
+      {
+        "nodeId": "triage-review",
+        "outcome": "standard"
+      }
+    ],
+    "joins": []
+  },
+  "support-triage-monolith": {
+    "schemaVersion": "switchyard-graph-display.v1",
+    "graph": {
+      "id": "example.support-triage-monolith",
+      "version": 1,
+      "digest": "40d9a7c277b97b7530640400f9b2f7c4a84bba6fa921e6549ec3a23cbe1ba17d"
+    },
+    "entry": "normalize",
+    "nodes": [
+      {
+        "nodeId": "normalize",
+        "kind": "code",
+        "ref": {
+          "id": "triage.normalize",
+          "version": 1
+        },
+        "input": "support-ticket.v1",
+        "outcomes": [
+          "ready",
+          "malformed"
+        ],
+        "outputs": {
+          "ready": "triage-context.v1",
+          "malformed": "support-ticket.v1"
+        },
+        "maxAttempts": 1,
+        "depth": 0,
+        "marks": false
+      },
+      {
+        "nodeId": "triage",
+        "kind": "model",
+        "ref": {
+          "id": "triage.monolith",
+          "version": 1
+        },
+        "input": "triage-context.v1",
+        "outcomes": [
+          "proposed",
+          "standard",
+          "uncertain"
+        ],
+        "outputs": {
+          "proposed": "dispatch-packet.v1",
+          "standard": "triage-context.v1",
+          "uncertain": "triage-escalation.v1"
+        },
+        "binding": {
+          "kind": "model",
+          "bindingId": "triage.monolith",
+          "version": 1,
+          "bindingDigest": "422f2a58ce0955cc2bf2271198683ac40e6a76de60d714547f4ece97e6f4a95a"
+        },
+        "maxAttempts": 2,
+        "depth": 1,
+        "marks": false
+      },
+      {
+        "nodeId": "dispatch-review",
+        "kind": "human",
+        "ref": {
+          "id": "triage.dispatch-review",
+          "version": 1
+        },
+        "input": "dispatch-packet.v1",
+        "outcomes": [
+          "approved",
+          "rejected"
+        ],
+        "maxAttempts": 1,
+        "depth": 2,
+        "marks": false
+      },
+      {
+        "nodeId": "triage-review",
+        "kind": "human",
+        "ref": {
+          "id": "triage.triage-review",
+          "version": 1
+        },
+        "input": "triage-escalation.v1",
+        "outcomes": [
+          "escalate",
+          "standard"
+        ],
+        "maxAttempts": 1,
+        "depth": 2,
+        "marks": false
+      }
+    ],
+    "arrows": [
+      {
+        "from": "normalize",
+        "to": "triage",
+        "outcomes": [
+          "ready"
+        ],
+        "edgeIds": [
+          "normalize-ready"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "triage",
+        "to": "dispatch-review",
+        "outcomes": [
+          "proposed"
+        ],
+        "edgeIds": [
+          "triage-proposed"
+        ],
+        "conditional": false,
+        "fanOut": []
+      },
+      {
+        "from": "triage",
+        "to": "triage-review",
+        "outcomes": [
+          "uncertain"
+        ],
+        "edgeIds": [
+          "triage-uncertain"
+        ],
+        "conditional": false,
+        "fanOut": []
+      }
+    ],
+    "terminals": [
+      {
+        "nodeId": "normalize",
+        "outcome": "malformed"
+      },
+      {
+        "nodeId": "triage",
+        "outcome": "standard"
+      },
+      {
+        "nodeId": "dispatch-review",
+        "outcome": "approved"
+      },
+      {
+        "nodeId": "dispatch-review",
+        "outcome": "rejected"
+      },
+      {
+        "nodeId": "triage-review",
+        "outcome": "escalate"
+      },
+      {
+        "nodeId": "triage-review",
+        "outcome": "standard"
+      }
+    ],
+    "joins": []
+  }
+}

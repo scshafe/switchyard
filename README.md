@@ -42,6 +42,19 @@ The package imports Node.js built-ins and its own files only. It never imports
 database clients, provider SDKs, credential loaders, or host frameworks.
 Consumers implement the exported store and node-kind ports.
 
+The repository also contains the separately packaged, unreleased
+[`switchyard-graphpaper` static SDK](packages/switchyard-graphpaper/README.md).
+It builds graphpaper diagram data from engine projections and consumer
+presentation and provides static server figures/assets plus browser
+selection, deep links, and an authorized details seam. It is excluded from
+this engine's npm payload; graphpaper and ELK are root development dependencies,
+not engine runtime dependencies. Static adapter code and automated checks are
+in place. Local Browser verification now covers ELK layout, mouse/keyboard
+selection, details identity/races, deep links, responsive layout, and teardown.
+Activating reduced motion remains unverified because the connected Browser has
+no media override. Runtime overlays, metrics, proposal rendering, viewer updates,
+goal scopes, and Inbox adoption remain proposed.
+
 Supported runtimes:
 
 - Node.js `>=22.22.0 <23`
@@ -115,6 +128,16 @@ join inbound declarations, join satisfiability outcomes, and bounded hostile
 input shapes. A node outcome vocabulary changes only by publishing a new node
 version.
 
+A node may declare `outputs`, the contract its body emits per outcome.
+`compileGraph` then proves that every edge carrying that outcome lands on a
+node whose input accepts it (except an opt-in envelope join, which embeds the
+source artifact), and a completion carrying any other contract is refused
+before it is cached. Declared outputs are definition data: they move
+the graph digest and the node definition signature. A node may also pin a
+`configuration` ref (`{ id, version, digest }`) naming the host-side policy
+it runs under; the digest enters the graph digest and the node execution
+fingerprint, and the worker context hands the ref to the body.
+
 The closed edge-predicate language is:
 
 - `{ outcome }`
@@ -123,13 +146,21 @@ The closed edge-predicate language is:
 
 Joins support `all` and `nOf` over declared inbound edge IDs. A join fires at
 most once per unit. Unsatisfiable joins emit the declared engine outcome;
-offers arriving after a fired join are journey-recorded no-ops.
+offers arriving after a fired join are journey-recorded no-ops. By default a
+join selects one accepted artifact. `join.compose: "envelope"` instead supplies
+all offers accepted at resolution, with embedded payloads and exact provenance,
+under `JOIN_INPUT_ARTIFACT_CONTRACT` (`switchyard.join-input.v1`).
+See the [P7/P8 contracts](docs/IMPLEMENTED-P7-P8.md) for aggregation and explicit
+failure-to-outcome policy, including downstream adapter requirements.
 
 ## Execution and stores
 
 The v2 execution modules are:
 
 - `execute/ports` — code, model, agent, human, and callback boundaries.
+- `execute/declared-failures` — opt-in `withDeclaredFailureOutcomes` for code,
+  model, and definite agent failures, with invocation-local evidence and
+  consumer-owned receipt policy.
 - `execute/turn` — one physical node-turn attempt, stable idempotency identity,
   output/usage validation, and retryable-versus-terminal failure taxonomy.
 - `execute/unit-runner` — claim a homogeneous per-node batch and request the
@@ -138,6 +169,7 @@ The v2 execution modules are:
   resolution.
 - `store/unit-store` — admission, queues, leases, journeys, joins, settlement,
   outbox, and dead-letter evidence.
+- `store/join-input` — construct and validate sealed aggregation envelopes.
 - `store/memory-graph-store` and `store/memory-unit-store` — the hermetic
   executable specification.
 
@@ -153,11 +185,36 @@ behavior are authored as nodes and edges.
 
 ## Host-facing helpers
 
+- `graph/display` provides `projectGraphDisplay`: a pure structural projection
+  of a compiled graph with its exact digest, depth, merged arrows, marking
+  nodes, fan-outs, joins, and terminals. Presentation words stay with the host.
+- `graph/diff` provides `graphDefinitionDiff`: a sealed-definition comparison
+  by node, edge, and terminal identity, carrying both graph digests and
+  machine-readable field changes, including outputs and configuration refs.
+- `graph/budget` provides `graphTurnBudget`: the back edges of a sealed graph
+  and, for an acyclic graph, the worst-case queue occurrences and turns per
+  node, per kind, and in total.
+- `store/unit-path` provides `projectUnitPath`: a pure, fail-closed projection
+  of one unit journey into per-node state, outcomes, open queues, join
+  progress, edges taken, and usage totals. Delivery state is the host's.
+- `graph/goals` provides `createGoalManifest` and `validateGoalManifest`: a
+  non-executable goal manifest sealed against the exact graph digest, proving
+  that a unit entering a goal closes it exactly once through a declared
+  `resolved` or `escalated` resolution.
+- `store/goal-closures` provides `projectGoalClosures`: per unit and per goal,
+  unentered, open, dead, or closed with the closing resolution, plus the turns
+  and receipts charged inside the goal.
+- `execute/code-port` provides `codeNodePortByNode`: one code body per node
+  behind the kind-keyed worker port; an unregistered node fails terminally
+  before any body runs.
 - `contracts/` provides canonical-JSON SHA-256 digests, artifact envelopes,
   artifact refs, and usage receipts.
 - `model/binding` and `prompt/` provide sealed model/prompt identities.
 - `model/invoker` provides the exact resolver boundary and prompt-identity
-  verification used inside a host's model node port.
+  verification used inside a host's model node port, and
+  `modelTurnInvocationRequest`, which builds the provider request from the
+  port's own arguments so the provider boundary receives the journey's
+  attempt identity.
 - `agent/step` and `agent/executor-port` provide the frozen one-agent-turn
   request/result contract and executor seam.
 - `gate/contracts`, `gate/compiler`, and `gate/certificate` remain
@@ -174,7 +231,14 @@ pnpm run verify
 The gate builds from a clean output directory, runs the v1-deletion guard and
 the complete test suite, checks the exact package payload, proves reproducible
 release bytes, installs the packed artifact into a fresh consumer, and runs
-JavaScript plus TypeScript import smokes.
+JavaScript plus TypeScript import smokes. It also builds the separately
+packaged static SDK, checks its independent payload/manifest, and runs its
+golden, hostile-input, packed-install, graphpaper layout/SVG, static SSR/assets,
+and fake-DOM browser wiring checks. The [local Browser verification record](docs/VERIFY-GRAPHPAPER-STATIC-ADAPTERS.md)
+covers the static adapter's supported interaction and responsive checks, with
+reduced-motion activation and deployed consumer verification still outstanding.
+It does not establish merge readiness. See the [SDK ADR](docs/ADR-GRAPHPAPER-FRONTEND-SDK.md)
+for implemented versus proposed behavior.
 
 `pnpm run test:fresh-clone` repeats the install, build and verify in a fresh
 clone of the committed `HEAD` (it requires a clean working tree). `lib/` is
@@ -198,6 +262,14 @@ build output and is not committed.
 `workflow_dispatch` of `publish.yml` with `dry_run` set stops at
 `pnpm publish --dry-run`.
 
+`npm run test:fresh-clone` requires a clean committed candidate. Dependency
+installation may fetch the exact Git-pinned renderer and requires repository
+read access; lifecycle scripts are disabled. The subsequent `npm run verify`
+and all packed-consumer checks run with npm offline.
+
 The ratified design and phase evidence are in
 [`docs/DESIGN-NODE-GRAPH-V2.md`](docs/DESIGN-NODE-GRAPH-V2.md) and
-[`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md).
+[`docs/PLAN-NODE-GRAPH-V2.md`](docs/PLAN-NODE-GRAPH-V2.md). Application
+guidance for building pipelines from focused objectives, a runnable example,
+the interface review, and the frontend SDK design are indexed in
+[`docs/README.md`](docs/README.md).

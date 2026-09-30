@@ -7,6 +7,7 @@
 
 import type { ContractId } from "../contracts/artifact.js";
 import {
+  declaredNodeOutputs,
   validateSwitchyardNode,
   type GraphDefinition,
   type GraphDefinitionRef,
@@ -29,6 +30,12 @@ export interface NodeDefinitionSignature {
   readonly input: ContractId;
   /** Set semantics, represented in canonical lexical order. */
   readonly outcomes: readonly string[];
+  /**
+   * Declared output contracts by outcome, in canonical lexical key order;
+   * present only when the node declares any. A ref/version that declares
+   * outputs in one graph and not in another names two definitions.
+   */
+  readonly outputs?: Readonly<Record<string, ContractId>>;
 }
 
 /** Validate, detach, and freeze a digest-bearing graph reference. */
@@ -53,14 +60,52 @@ export function nodeDefinitionSignature(
   node: SwitchyardNode
 ): NodeDefinitionSignature {
   const validated = validateSwitchyardNode(node, "node definition signature input");
+  const outputs = declaredNodeOutputs(validated);
   return deepFrozenClone(
     {
       kind: validated.kind,
       input: validated.input,
-      outcomes: [...validated.outcomes.outcomes].sort()
+      outcomes: [...validated.outcomes.outcomes].sort(),
+      ...(outputs === undefined
+        ? {}
+        : {
+            outputs: Object.fromEntries(
+              Object.keys(outputs).sort().map((outcome) => [outcome, outputs[outcome]])
+            )
+          })
     },
     `node definition ${validated.ref.id}@${validated.ref.version} signature`
   );
+}
+
+/** Field-by-field signature comparison every GraphStore implementation must apply. */
+export function nodeDefinitionSignatureConflict(
+  published: NodeDefinitionSignature,
+  requested: NodeDefinitionSignature
+): NodeDefinitionConflictField | undefined {
+  if (published.kind !== requested.kind) return "kind";
+  if (published.input !== requested.input) return "input contract";
+  if (
+    published.outcomes.length !== requested.outcomes.length
+    || published.outcomes.some((outcome, index) => outcome !== requested.outcomes[index])
+  ) {
+    return "outcome vocabulary";
+  }
+  const publishedOutputs = Object.hasOwn(published, "outputs") ? published.outputs : undefined;
+  const requestedOutputs = Object.hasOwn(requested, "outputs") ? requested.outputs : undefined;
+  if (publishedOutputs === undefined || requestedOutputs === undefined) {
+    return publishedOutputs === requestedOutputs ? undefined : "output contracts";
+  }
+  const publishedKeys = Object.keys(publishedOutputs);
+  if (
+    publishedKeys.length !== Object.keys(requestedOutputs).length
+    || publishedKeys.some((outcome) =>
+      !Object.hasOwn(requestedOutputs, outcome) || requestedOutputs[outcome] !== publishedOutputs[outcome]
+    )
+  ) {
+    return "output contracts";
+  }
+  return undefined;
 }
 
 /** A sealed graph failed semantic compilation before publication. */
@@ -136,7 +181,8 @@ export class GraphLoadDigestConflictError extends Error {
 export type NodeDefinitionConflictField =
   | "kind"
   | "input contract"
-  | "outcome vocabulary";
+  | "outcome vocabulary"
+  | "output contracts";
 
 /** One node ref/version was given a different definition-bound meaning. */
 export class NodeDefinitionPublicationConflictError extends Error {

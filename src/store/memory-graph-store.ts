@@ -13,9 +13,9 @@ import {
   GraphPublicationValidationError,
   NodeDefinitionPublicationConflictError,
   nodeDefinitionSignature,
+  nodeDefinitionSignatureConflict,
   validateGraphDefinitionRef,
   type GraphStore,
-  type NodeDefinitionConflictField,
   type NodeDefinitionSignature
 } from "./graph-store.js";
 
@@ -30,21 +30,6 @@ function graphKey(id: string, version: number): string {
 
 function nodeRefKey(id: string, version: number): string {
   return `${id}\u0000${version}`;
-}
-
-function firstSignatureConflict(
-  published: NodeDefinitionSignature,
-  requested: NodeDefinitionSignature
-): NodeDefinitionConflictField | undefined {
-  if (published.kind !== requested.kind) return "kind";
-  if (published.input !== requested.input) return "input contract";
-  if (
-    published.outcomes.length !== requested.outcomes.length
-    || published.outcomes.some((outcome, index) => outcome !== requested.outcomes[index])
-  ) {
-    return "outcome vocabulary";
-  }
-  return undefined;
 }
 
 function trustedErrorMessage(error: unknown): string {
@@ -96,7 +81,7 @@ export class MemoryGraphStore implements GraphStore {
       const requested = nodeDefinitionSignature(node);
       const published = this.#nodeDefinitions.get(key);
       if (published !== undefined) {
-        const field = firstSignatureConflict(published.signature, requested);
+        const field = nodeDefinitionSignatureConflict(published.signature, requested);
         if (field !== undefined) {
           throw new NodeDefinitionPublicationConflictError({
             nodeRefId: node.ref.id,

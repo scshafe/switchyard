@@ -1,0 +1,78 @@
+/* Static pipeline vocabulary layered on graphpaper's public CSS classes. */
+.pipeline-viewer {
+  --pipeline-code: #64748b;
+  --pipeline-model: #6366f1;
+  --pipeline-human: #b45309;
+  --pipeline-agent: #0f766e;
+  --pipeline-callback: #be185d;
+  --pipeline-endpoint: #0369a1;
+  --pipeline-terminal: #6b7280;
+  --pipeline-focus: #2563eb;
+  max-width: 100%;
+  margin: 0;
+}
+.pipeline-viewer .diagram-svg { display: block; width: var(--pipeline-diagram-width, 100%); max-width: 100%; height: auto; margin: 0 auto; }
+/* Pan/zoom sets an inline SVG width; bound its canvas to preserve natural size. */
+.pipeline-viewer [data-pipeline-canvas] { max-width: var(--pipeline-diagram-width, 100%); margin-inline: auto; padding-bottom: 44px; }
+/* Keep the key and zoom controls below the drawing, clear of terminal nodes. */
+.pipeline-viewer .diagram-legend { position: static; width: fit-content; max-width: 100%; box-sizing: border-box; margin: 12px 0 0; }
+.pipeline-viewer .node-type-code > rect { stroke: var(--pipeline-code); }
+.pipeline-viewer .node-type-model > rect { stroke: var(--pipeline-model); }
+.pipeline-viewer .node-type-human > rect { stroke: var(--pipeline-human); }
+.pipeline-viewer .node-type-agent > rect { stroke: var(--pipeline-agent); }
+.pipeline-viewer .node-type-callback > rect { stroke: var(--pipeline-callback); }
+.pipeline-viewer .node-type-endpoint > rect { stroke: var(--pipeline-endpoint); stroke-width: 2; }
+.pipeline-viewer .node-type-terminal > rect { stroke: var(--pipeline-terminal); stroke-dasharray: 4 3; }
+.pipeline-viewer .edge-kind-outcome { stroke: var(--gp-muted, #64748b); }
+.pipeline-viewer .edge-kind-exit { stroke: var(--gp-muted, #64748b); stroke-dasharray: 5 4; }
+.pipeline-viewer .edge-kind-join { stroke: var(--pipeline-agent); stroke-width: 2.5; }
+.pipeline-viewer .diagram-node-selected > rect,
+.pipeline-viewer [data-diagram-node]:focus-visible > rect {
+  stroke: var(--pipeline-focus);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 3px var(--pipeline-focus));
+}
+.pipeline-viewer [data-diagram-node]:focus-visible { outline: none; }
+.pipeline-viewer-host { position: relative; }
+.pipeline-details {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 92%);
+  min-height: 180px;
+  max-height: 100%;
+  border: 1px solid var(--gp-line, #cbd5e1);
+  border-radius: 8px;
+  background: var(--gp-panel, #fff);
+  color: var(--gp-text, #172033);
+  box-shadow: -6px 0 24px rgb(0 0 0 / 16%);
+  font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+.pipeline-details[hidden] { display: none; }
+.pipeline-details:focus-visible { outline: 3px solid var(--pipeline-focus, #2563eb); outline-offset: 2px; }
+.pipeline-details-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px; border-bottom: 1px solid var(--gp-line, #cbd5e1); }
+.pipeline-details-title { margin: 0; font-size: 17px; line-height: 1.3; }
+.pipeline-details-close { flex: none; min-width: 36px; min-height: 36px; border: 1px solid var(--gp-line, #94a3b8); border-radius: 5px; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.pipeline-details-close:focus-visible { outline: 3px solid var(--pipeline-focus, #2563eb); outline-offset: 2px; }
+.pipeline-details-body { overflow: auto; min-height: 0; padding: 14px; overflow-wrap: anywhere; }
+.pipeline-details-body h3 { margin: 16px 0 6px; font-size: 13px; }
+.pipeline-details-body h3:first-child { margin-top: 0; }
+.pipeline-details-body p { margin: 0 0 10px; }
+.pipeline-details-body dl { display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.pipeline-details-body dt { color: var(--gp-muted, #526176); }
+.pipeline-details-body dd { margin: 0; }
+.pipeline-details-prompt { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.pipeline-details-note { color: var(--gp-muted, #526176); }
+@media (max-width: 680px) {
+  .pipeline-details { top: auto; left: 0; width: 100%; max-height: min(65vh, 100%); border-radius: 8px 8px 0 0; }
+  .pipeline-details-header { padding: 10px 12px; }
+  .pipeline-details-body { padding: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-details, .pipeline-viewer [data-diagram-node] { animation: none; transition: none; scroll-behavior: auto; }
+}

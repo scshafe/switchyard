@@ -31,6 +31,7 @@ import {
   ExecutionFailureError,
   isExecutionFailureError
 } from "./failure.js";
+import { declaredFailureRecoveryUsage } from "./declared-failures.js";
 import {
   snapshotNodeTurnCompletion,
   snapshotWorkerNodeTurnContext,
@@ -88,13 +89,19 @@ function validateNodeRef(value: unknown, label: string): SwitchyardNodeRef {
   });
 }
 
-/** The exact below-N0 fingerprint formula recorded in the phase plan. */
+/**
+ * The exact below-N0 fingerprint formula recorded in the phase plan. The
+ * configuration slot was sealed as the constant `"default"` before 2.1.0; a
+ * node that declares a configuration ref fills it with that ref's digest, and
+ * a node that declares none is byte-identical to before.
+ */
 export function nodeExecutionFingerprint(nodeRaw: unknown): string {
   const node = validateSwitchyardNode(nodeRaw, "node execution fingerprint");
   const binding = Object.hasOwn(node, "binding") ? node.binding : undefined;
+  const configuration = Object.hasOwn(node, "configuration") ? node.configuration : undefined;
   return digest({
     bindingFingerprint: binding?.bindingDigest ?? "none",
-    configurationFingerprint: NODE_EXECUTION_CONFIGURATION_FINGERPRINT
+    configurationFingerprint: configuration?.digest ?? NODE_EXECUTION_CONFIGURATION_FINGERPRINT
   });
 }
 
@@ -239,7 +246,7 @@ export function nodeTurnResultErrorUsage(
   const evidence = nodeTurnResultErrorEvidenceByError.get(value);
   return evidence?.nodeId === nodeId && evidence.idempotencyKey === idempotencyKey
     ? evidence.usage
-    : undefined;
+    : declaredFailureRecoveryUsage(value, nodeId, idempotencyKey);
 }
 
 /** A worker claim exposed a human/callback wait to an executable worker. */
@@ -362,6 +369,26 @@ function assertContextMatchesNode(
     || (contextHasBytes && context.inputArtifact.bytes !== inputArtifact.bytes)
   ) {
     throw new Error(`worker context inputArtifact does not match node ${node.nodeId} input`);
+  }
+  const nodeConfiguration = Object.hasOwn(node, "configuration") ? node.configuration : undefined;
+  const contextConfiguration = Object.hasOwn(context, "configuration")
+    ? context.configuration
+    : undefined;
+  if (
+    (nodeConfiguration === undefined) !== (contextConfiguration === undefined)
+    || (
+      nodeConfiguration !== undefined
+      && contextConfiguration !== undefined
+      && (
+        nodeConfiguration.id !== contextConfiguration.id
+        || nodeConfiguration.version !== contextConfiguration.version
+        || nodeConfiguration.digest !== contextConfiguration.digest
+      )
+    )
+  ) {
+    throw new Error(
+      `worker context configuration does not match sealed node ${node.nodeId}`
+    );
   }
   const expectedKey = nodeTurnIdempotencyKey({
     unitId: context.unitId,

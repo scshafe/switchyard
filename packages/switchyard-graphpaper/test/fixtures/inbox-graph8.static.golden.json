@@ -1,0 +1,1325 @@
+{
+  "id": "inbox-email-pipeline",
+  "title": "Email pipeline · inbox.email-graph.v1 v8",
+  "kind": "process",
+  "description": "Every email admitted from a mail account walks this graph top to bottom. Each arrow carries the decision that takes an email down it; dashed exits are where its journey ends.",
+  "nodes": [
+    {
+      "id": "filter",
+      "type": "code",
+      "title": "Normalizer (1)",
+      "description": "Mints the normalized email every later agent reads — sender name, address and domain; a 16k text projection of subject, body and quarantined attachment metadata; links; a bulk-label flag. Spam is the provider's own label, never a judgement made here.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "1"
+        },
+        {
+          "label": "outcomes",
+          "value": "spam | clean"
+        },
+        {
+          "label": "later agents read",
+          "value": "sender domain (router) · text ≤16k (security scan, models) · links (mentions, JobTrack) · bulk-label flag (newsletter fallback)"
+        },
+        {
+          "label": "ref",
+          "value": "normalize.email@2"
+        }
+      ],
+      "metadata": {
+        "nodeId": "filter",
+        "role": "code",
+        "kind": "code",
+        "rank": 1
+      }
+    },
+    {
+      "id": "security",
+      "type": "code",
+      "title": "Security scan (2)",
+      "visibleRows": 1,
+      "description": "Marks the risk: high when a severe pattern fires (that is the hostile mark, and it forces review), medium when the only flag is an external link, low when nothing fires. Both outcomes go to the Router.",
+      "rows": [
+        {
+          "label": "marks",
+          "value": "ok | hostile"
+        },
+        {
+          "label": "depth",
+          "value": "2"
+        },
+        {
+          "label": "ref",
+          "value": "security.scan@2"
+        }
+      ],
+      "metadata": {
+        "nodeId": "security",
+        "role": "code",
+        "kind": "code",
+        "rank": 2,
+        "marks": [
+          "ok",
+          "hostile"
+        ]
+      }
+    },
+    {
+      "id": "route",
+      "type": "code",
+      "title": "Router (3)",
+      "visibleRows": 1,
+      "description": "Keyword and domain patterns over the sender domain and the message text tag one lane, first match wins; unmatched bulk-labelled mail falls to newsletter, the rest to unknown. The lane never branches — it rides along as evidence for the classifier and the action models.",
+      "rows": [
+        {
+          "label": "marks",
+          "value": "jobs | finance | travel | friends_family | newsletter | unknown"
+        },
+        {
+          "label": "depth",
+          "value": "3"
+        },
+        {
+          "label": "how",
+          "value": "first rule that matches sender domain + message text; else the bulk label makes it newsletter; else unknown"
+        },
+        {
+          "label": "also marks",
+          "value": "confidence 0.82 rule · 0.72 bulk label · 0.2 no match; the reason it used; review-recommended — always true today, because the router's highest confidence (0.82) never clears the 0.9 bar"
+        },
+        {
+          "label": "ref",
+          "value": "route.deterministic@2"
+        }
+      ],
+      "metadata": {
+        "nodeId": "route",
+        "role": "code",
+        "kind": "code",
+        "rank": 3,
+        "marks": [
+          "jobs",
+          "finance",
+          "travel",
+          "friends_family",
+          "newsletter",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "classification",
+      "type": "model",
+      "title": "Classifier (4)",
+      "description": "Local model: settles the mail's category itself — the router's lane is only prompt evidence — and sets the urgency, human-action flag, summary and confidence later agents read.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "4"
+        },
+        {
+          "label": "outcomes",
+          "value": "jobs | finance | travel | friends_family | newsletter | informational | unknown"
+        },
+        {
+          "label": "model",
+          "value": "qwen2.5-14b"
+        },
+        {
+          "label": "ref",
+          "value": "classify.model@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "classification",
+        "role": "model",
+        "kind": "model",
+        "rank": 4
+      }
+    },
+    {
+      "id": "notifications",
+      "type": "code",
+      "title": "Notification planner (5)",
+      "description": "Runs on every classified email and always settles planned. The plan names a push topic only when the classifier said the mail needs a person's action or set urgency high or time_sensitive; otherwise it carries no target and no action, and nothing is written to the outbox.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "5"
+        },
+        {
+          "label": "outcomes",
+          "value": "planned"
+        },
+        {
+          "label": "ref",
+          "value": "notifications.plan@2"
+        }
+      ],
+      "metadata": {
+        "nodeId": "notifications",
+        "role": "code",
+        "kind": "code",
+        "rank": 5
+      }
+    },
+    {
+      "id": "unsubscribe",
+      "type": "code",
+      "title": "Unsubscribe offer (5)",
+      "description": "Newsletter mail filed under Promotions with an unsubscribe header and a sender outside the keep-list becomes a proposal for dedicated human review. No target is contacted and no request is emitted by this node.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "5"
+        },
+        {
+          "label": "outcomes",
+          "value": "candidate | skipped"
+        },
+        {
+          "label": "proposes when",
+          "value": "classifier newsletter · Gmail CATEGORY_PROMOTIONS · unsubscribe header · sender not kept"
+        },
+        {
+          "label": "unsupported methods",
+          "value": "mailto-only and malformed targets still reach review for needs-help, never a mail send"
+        },
+        {
+          "label": "ref",
+          "value": "mail.unsubscribe@2"
+        }
+      ],
+      "metadata": {
+        "nodeId": "unsubscribe",
+        "role": "code",
+        "kind": "code",
+        "rank": 5
+      }
+    },
+    {
+      "id": "unsubscribe-review",
+      "type": "human",
+      "title": "Unsubscribe review (6)",
+      "description": "A person authorizes contact with the exact target and bounded preference-page projection to GPT-6 Astra, keeps the subscription, or records needs-help. The frontier reviewer cannot decide this node. Only approval emits an external request; it does not claim unsubscribe success.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "6"
+        },
+        {
+          "label": "outcomes",
+          "value": "approved | rejected | needs_help"
+        },
+        {
+          "label": "ref",
+          "value": "mail.unsubscribe.review@2"
+        }
+      ],
+      "metadata": {
+        "nodeId": "unsubscribe-review",
+        "role": "human",
+        "kind": "human",
+        "rank": 6
+      }
+    },
+    {
+      "id": "mailbox-writer",
+      "type": "code",
+      "title": "Mailbox writer (5)",
+      "description": "Runs on every classified email and asks that the mailbox it arrived in be given the pipeline's own label for what the classifier decided — one Pipeline/<category> label, added, nothing removed and nothing archived. Only a mailbox the operator put on the write allowlist is ever asked for; every other mailbox is skipped with the rule named. The label is written here, never read out of the mail.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "5"
+        },
+        {
+          "label": "outcomes",
+          "value": "requested | skipped"
+        },
+        {
+          "label": "asks when",
+          "value": "the mailbox is on the write allowlist (INBOX_MAILBOX_WRITE_ACCOUNTS, read once at engine start; absent means only owner@example.com, empty means no mailbox at all)"
+        },
+        {
+          "label": "leaves alone",
+          "value": "every mailbox not on the allowlist — account_not_enabled, the only rule it has today"
+        },
+        {
+          "label": "the label",
+          "value": "Pipeline/jobs · Pipeline/finance · Pipeline/travel · Pipeline/friends_family · Pipeline/newsletter · Pipeline/informational · Pipeline/unknown"
+        },
+        {
+          "label": "the act",
+          "value": "one Gmail modify call by the mailbox write relay, once per mailbox per message per operation; dry-run until the relay is armed"
+        },
+        {
+          "label": "ref",
+          "value": "mail.mailbox-write@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "mailbox-writer",
+        "role": "code",
+        "kind": "code",
+        "rank": 5
+      }
+    },
+    {
+      "id": "mention-gate",
+      "type": "code",
+      "title": "Mention gate (5)",
+      "description": "Jobs mail only. Skips the local extractor whenever its own deterministic scan of the message and sender already found an exact reference, a posting URL, or company + role — and whenever INBOX_EMAIL_MODEL_MENTIONS is off, which is the default and is fixed at boot.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "5"
+        },
+        {
+          "label": "outcomes",
+          "value": "disabled | extract"
+        },
+        {
+          "label": "gate",
+          "value": "INBOX_EMAIL_MODEL_MENTIONS · read once at engine start; default off"
+        },
+        {
+          "label": "skips the model when",
+          "value": "its own deterministic scan already has a reference code, a posting URL, or a role title with a company"
+        },
+        {
+          "label": "ref",
+          "value": "email.mentions.gate@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "mention-gate",
+        "role": "code",
+        "kind": "code",
+        "rank": 5
+      }
+    },
+    {
+      "id": "mention-extraction",
+      "type": "model",
+      "title": "Mention extractor (6)",
+      "visibleRows": 1,
+      "description": "Local model proposes mentions; deterministic source grounding admits only literal email text. One attempt, no retry — anything that does not come back usable falls back to the deterministic mentions.",
+      "rows": [
+        {
+          "label": "marks",
+          "value": "extracted | fallback"
+        },
+        {
+          "label": "depth",
+          "value": "6"
+        },
+        {
+          "label": "model",
+          "value": "qwen2.5-14b"
+        },
+        {
+          "label": "ref",
+          "value": "email.mentions.model@1"
+        }
+      ],
+      "metadata": {
+        "nodeId": "mention-extraction",
+        "role": "model",
+        "kind": "model",
+        "rank": 6,
+        "marks": [
+          "extracted",
+          "fallback"
+        ]
+      }
+    },
+    {
+      "id": "jobtrack-proposal",
+      "type": "code",
+      "title": "JobTrack proposer (7)",
+      "description": "Turns a jobs classification into a JobTrack proposal on the outbox, or settles not_applicable when the mail carries no application signal.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "7"
+        },
+        {
+          "label": "outcomes",
+          "value": "proposed | not_applicable"
+        },
+        {
+          "label": "signal",
+          "value": "application_status_signal | interview_signal | recruiter_communication | application_information_request | application_acknowledged | rejection_signal | offer_signal | unknown_job_mail"
+        },
+        {
+          "label": "ref",
+          "value": "jobtrack.proposal@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "jobtrack-proposal",
+        "role": "code",
+        "kind": "code",
+        "rank": 7
+      }
+    },
+    {
+      "id": "action-evidence",
+      "type": "code",
+      "title": "Evidence gatherer (4)",
+      "description": "Opens the action decision: pins the exact stored message revision and the content digests every later action turn re-checks, then hands the mail to a person whenever the security scan raised a flag — one link counts — and on to the models only when it raised none.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "4"
+        },
+        {
+          "label": "outcomes",
+          "value": "eligible | security_review | evidence_incomplete"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.evidence-gate@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-evidence",
+        "role": "code",
+        "kind": "code",
+        "rank": 4
+      }
+    },
+    {
+      "id": "action-recall",
+      "type": "model",
+      "title": "Recall analyst (5)",
+      "description": "Local model, recall-first: does this email oblige a person to act? An answer at 0.70 confidence or better goes on to the Precision analyst; a less confident answer is still recorded and goes to the arbiter.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "5"
+        },
+        {
+          "label": "outcomes",
+          "value": "candidate | low_confidence | invalid | action_provider_policy_violation | action_provider_outcome_indeterminate | action_output_contract_rejected"
+        },
+        {
+          "label": "model",
+          "value": "qwen2.5-14b"
+        },
+        {
+          "label": "records",
+          "value": "on an answer: its yes/no, confidence, category and urgency, for the comparer, arbiter and validator"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.recall-sentinel@5"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-recall",
+        "role": "model",
+        "kind": "model",
+        "rank": 5
+      }
+    },
+    {
+      "id": "action-precision",
+      "type": "model",
+      "title": "Precision analyst (6)",
+      "description": "The same local model as the recall analyst, prompted the opposite way: call an email actionable only when the supplied evidence shows a concrete obligation. It is shown recall's answer, not asked blind.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "6"
+        },
+        {
+          "label": "outcomes",
+          "value": "candidate | low_confidence | invalid | action_provider_policy_violation | action_provider_outcome_indeterminate | action_output_contract_rejected"
+        },
+        {
+          "label": "model",
+          "value": "qwen2.5-14b"
+        },
+        {
+          "label": "records",
+          "value": "on an answer: its yes/no, confidence, category and urgency, for the comparer, arbiter and validator"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.precision-gatekeeper@5"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-precision",
+        "role": "model",
+        "kind": "model",
+        "rank": 6
+      }
+    },
+    {
+      "id": "action-compare",
+      "type": "code",
+      "title": "Comparer (7)",
+      "description": "Do the two analysts' yes/no answers match? Only that is compared — not confidence, category or urgency. Agreement goes to the Validator; a disagreement, or a record missing one of the two answers, goes to the arbiter.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "7"
+        },
+        {
+          "label": "outcomes",
+          "value": "agree | disagree | invalid"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.compare@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-compare",
+        "role": "code",
+        "kind": "code",
+        "rank": 7
+      }
+    },
+    {
+      "id": "action-arbiter",
+      "type": "model",
+      "title": "Skeptical arbiter (8)",
+      "description": "Reached when a specialist escalates or the two disagree. A bigger local model, skeptically prompted, answers the action question itself — the specialists' verdicts are evidence in its prompt, not votes it counts — and its answer becomes the decision if it clears 0.75 confidence, on a single attempt. Below that bar, or when the local provider returns nothing usable, a person decides.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "8"
+        },
+        {
+          "label": "outcomes",
+          "value": "candidate | low_confidence | invalid | action_provider_policy_violation | action_provider_outcome_indeterminate | action_output_contract_rejected"
+        },
+        {
+          "label": "model",
+          "value": "mistral-large-123b"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.skeptical-arbiter@5"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-arbiter",
+        "role": "model",
+        "kind": "model",
+        "rank": 8
+      }
+    },
+    {
+      "id": "action-validate",
+      "type": "code",
+      "title": "Validator (9)",
+      "description": "Picks the winning candidate — the arbiter's, else the less confident of the two agreeing specialists — re-checks security, model binding and the confidence floors, then mints the decision record: needs action, or no action.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "9"
+        },
+        {
+          "label": "outcomes",
+          "value": "valid | invalid"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.validator@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-validate",
+        "role": "code",
+        "kind": "code",
+        "rank": 9
+      }
+    },
+    {
+      "id": "action-context-review",
+      "type": "human",
+      "title": "Context review (9)",
+      "description": "A person decides mail the automatic ladder would not settle. Approving records 'needs action' on their own authority; rejecting ends the branch with no action decision.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "9"
+        },
+        {
+          "label": "outcomes",
+          "value": "approved | rejected"
+        },
+        {
+          "label": "waits",
+          "value": "in the /human queue until a person answers - no expiry, no reminder"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.context-review@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-context-review",
+        "role": "human",
+        "kind": "human",
+        "rank": 9
+      }
+    },
+    {
+      "id": "action-validation-review",
+      "type": "human",
+      "title": "Validation review (10)",
+      "description": "A person decides after the validator refused to certify a decision — what is queued is that escalation, not a decision. Approving records 'needs action' on their own authority; rejecting ends the branch.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "10"
+        },
+        {
+          "label": "outcomes",
+          "value": "approved | rejected"
+        },
+        {
+          "label": "waits",
+          "value": "in the /human queue until a person answers - no expiry, no reminder"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.validation-review@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-validation-review",
+        "role": "human",
+        "kind": "human",
+        "rank": 10
+      }
+    },
+    {
+      "id": "action-context-reviewed",
+      "type": "code",
+      "title": "Context recorder (10)",
+      "description": "Re-checks the approval a person gave against the sealed action-decision contract, then the journey ends. It stores no new record and sends nothing: the approval itself was written one step back, when Human context review settled.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "10"
+        },
+        {
+          "label": "outcomes",
+          "value": "recorded"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.context-reviewed@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-context-reviewed",
+        "role": "code",
+        "kind": "code",
+        "rank": 10
+      }
+    },
+    {
+      "id": "action-validation-reviewed",
+      "type": "code",
+      "title": "Validation recorder (11)",
+      "description": "Re-checks the approval a person gave against the sealed action-decision contract, then the journey ends. It stores no new record and sends nothing: the approval itself was written one step back, when Human validation review settled.",
+      "rows": [
+        {
+          "label": "depth",
+          "value": "11"
+        },
+        {
+          "label": "outcomes",
+          "value": "recorded"
+        },
+        {
+          "label": "ref",
+          "value": "decision.action.validation-reviewed@3"
+        }
+      ],
+      "metadata": {
+        "nodeId": "action-validation-reviewed",
+        "role": "code",
+        "kind": "code",
+        "rank": 11
+      }
+    },
+    {
+      "id": "endpoint:jobtrack",
+      "type": "endpoint",
+      "title": "JobTrack",
+      "subtitle": "applicant tracker",
+      "description": "A proposal about an application email — acknowledgement, invite, offer — becomes JobTrack facts, correlated to the application and reviewed by the applicant's agent.",
+      "rows": [
+        {
+          "label": "kind",
+          "value": "extension · relay to the tracker"
+        },
+        {
+          "label": "fed by",
+          "value": "JobTrack proposer"
+        },
+        {
+          "label": "via",
+          "value": "outbox → NOTIFY inbox_jobtrack_outbox → listening relay on the JobTrack host → jobtrack CLI (import-facts, correlate, record-correlation)"
+        }
+      ],
+      "metadata": {
+        "endpointId": "jobtrack",
+        "sink": "endpoint",
+        "outboxEventTypes": [
+          "inbox.email-graph.jobtrack-proposal.v1"
+        ]
+      }
+    },
+    {
+      "id": "endpoint:notifications",
+      "type": "endpoint",
+      "title": "Push notifications",
+      "subtitle": "ntfy · not wired",
+      "description": "Mail that needs action or is urgent commits a plan to the outbox in the same transaction as the node settles. Nothing in this pipeline reads it: unlike JobTrack there is no NOTIFY trigger and no relay, so the plan waits in the outbox and this endpoint can only ever read 'planned'.",
+      "rows": [
+        {
+          "label": "kind",
+          "value": "push plan · awaiting a transport"
+        },
+        {
+          "label": "fed by",
+          "value": "Notification planner"
+        },
+        {
+          "label": "via",
+          "value": "outbox row inbox.email-graph.notification-plan.v1 — no reader in this pipeline"
+        }
+      ],
+      "metadata": {
+        "endpointId": "notifications",
+        "sink": "endpoint",
+        "outboxEventTypes": [
+          "inbox.email-graph.notification-plan.v1"
+        ]
+      }
+    },
+    {
+      "id": "endpoint:unsubscribe",
+      "type": "endpoint",
+      "title": "Unsubscribe jobs",
+      "subtitle": "external executor · operator-approved requests only",
+      "description": "Dedicated human approval emits a request bound to the exact source, target and candidate. One-click first; bounded headless Astra fallback only when safe. Needs-help and uncertain outcomes never claim success or permit blind replay. The old ungated relay is retired.",
+      "rows": [
+        {
+          "label": "kind",
+          "value": "extension · approved target only"
+        },
+        {
+          "label": "fed by",
+          "value": "Unsubscribe review"
+        },
+        {
+          "label": "via",
+          "value": "human approval → transactional approved-request outbox → external executor → evidence-backed result"
+        }
+      ],
+      "metadata": {
+        "endpointId": "unsubscribe",
+        "sink": "endpoint",
+        "outboxEventTypes": [
+          "inbox.email-graph.unsubscribe-approved-request.v1"
+        ]
+      }
+    },
+    {
+      "id": "endpoint:mailbox",
+      "type": "endpoint",
+      "title": "Mailbox write relay",
+      "subtitle": "this stack · dry-run until armed",
+      "description": "A decision to file an email in the mailbox it arrived in becomes one Gmail modify call, made by the relay from the outbox — one operation per message, once, and only for an account on the write allowlist. The request names the account, the provider message id and the operation the pipeline authored (today, a Pipeline/… label named for the classifier's category); no subject, body, sender or link travels with it. In dry-run the relay lists what it would do, reads no credential and spawns nothing.",
+      "rows": [
+        {
+          "label": "kind",
+          "value": "extension · one operation per message"
+        },
+        {
+          "label": "fed by",
+          "value": "Mailbox writer"
+        },
+        {
+          "label": "via",
+          "value": "outbox → relay poll (INBOX_MAILBOX_RELAY_MODE=live) → gog gmail messages modify → write ledger"
+        }
+      ],
+      "metadata": {
+        "endpointId": "mailbox",
+        "sink": "endpoint",
+        "outboxEventTypes": [
+          "inbox.email-graph.mailbox-write-request.v1"
+        ]
+      }
+    },
+    {
+      "id": "endpoint:human-review",
+      "type": "endpoint",
+      "title": "Human review console",
+      "subtitle": "this dashboard (/human)",
+      "description": "Human nodes queue a bounded decision for a person; the approval flows back into the graph.",
+      "rows": [
+        {
+          "label": "kind",
+          "value": "flag for a person"
+        },
+        {
+          "label": "fed by",
+          "value": "Context review, Validation review"
+        },
+        {
+          "label": "via",
+          "value": "unit queue → /human → decision routine"
+        }
+      ],
+      "metadata": {
+        "endpointId": "human-review",
+        "sink": "endpoint",
+        "outboxEventTypes": []
+      }
+    },
+    {
+      "id": "terminal:spam",
+      "type": "terminal",
+      "title": "Provider-labelled spam",
+      "subtitle": "ends here",
+      "description": "The mail provider had already labelled the message spam, so the journey stops at step 1 — nothing leaves the graph, nothing is proposed, and nobody is told.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Normalizer: spam"
+        }
+      ],
+      "metadata": {
+        "terminalId": "spam",
+        "sink": "terminal",
+        "ends": [
+          "filter:spam"
+        ]
+      }
+    },
+    {
+      "id": "terminal:no-application-signal",
+      "type": "terminal",
+      "title": "No application signal",
+      "subtitle": "ends here",
+      "description": "The proposer's declared quiet end: mail it decides not to propose about. Nothing is proposed and nothing leaves the graph from here.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "JobTrack proposer: not_applicable"
+        }
+      ],
+      "metadata": {
+        "terminalId": "no-application-signal",
+        "sink": "terminal",
+        "ends": [
+          "jobtrack-proposal:not_applicable"
+        ]
+      }
+    },
+    {
+      "id": "terminal:action-decided",
+      "type": "terminal",
+      "title": "Action decided",
+      "subtitle": "ends here",
+      "description": "The decision stood: the validator accepted it, or a person approved a flagged one. The verdict — needs action, or no action — is stored with the email's record; nothing is sent and no other system is told.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Validator: valid, Context recorder: recorded, Validation recorder: recorded"
+        }
+      ],
+      "metadata": {
+        "terminalId": "action-decided",
+        "sink": "terminal",
+        "ends": [
+          "action-validate:valid",
+          "action-context-reviewed:recorded",
+          "action-validation-reviewed:recorded"
+        ]
+      }
+    },
+    {
+      "id": "terminal:left-subscribed",
+      "type": "terminal",
+      "title": "Left subscribed",
+      "subtitle": "ends here",
+      "description": "The candidate stage skipped by a named rule, or a person kept the subscription. Nothing leaves this branch.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Unsubscribe offer: skipped, Unsubscribe review: rejected"
+        }
+      ],
+      "metadata": {
+        "terminalId": "left-subscribed",
+        "sink": "terminal",
+        "ends": [
+          "unsubscribe:skipped",
+          "unsubscribe-review:rejected"
+        ]
+      }
+    },
+    {
+      "id": "terminal:unsubscribe-needs-help",
+      "type": "terminal",
+      "title": "Unsubscribe needs help",
+      "subtitle": "ends here",
+      "description": "A person recorded that manual help is required. No request was emitted and no unsubscribe success is claimed.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Unsubscribe review: needs_help"
+        }
+      ],
+      "metadata": {
+        "terminalId": "unsubscribe-needs-help",
+        "sink": "terminal",
+        "ends": [
+          "unsubscribe-review:needs_help"
+        ]
+      }
+    },
+    {
+      "id": "terminal:not-filed",
+      "type": "terminal",
+      "title": "Left unfiled",
+      "subtitle": "ends here",
+      "description": "The Mailbox writer looked and asked for nothing: this mailbox is not on the write allowlist, so no label is proposed for it. The plan names the rule; nothing leaves the graph from here.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Mailbox writer: skipped"
+        }
+      ],
+      "metadata": {
+        "terminalId": "not-filed",
+        "sink": "terminal",
+        "ends": [
+          "mailbox-writer:skipped"
+        ]
+      }
+    },
+    {
+      "id": "terminal:dismissed",
+      "type": "terminal",
+      "title": "Dismissed by reviewer",
+      "subtitle": "ends here",
+      "description": "A person ended the review, so no action decision is recorded for this email; the rejection itself is settled and attributed to them. Nothing leaves the graph from here.",
+      "rows": [
+        {
+          "label": "ends",
+          "value": "Context review: rejected, Validation review: rejected"
+        }
+      ],
+      "metadata": {
+        "terminalId": "dismissed",
+        "sink": "terminal",
+        "ends": [
+          "action-context-review:rejected",
+          "action-validation-review:rejected"
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "filter->security",
+      "from": "filter",
+      "to": "security",
+      "type": "outcome",
+      "label": "clean",
+      "description": "Normalizer settles clean → Security scan"
+    },
+    {
+      "id": "security->route:ok",
+      "from": "security",
+      "to": "route",
+      "type": "outcome",
+      "label": "ok",
+      "description": "risk low or medium — none of the four high-risk patterns matched. An http or https link anywhere in the subject or body makes it medium, and the Evidence gatherer treats anything above low as risky, so a medium email still leaves the action ladder there."
+    },
+    {
+      "id": "security->route:hostile",
+      "from": "security",
+      "to": "route",
+      "type": "outcome",
+      "label": "hostile",
+      "description": "risk high — injection phrasing, code or script text, a javascript:/data:/file: string, or a base64, private-key or eval marker matched, so requiresReview is set. Same path either way: the Router runs next and reads the flag, and the Evidence gatherer sends this email to human context review."
+    },
+    {
+      "id": "route->classification",
+      "from": "route",
+      "to": "classification",
+      "type": "outcome",
+      "label": "always",
+      "description": "Router settles any outcome → Classifier; the mark rides along in the email record, and the same email also goes to the Evidence gatherer"
+    },
+    {
+      "id": "route->action-evidence",
+      "from": "route",
+      "to": "action-evidence",
+      "type": "outcome",
+      "label": "always",
+      "description": "Router settles any outcome → Evidence gatherer; the mark rides along in the email record, and the same email also goes to the Classifier"
+    },
+    {
+      "id": "classification->notifications",
+      "from": "classification",
+      "to": "notifications",
+      "type": "outcome",
+      "label": "always",
+      "description": "Classifier settles any outcome → Notification planner, and on jobs the same email also goes to the Mention gate, and on newsletter the same email also goes to the Unsubscribe offer"
+    },
+    {
+      "id": "classification->mention-gate",
+      "from": "classification",
+      "to": "mention-gate",
+      "type": "outcome",
+      "label": "jobs",
+      "description": "Classifier settles jobs → Mention gate, and the same email also goes to the Notification planner"
+    },
+    {
+      "id": "classification->unsubscribe",
+      "from": "classification",
+      "to": "unsubscribe",
+      "type": "outcome",
+      "label": "newsletter",
+      "description": "The candidate stage runs beside notifications. Eligible header offers always wait for separate human permission."
+    },
+    {
+      "id": "classification->mailbox-writer",
+      "from": "classification",
+      "to": "mailbox-writer",
+      "type": "outcome",
+      "label": "every category",
+      "description": "Whatever the classifier settled, the Mailbox writer is offered the same email beside the Notification planner: the category IS the label it would ask for. Only a mailbox on the write allowlist becomes a request; everything else is skipped with the rule named."
+    },
+    {
+      "id": "mention-gate->jobtrack-proposal",
+      "from": "mention-gate",
+      "to": "jobtrack-proposal",
+      "type": "outcome",
+      "label": "skip the extractor",
+      "description": "Either the boot flag INBOX_EMAIL_MODEL_MENTIONS is off — the default — or the deterministic scan already found an exact reference, a posting URL, or company + role. The proposer runs on the deterministic mentions alone; only this model lane is skipped, never the action ladder."
+    },
+    {
+      "id": "mention-gate->mention-extraction",
+      "from": "mention-gate",
+      "to": "mention-extraction",
+      "type": "outcome",
+      "label": "run the extractor",
+      "description": "The boot flag INBOX_EMAIL_MODEL_MENTIONS is on and the deterministic scan found no exact reference, no posting URL and no company + role pair, so the local model is asked for the mentions."
+    },
+    {
+      "id": "mention-extraction->jobtrack-proposal:extracted",
+      "from": "mention-extraction",
+      "to": "jobtrack-proposal",
+      "type": "outcome",
+      "label": "extracted",
+      "description": "Mention extractor settles extracted → JobTrack proposer; the mark rides along in the email record"
+    },
+    {
+      "id": "mention-extraction->jobtrack-proposal:fallback",
+      "from": "mention-extraction",
+      "to": "jobtrack-proposal",
+      "type": "outcome",
+      "label": "fallback",
+      "description": "Mention extractor settles fallback → JobTrack proposer; the mark rides along in the email record"
+    },
+    {
+      "id": "action-evidence->action-recall",
+      "from": "action-evidence",
+      "to": "action-recall",
+      "type": "outcome",
+      "label": "eligible",
+      "description": "The security scan raised no flag at all — one external link is enough to lose eligibility — and the stored body text came back matching its digest. Stricter than the scan's own ok mark, which only means not-high risk."
+    },
+    {
+      "id": "action-evidence->action-context-review",
+      "from": "action-evidence",
+      "to": "action-context-review",
+      "type": "outcome",
+      "label": "otherwise",
+      "description": "security_review: the mail scored above low risk, or the scan flagged it outright. evidence_incomplete: the email's content hydration is not complete, or the sanitized body does not match the digest the evidence pins."
+    },
+    {
+      "id": "action-recall->action-precision",
+      "from": "action-recall",
+      "to": "action-precision",
+      "type": "outcome",
+      "label": "confident answer",
+      "description": "An answer of either kind — requires_action or no_action — at the model's own confidence of 0.70 or better. The Precision analyst then judges the same email with the recall answer in front of it, and the Comparer checks the two decisions match."
+    },
+    {
+      "id": "action-recall->action-arbiter:low_confidence",
+      "from": "action-recall",
+      "to": "action-arbiter",
+      "type": "outcome",
+      "label": "not confident",
+      "description": "The analyst answered, but under the 0.70 bar. The answer is still recorded and travels with the email: the arbiter re-decides with it in view."
+    },
+    {
+      "id": "action-recall->action-arbiter:invalid",
+      "from": "action-recall",
+      "to": "action-arbiter",
+      "type": "outcome",
+      "label": "no usable answer",
+      "description": "The model's answer could not be read, was rejected by host policy (wrong model, bad finish, over the token ceiling, contract-breaking JSON), the journaled call never came back with a determinate result, or the answer was accepted but the graph-state record built from it failed the sealed contract. No answer is recorded, so the next step decides with no prior candidate in view."
+    },
+    {
+      "id": "action-precision->action-compare",
+      "from": "action-precision",
+      "to": "action-compare",
+      "type": "outcome",
+      "label": "confident answer",
+      "description": "A second answer at 0.70 confidence or better. The Comparer checks only whether the two analysts' yes/no answers match."
+    },
+    {
+      "id": "action-precision->action-arbiter:low_confidence",
+      "from": "action-precision",
+      "to": "action-arbiter",
+      "type": "outcome",
+      "label": "not confident",
+      "description": "The analyst answered, but under the 0.70 bar. The answer is still recorded and travels with the email: the arbiter re-decides with it in view."
+    },
+    {
+      "id": "action-precision->action-arbiter:invalid",
+      "from": "action-precision",
+      "to": "action-arbiter",
+      "type": "outcome",
+      "label": "no usable answer",
+      "description": "The model's answer could not be read, was rejected by host policy (wrong model, bad finish, over the token ceiling, contract-breaking JSON), the journaled call never came back with a determinate result, or the answer was accepted but the graph-state record built from it failed the sealed contract. No answer is recorded, so the next step decides with no prior candidate in view. The Comparer never runs."
+    },
+    {
+      "id": "action-compare->action-validate",
+      "from": "action-compare",
+      "to": "action-validate",
+      "type": "outcome",
+      "label": "agree",
+      "description": "Comparer settles agree → Validator"
+    },
+    {
+      "id": "action-compare->action-arbiter",
+      "from": "action-compare",
+      "to": "action-arbiter",
+      "type": "outcome",
+      "label": "disagree | invalid",
+      "description": "Comparer settles disagree or invalid → Skeptical arbiter"
+    },
+    {
+      "id": "action-arbiter->action-validate",
+      "from": "action-arbiter",
+      "to": "action-validate",
+      "type": "outcome",
+      "label": "confident answer",
+      "description": "The arbiter's own answer, at 0.75 confidence or better, becomes the decision; the Validator re-checks it before the record is minted."
+    },
+    {
+      "id": "action-arbiter->action-context-review:low_confidence",
+      "from": "action-arbiter",
+      "to": "action-context-review",
+      "type": "outcome",
+      "label": "not confident",
+      "description": "The arbiter answered, but under the 0.75 bar. Its answer is still recorded and is shown to the reviewer."
+    },
+    {
+      "id": "action-arbiter->action-context-review:invalid",
+      "from": "action-arbiter",
+      "to": "action-context-review",
+      "type": "outcome",
+      "label": "no usable answer",
+      "description": "The model's answer could not be read, was rejected by host policy (wrong model, bad finish, over the token ceiling, contract-breaking JSON), the journaled call never came back with a determinate result, or the answer was accepted but the graph-state record built from it failed the sealed contract. No answer is recorded, so the next step decides with no prior candidate in view."
+    },
+    {
+      "id": "action-validate->action-validation-review",
+      "from": "action-validate",
+      "to": "action-validation-review",
+      "type": "outcome",
+      "label": "invalid",
+      "description": "Validator settles invalid → Validation review"
+    },
+    {
+      "id": "unsubscribe->unsubscribe-review",
+      "from": "unsubscribe",
+      "to": "unsubscribe-review",
+      "type": "outcome",
+      "label": "candidate",
+      "description": "A header-derived candidate is not an authorization. Every candidate waits for a person."
+    },
+    {
+      "id": "action-context-review->action-context-reviewed",
+      "from": "action-context-review",
+      "to": "action-context-reviewed",
+      "type": "outcome",
+      "label": "approved",
+      "description": "Context review settles approved → Context recorder"
+    },
+    {
+      "id": "action-validation-review->action-validation-reviewed",
+      "from": "action-validation-review",
+      "to": "action-validation-reviewed",
+      "type": "outcome",
+      "label": "approved",
+      "description": "Validation review settles approved → Validation recorder"
+    },
+    {
+      "id": "jobtrack-proposal->endpoint:jobtrack",
+      "from": "jobtrack-proposal",
+      "to": "endpoint:jobtrack",
+      "type": "exit",
+      "label": "proposed",
+      "description": "JobTrack proposer settles proposed → JobTrack (outbox → NOTIFY inbox_jobtrack_outbox → listening relay on the JobTrack host → jobtrack CLI (import-facts, correlate, record-correlation))"
+    },
+    {
+      "id": "notifications->endpoint:notifications",
+      "from": "notifications",
+      "to": "endpoint:notifications",
+      "type": "exit",
+      "label": "planned",
+      "description": "Notification planner settles planned → Push notifications (outbox row inbox.email-graph.notification-plan.v1 — no reader in this pipeline)"
+    },
+    {
+      "id": "unsubscribe-review->endpoint:unsubscribe",
+      "from": "unsubscribe-review",
+      "to": "endpoint:unsubscribe",
+      "type": "exit",
+      "label": "approved",
+      "description": "Unsubscribe review settles approved → Unsubscribe jobs (human approval → transactional approved-request outbox → external executor → evidence-backed result)"
+    },
+    {
+      "id": "mailbox-writer->endpoint:mailbox",
+      "from": "mailbox-writer",
+      "to": "endpoint:mailbox",
+      "type": "exit",
+      "label": "requested",
+      "description": "Mailbox writer settles requested → Mailbox write relay (outbox → relay poll (INBOX_MAILBOX_RELAY_MODE=live) → gog gmail messages modify → write ledger)"
+    },
+    {
+      "id": "action-context-review->endpoint:human-review",
+      "from": "action-context-review",
+      "to": "endpoint:human-review",
+      "type": "exit",
+      "label": "flag for a person",
+      "description": "Context review queues a bounded decision → Human review console (unit queue → /human → decision routine)"
+    },
+    {
+      "id": "action-validation-review->endpoint:human-review",
+      "from": "action-validation-review",
+      "to": "endpoint:human-review",
+      "type": "exit",
+      "label": "flag for a person",
+      "description": "Validation review queues a bounded decision → Human review console (unit queue → /human → decision routine)"
+    },
+    {
+      "id": "filter->terminal:spam",
+      "from": "filter",
+      "to": "terminal:spam",
+      "type": "exit",
+      "label": "spam",
+      "description": "Normalizer settles spam → Provider-labelled spam: The mail provider had already labelled the message spam, so the journey stops at step 1 — nothing leaves the graph, nothing is proposed, and nobody is told."
+    },
+    {
+      "id": "jobtrack-proposal->terminal:no-application-signal",
+      "from": "jobtrack-proposal",
+      "to": "terminal:no-application-signal",
+      "type": "exit",
+      "label": "not_applicable",
+      "description": "JobTrack proposer settles not_applicable → No application signal: The proposer's declared quiet end: mail it decides not to propose about. Nothing is proposed and nothing leaves the graph from here."
+    },
+    {
+      "id": "action-validate->terminal:action-decided",
+      "from": "action-validate",
+      "to": "terminal:action-decided",
+      "type": "exit",
+      "label": "valid",
+      "description": "Validator settles valid → Action decided: The decision stood: the validator accepted it, or a person approved a flagged one. The verdict — needs action, or no action — is stored with the email's record; nothing is sent and no other system is told."
+    },
+    {
+      "id": "action-context-reviewed->terminal:action-decided",
+      "from": "action-context-reviewed",
+      "to": "terminal:action-decided",
+      "type": "exit",
+      "label": "recorded",
+      "description": "Context recorder settles recorded → Action decided: The decision stood: the validator accepted it, or a person approved a flagged one. The verdict — needs action, or no action — is stored with the email's record; nothing is sent and no other system is told."
+    },
+    {
+      "id": "action-validation-reviewed->terminal:action-decided",
+      "from": "action-validation-reviewed",
+      "to": "terminal:action-decided",
+      "type": "exit",
+      "label": "recorded",
+      "description": "Validation recorder settles recorded → Action decided: The decision stood: the validator accepted it, or a person approved a flagged one. The verdict — needs action, or no action — is stored with the email's record; nothing is sent and no other system is told."
+    },
+    {
+      "id": "unsubscribe->terminal:left-subscribed",
+      "from": "unsubscribe",
+      "to": "terminal:left-subscribed",
+      "type": "exit",
+      "label": "skipped",
+      "description": "Unsubscribe offer settles skipped → Left subscribed: The candidate stage skipped by a named rule, or a person kept the subscription. Nothing leaves this branch."
+    },
+    {
+      "id": "unsubscribe-review->terminal:left-subscribed",
+      "from": "unsubscribe-review",
+      "to": "terminal:left-subscribed",
+      "type": "exit",
+      "label": "rejected",
+      "description": "Unsubscribe review settles rejected → Left subscribed: The candidate stage skipped by a named rule, or a person kept the subscription. Nothing leaves this branch."
+    },
+    {
+      "id": "unsubscribe-review->terminal:unsubscribe-needs-help",
+      "from": "unsubscribe-review",
+      "to": "terminal:unsubscribe-needs-help",
+      "type": "exit",
+      "label": "needs_help",
+      "description": "Unsubscribe review settles needs_help → Unsubscribe needs help: A person recorded that manual help is required. No request was emitted and no unsubscribe success is claimed."
+    },
+    {
+      "id": "mailbox-writer->terminal:not-filed",
+      "from": "mailbox-writer",
+      "to": "terminal:not-filed",
+      "type": "exit",
+      "label": "skipped",
+      "description": "Mailbox writer settles skipped → Left unfiled: The Mailbox writer looked and asked for nothing: this mailbox is not on the write allowlist, so no label is proposed for it. The plan names the rule; nothing leaves the graph from here."
+    },
+    {
+      "id": "action-context-review->terminal:dismissed",
+      "from": "action-context-review",
+      "to": "terminal:dismissed",
+      "type": "exit",
+      "label": "rejected",
+      "description": "Context review settles rejected → Dismissed by reviewer: A person ended the review, so no action decision is recorded for this email; the rejection itself is settled and attributed to them. Nothing leaves the graph from here."
+    },
+    {
+      "id": "action-validation-review->terminal:dismissed",
+      "from": "action-validation-review",
+      "to": "terminal:dismissed",
+      "type": "exit",
+      "label": "rejected",
+      "description": "Validation review settles rejected → Dismissed by reviewer: A person ended the review, so no action decision is recorded for this email; the rejection itself is settled and attributed to them. Nothing leaves the graph from here."
+    }
+  ],
+  "metadata": {
+    "graphId": "inbox.email-graph.v1",
+    "graphVersion": 8,
+    "graphDigest": "c62ee5300cd62f4aedd09276b9aeec196e7d34732734423271b2055895c64a57",
+    "publication": "source",
+    "highlighted": false,
+    "unclaimedTerminals": []
+  }
+}

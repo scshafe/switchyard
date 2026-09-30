@@ -1,0 +1,51 @@
+{
+  "graphs": {
+    "filter-chain": {
+      "sealedDigest": "cb9b863ed7fad5edf9e5c9a5eb408c441b367f08dcfb7be95ab143b00fa9e55a",
+      "candidateDigest": "9f91c1bd62d2be579b0cbec0f9932d4d1fe4db5b2db83a63584cac4ed9ce24e1",
+      "sameDiffDigest": "0573c23c21779bb51d87b16ea89091f0a809edec85525a9dd3d846574bc43c86",
+      "revisionDiffDigest": "b963fc828c83a2a426296430ce463e8344f99b679083bb50e5f64855f773459e"
+    },
+    "outcome-router": {
+      "sealedDigest": "7e8eacc9dbcc86f480e0b1439ed819ee64c8f18c18335c65b1393d7e71b108b3",
+      "candidateDigest": "a3403b5c924ff4085e323293a55d048c4c2b38bd3b43ccbcd83d340fcde6382a",
+      "sameDiffDigest": "b70a28c19c2c76267d97eaebb24f26a6966974ef673526c119d40a0583e93822",
+      "revisionDiffDigest": "f884f1c22bb23fbb9fca0a09ef02d9da3b52c52a1638ee7faedc9bb7e834c941"
+    },
+    "escalation-ladder": {
+      "sealedDigest": "12ee176f3a36576476b9701469c280bad19fafa2c4aa104ca8c7fbb8f22f7769",
+      "candidateDigest": "22f44aca5b7ba4bb4fc6e10de2ee4c5d624325ad43de15fc5ee3dcc4a94375f0",
+      "sameDiffDigest": "2a66813888bd80f5761da58875474ecf6cfe7b13d89ba703bedfdd23e6c5f571",
+      "revisionDiffDigest": "99c1a4174adb3b1ab70ea08a17fbabf15467e7af50d4378d3b19af3baa9c5c64"
+    },
+    "human-in-the-middle": {
+      "sealedDigest": "39903b7b158ed546c3c8b7bebce099155828a3986f7d4a3cf210ed3f27f11020",
+      "candidateDigest": "2c58abd0b613cc2f087a5ded28f4b7fc5170f43a871935f5dc761dc6da08a426",
+      "sameDiffDigest": "23c364dba78394358ac67194a4b835600b75993ee93331828c3c7d50333dde84",
+      "revisionDiffDigest": "530a876032667ea947045dc1835384e241282265215ce2a8dd2f81faf8839737"
+    },
+    "join": {
+      "sealedDigest": "ff7483988a6add97126155a3f324de37dd10d008031b7614e3a0696ea2e2a3f6",
+      "candidateDigest": "27a6c65245b7996449e916ffb4e3ddf083753822b34fc0da615d4264c5601244",
+      "sameDiffDigest": "6c7d30f118f602234bed2b8022de50f388a76e687942d8b89bf251a6d3ffbd2d",
+      "revisionDiffDigest": "ffe6e95deb2f2da8f974c82d03faa5efbfb615f69ec06be69569b28d2c1a5c09"
+    },
+    "shadow-lane": {
+      "sealedDigest": "2b453a8a80b5b0357b2dfc7d1db1cffa05221e6021262af0ff3d59d1860e0a1e",
+      "candidateDigest": "7ca62689ff1f2b216851184039fdfe289524d3e891f2119e602e3fea88b630cd",
+      "sameDiffDigest": "957649b11afb85f782b53d5354a901e3e453bb76a020f7e52d28876e4378cade",
+      "revisionDiffDigest": "7e25702c2a79bc90c4f8653daa157c83c4b45fb2ed1297c96aa6872c0fb94b39"
+    },
+    "support-triage": {
+      "sealedDigest": "7f06a0fa6ec1fa1ddb1a156bc1ec647fb63dca17634e7608dfb5680675aad8c3",
+      "candidateDigest": "94602b6a1e530e3fb13cb83f00f75b1d78f03697f441bc9973b9f35c0e68d49e",
+      "sameDiffDigest": "07095c9fde76e6d0e7e5a8ff1bb5084a804a21b4fcab82af0cdac0714d00f67d",
+      "revisionDiffDigest": "b537f2f391ff1bacdcb817ef9736bc779f744cb0e9d39886e7d354c9d975f5e8"
+    }
+  },
+  "supportTriageComparison": {
+    "sealedDigest": "40d9a7c277b97b7530640400f9b2f7c4a84bba6fa921e6549ec3a23cbe1ba17d",
+    "candidateDigest": "7f06a0fa6ec1fa1ddb1a156bc1ec647fb63dca17634e7608dfb5680675aad8c3",
+    "diffDigest": "e91ba77c47d610d5c0524404b4313e348d62135b10157c4bf51092af605ef137"
+  }
+}

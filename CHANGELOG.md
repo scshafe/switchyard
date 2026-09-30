@@ -7,6 +7,28 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
+## 2.1.0 — 2026-09-30
+
+The additive engine work first prepared as 1.1.0, rebased onto 2.0.0 with
+the Switchyard names: graph display projection and definition diff, unit
+path and goal manifest/closure projections, turn budget, code port by node,
+declared node outputs and configuration refs, join input envelopes
+(`switchyard.join-input.v1`) and declared failure recovery, plus the
+separately packaged, unpublished `switchyard-graphpaper` 0.1.0 SDK. New
+schema versions use the `switchyard-` prefix (`switchyard-graph-display.v1`,
+`switchyard-graph-definition-diff.v1`, `switchyard-unit-path.v1`,
+`switchyard-goal-manifest.v1`, `switchyard-goal-closures.v1`; SDK:
+`switchyard-presentation.v1`, `switchyard-diagram.v1`).
+
+The graphpaper renderer is now the registry package `@scshafe/graphpaper`
+from GitHub Packages: an exact `0.5.2` root dev dependency (replacing the Git
+pin of the 0.5.0 source, whose renderer, types and stylesheet 0.5.2 matches
+byte for byte) and the SDK's optional peer `^0.5.2`. The SDK imports and
+`viewerAssets()` resolve `@scshafe/graphpaper`; the served asset names are
+unchanged. The engine's runtime dependencies are still none. CI reads
+`@scshafe/*` with the workflow's `GITHUB_TOKEN`. The release manifest is
+`release/scshafe-switchyard-2.1.0.payload.sha256`.
+
 ## 2.0.0 — 2026-09-30
 
 Breaking rename: the package is now **Switchyard**. The name "mission" came
