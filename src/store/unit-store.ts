@@ -1,4 +1,4 @@
-// store/unit-store.ts — durable v2 MissionPipelineUnit / journey store port.
+// store/unit-store.ts — durable v2 SwitchyardUnit / journey store port.
 //
 // This is the host-neutral contract implemented by the N3 memory executable
 // specification and, in N4, by the consumer-owned Postgres adapter. The
@@ -18,12 +18,12 @@ import type { UsageReceipt } from "../contracts/usage-receipt.js";
 import type {
   GraphDefinitionRef,
   JoinRequirement,
-  MissionPipelineNodeKind,
-  MissionPipelineNodeRef
+  SwitchyardNodeKind,
+  SwitchyardNodeRef
 } from "../graph/definition.js";
 import {
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
-  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID
+  SWITCHYARD_ENGINE_PRINCIPAL_ID
 } from "../graph/definition.js";
 import type { NodeTurnCompletion } from "../execute/ports.js";
 import type {
@@ -40,11 +40,11 @@ export {
   type NodeTurnSettlementDigestInput
 } from "../execute/turn-evidence.js";
 
-export const MISSION_PIPELINE_UNIT_SCHEMA_VERSION =
+export const SWITCHYARD_UNIT_SCHEMA_VERSION =
   "mission-pipeline-unit.v2" as const;
 export {
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
-  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID
+  SWITCHYARD_ENGINE_PRINCIPAL_ID
 };
 export const MAX_UNIT_STORE_LIST_LIMIT = 10_000;
 
@@ -62,8 +62,8 @@ export const SETTLE_TRANSACTION_CHECKPOINTS = Object.freeze([
 export type SettleTransactionCheckpoint =
   (typeof SETTLE_TRANSACTION_CHECKPOINTS)[number];
 
-export interface MissionPipelineUnit {
-  readonly schemaVersion: typeof MISSION_PIPELINE_UNIT_SCHEMA_VERSION;
+export interface SwitchyardUnit {
+  readonly schemaVersion: typeof SWITCHYARD_UNIT_SCHEMA_VERSION;
   readonly unitId: string;
   readonly graph: GraphDefinitionRef;
   readonly seedArtifact: ArtifactRef;
@@ -93,7 +93,7 @@ export interface UnitQueueOccurrence {
   readonly unitId: string;
   readonly graph: GraphDefinitionRef;
   readonly nodeId: string;
-  readonly nodeRef: MissionPipelineNodeRef;
+  readonly nodeRef: SwitchyardNodeRef;
   readonly inputArtifact: ArtifactEnvelope;
   readonly queuedAt: string;
   readonly enqueueSequence: number;
@@ -104,7 +104,7 @@ export interface UnitQueueOccurrence {
 
 export interface AdmitUnitResult {
   readonly created: boolean;
-  readonly unit: MissionPipelineUnit;
+  readonly unit: SwitchyardUnit;
   readonly entryQueue: UnitQueueOccurrence;
 }
 
@@ -210,7 +210,7 @@ export interface UnitTurnJourneyRecord extends JourneyRecordBase {
   readonly kind: "turn_settled";
   readonly queueId: string;
   readonly nodeId: string;
-  readonly nodeRef: MissionPipelineNodeRef;
+  readonly nodeRef: SwitchyardNodeRef;
   readonly attemptNumber: number;
   readonly attemptIndex: number;
   readonly idempotencyKey: string;
@@ -231,7 +231,7 @@ export interface UnitAttemptFailureJourneyRecord extends JourneyRecordBase {
   readonly kind: "turn_failed";
   readonly queueId: string;
   readonly nodeId: string;
-  readonly nodeRef: MissionPipelineNodeRef;
+  readonly nodeRef: SwitchyardNodeRef;
   readonly attemptNumber: number;
   readonly attemptIndex: number;
   readonly idempotencyKey: string;
@@ -252,7 +252,7 @@ export interface JoinUnsatisfiableJourneyRecord extends JourneyRecordBase {
   readonly kind: "join_unsatisfiable";
   readonly nodeId: string;
   readonly outcome: "join_unsatisfiable";
-  readonly principalId: typeof MISSION_PIPELINE_ENGINE_PRINCIPAL_ID;
+  readonly principalId: typeof SWITCHYARD_ENGINE_PRINCIPAL_ID;
   readonly startedAt: string;
   readonly settledAt: string;
   readonly causeEvidenceDigest: string;
@@ -272,8 +272,8 @@ export interface QueuedUnit {
   readonly unitId: string;
   readonly graph: GraphDefinitionRef;
   readonly nodeId: string;
-  readonly nodeRef: MissionPipelineNodeRef;
-  readonly nodeKind: MissionPipelineNodeKind;
+  readonly nodeRef: SwitchyardNodeRef;
+  readonly nodeKind: SwitchyardNodeKind;
   readonly principalId: string;
   readonly inputArtifact: ArtifactEnvelope;
   readonly queuedAt: string;
@@ -343,7 +343,7 @@ export interface ListUnitEvidenceInput {
  */
 export interface UnitStore extends TurnRunnerStore {
   admitUnit(input: AdmitUnitInput): Promise<AdmitUnitResult>;
-  readUnit(input: ReadUnitInput): Promise<MissionPipelineUnit | undefined>;
+  readUnit(input: ReadUnitInput): Promise<SwitchyardUnit | undefined>;
   readJourney(input: ReadJourneyInput): Promise<readonly UnitJourneyRecord[]>;
   readJoinProgress(input: ReadJoinProgressInput): Promise<JoinProgress | undefined>;
   listQueuedUnits(input: ListQueuedUnitsInput): Promise<readonly QueuedUnit[]>;

@@ -24,10 +24,10 @@ import {
   createGraphDefinition,
   graphDefinitionRef,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
-  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
+  SWITCHYARD_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
-  validateMissionPipelineNode,
-  validateMissionPipelineNodeBindingRef
+  validateSwitchyardNode,
+  validateSwitchyardNodeBindingRef
 } from "@scshafe/switchyard/graph/definition";
 import { compileGraph } from "@scshafe/switchyard/graph/compile";
 import {
@@ -98,12 +98,12 @@ test("identity versions: unsafe integers are rejected before they can alias", ()
 
   const unsafeNode = node("unsafe-node", ["ok"], { version: unsafe });
   assert.throws(
-    () => validateMissionPipelineNode(unsafeNode),
+    () => validateSwitchyardNode(unsafeNode),
     /ref\.version: must be a safe positive integer/
   );
 
   assert.throws(
-    () => validateMissionPipelineNodeBindingRef({ ...MODEL_BINDING, version: unsafe }),
+    () => validateSwitchyardNodeBindingRef({ ...MODEL_BINDING, version: unsafe }),
     /binding\.version: must be a safe positive integer/
   );
 });
@@ -185,7 +185,7 @@ test("required-own-key guards reject omissions instead of inherited defaults", (
   const missingTurn = node("missing-turn", ["ok"]);
   delete missingTurn.turn;
   assert.throws(
-    () => validateMissionPipelineNode(missingTurn),
+    () => validateSwitchyardNode(missingTurn),
     /missing required key\(s\) "turn"/
   );
   const missingTerminals = clone(fixtureGraphs["filter-chain"]);
@@ -202,44 +202,44 @@ test("node contract: follows the five-kind interface and ties outcomes to ref ve
       kind,
       ...(kind === "model" ? { binding: MODEL_BINDING } : {})
     });
-    assert.equal(validateMissionPipelineNode(candidate).kind, kind);
+    assert.equal(validateSwitchyardNode(candidate).kind, kind);
   }
   const mismatched = node("versioned", ["ok"], { version: 2 });
   mismatched.outcomes.version = 1;
   assert.throws(
-    () => validateMissionPipelineNode(mismatched),
+    () => validateSwitchyardNode(mismatched),
     /outcome vocabulary version 1 must equal node ref version 2/
   );
   assert.throws(
-    () => validateMissionPipelineNode({ ...node("bad-kind", ["ok"]), kind: "gate" }),
+    () => validateSwitchyardNode({ ...node("bad-kind", ["ok"]), kind: "gate" }),
     /kind must be one of "code" \| "model" \| "agent" \| "human" \| "callback"/
   );
   assert.throws(
-    () => validateMissionPipelineNode({ ...node("ttl", ["ok"]), ttlMs: 1 }),
+    () => validateSwitchyardNode({ ...node("ttl", ["ok"]), ttlMs: 1 }),
     /unknown key\(s\) "ttlMs"/
   );
   assert.throws(
-    () => validateMissionPipelineNode({ ...node("lease", ["ok"]), turn: { ...TURN, leaseMs: 0 } }),
+    () => validateSwitchyardNode({ ...node("lease", ["ok"]), turn: { ...TURN, leaseMs: 0 } }),
     /leaseMs: must be a positive integer/
   );
   assert.throws(
-    () => validateMissionPipelineNode({ ...node("attempts", ["ok"]), turn: { ...TURN, maxAttempts: 11 } }),
+    () => validateSwitchyardNode({ ...node("attempts", ["ok"]), turn: { ...TURN, maxAttempts: 11 } }),
     /maxAttempts: must be an integer in 1\.\.10/
   );
 });
 
 test("model binding ref: is symbolic, content-addressed, and strict", () => {
-  assert.deepEqual(validateMissionPipelineNodeBindingRef(MODEL_BINDING), MODEL_BINDING);
+  assert.deepEqual(validateSwitchyardNodeBindingRef(MODEL_BINDING), MODEL_BINDING);
   assert.throws(
-    () => validateMissionPipelineNodeBindingRef({ ...MODEL_BINDING, kind: "decision" }),
+    () => validateSwitchyardNodeBindingRef({ ...MODEL_BINDING, kind: "decision" }),
     /kind must be "model"/
   );
   assert.throws(
-    () => validateMissionPipelineNodeBindingRef({ ...MODEL_BINDING, credential: "secret" }),
+    () => validateSwitchyardNodeBindingRef({ ...MODEL_BINDING, credential: "secret" }),
     /unknown key\(s\) "credential"/
   );
   assert.throws(
-    () => validateMissionPipelineNodeBindingRef({ ...MODEL_BINDING, bindingDigest: "sha256:nope" }),
+    () => validateSwitchyardNodeBindingRef({ ...MODEL_BINDING, bindingDigest: "sha256:nope" }),
     /bare lowercase sha256 hex/
   );
 });
@@ -728,7 +728,7 @@ test("v2 graph structure: reachable cycles compile (no inherited v1 DAG rule)", 
 
 test("N3 guard bites: authored nodes cannot claim the reserved engine principal", () => {
   const reserved = clone(fixtureGraphs["filter-chain"]);
-  reserved.nodes[0].principal.id = MISSION_PIPELINE_ENGINE_PRINCIPAL_ID;
+  reserved.nodes[0].principal.id = SWITCHYARD_ENGINE_PRINCIPAL_ID;
   assert.throws(
     () => sealAndCompile(reserved),
     /Graph node filter cannot use reserved engine principal mission_pipeline\.engine/

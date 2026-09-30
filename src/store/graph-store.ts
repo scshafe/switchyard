@@ -7,11 +7,11 @@
 
 import type { ContractId } from "../contracts/artifact.js";
 import {
-  validateMissionPipelineNode,
+  validateSwitchyardNode,
   type GraphDefinition,
   type GraphDefinitionRef,
-  type MissionPipelineNode,
-  type MissionPipelineNodeKind
+  type SwitchyardNode,
+  type SwitchyardNodeKind
 } from "../graph/definition.js";
 import {
   assertIdentifier,
@@ -25,7 +25,7 @@ const GRAPH_REF_KEYS = new Set(["id", "version", "digest"]);
 
 /** Definition-bound meaning of one `(node ref id, version)`. */
 export interface NodeDefinitionSignature {
-  readonly kind: MissionPipelineNodeKind;
+  readonly kind: SwitchyardNodeKind;
   readonly input: ContractId;
   /** Set semantics, represented in canonical lexical order. */
   readonly outcomes: readonly string[];
@@ -50,9 +50,9 @@ export function validateGraphDefinitionRef(
 
 /** Canonical signature used by every GraphStore implementation. */
 export function nodeDefinitionSignature(
-  node: MissionPipelineNode
+  node: SwitchyardNode
 ): NodeDefinitionSignature {
-  const validated = validateMissionPipelineNode(node, "node definition signature input");
+  const validated = validateSwitchyardNode(node, "node definition signature input");
   return deepFrozenClone(
     {
       kind: validated.kind,

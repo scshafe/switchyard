@@ -18,11 +18,11 @@ import {
   createGraphDefinition,
   graphDefinitionRef,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
-  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
+  SWITCHYARD_ENGINE_PRINCIPAL_ID,
   type GraphDefinition,
   type JoinRequirement,
-  type MissionPipelineJoin,
-  type MissionPipelineNodeKind
+  type SwitchyardJoin,
+  type SwitchyardNodeKind
 } from "../graph/definition.js";
 import { ExecutionFailureError } from "../execute/failure.js";
 import {
@@ -51,7 +51,7 @@ import type { GraphStore } from "./graph-store.js";
 import {
   SETTLE_TRANSACTION_CHECKPOINTS,
   type JoinProgress,
-  type MissionPipelineUnit,
+  type SwitchyardUnit,
   type SettleTransactionCheckpoint,
   type UnitDeadLetterRecord,
   type UnitJourneyRecord,
@@ -129,11 +129,11 @@ export interface RegisterUnitStoreConformanceOptions {
 }
 
 interface NodeOptions {
-  readonly kind?: MissionPipelineNodeKind;
+  readonly kind?: SwitchyardNodeKind;
   readonly input?: string;
   readonly principal?: string;
   readonly refId?: string;
-  readonly join?: MissionPipelineJoin;
+  readonly join?: SwitchyardJoin;
   readonly maxAttempts?: number;
 }
 
@@ -482,7 +482,7 @@ function settledAtNode(
   );
 }
 
-function assertAdmissionDigest(unit: MissionPipelineUnit): void {
+function assertAdmissionDigest(unit: SwitchyardUnit): void {
   const { admissionDigest, ...base } = unit;
   assert.equal(admissionDigest, digest(base), `admission digest for ${unit.unitId}`);
 }
@@ -1123,7 +1123,7 @@ export function registerUnitStoreConformanceTests(
     const journey = await driver.unitStore.readJourney({ unitId: "unit-join-unsatisfiable" });
     const synthetic = journey.filter((record) => record.kind === "join_unsatisfiable");
     assert.equal(synthetic.length, 1);
-    assert.equal(synthetic[0]!.principalId, MISSION_PIPELINE_ENGINE_PRINCIPAL_ID);
+    assert.equal(synthetic[0]!.principalId, SWITCHYARD_ENGINE_PRINCIPAL_ID);
     assert.equal(synthetic[0]!.startedAt, synthetic[0]!.settledAt);
     assert.equal(synthetic[0]!.artifact.contractId, JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT);
 
@@ -1177,7 +1177,7 @@ export function registerUnitStoreConformanceTests(
     );
     assert.ok(cause?.kind === "turn_settled");
     assert.equal(synthetic.causeEvidenceDigest, cause.settlementDigest);
-    assert.equal(synthetic.principalId, MISSION_PIPELINE_ENGINE_PRINCIPAL_ID);
+    assert.equal(synthetic.principalId, SWITCHYARD_ENGINE_PRINCIPAL_ID);
     assert.equal(synthetic.startedAt, synthetic.settledAt);
     assert.equal(recover[0]!.inputArtifact.digest, synthetic.artifact.digest);
     const artifact = await driver.unitStore.getArtifact({ artifact: synthetic.artifact });

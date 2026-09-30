@@ -30,6 +30,29 @@ no compatibility aliases for any old name.
   now `SWITCHYARD_SMOKE_CONSUMER`, and `MISSION_PIPELINE_V1_GUARD_PROBE_ROOT` is
   now `SWITCHYARD_V1_GUARD_PROBE_ROOT`.
 
+### API renames
+
+Every exported `MissionPipeline*` name drops the prefix `MissionPipeline` for
+`Switchyard`, and every `MISSION_PIPELINE_*` constant becomes `SWITCHYARD_*`;
+the rest of each name, its module and its shape are unchanged.
+
+| 1.x name | 2.0.0 name | Module |
+| --- | --- | --- |
+| `MissionPipelineNode` | `SwitchyardNode` | `graph/definition` |
+| `MissionPipelineNodeRef` | `SwitchyardNodeRef` | `graph/definition` |
+| `MissionPipelineNodeBindingRef` | `SwitchyardNodeBindingRef` | `graph/definition` |
+| `MissionPipelineNodeKind` | `SwitchyardNodeKind` | `graph/definition` |
+| `MissionPipelineNodeTurn` | `SwitchyardNodeTurn` | `graph/definition` |
+| `MissionPipelineJoin` | `SwitchyardJoin` | `graph/definition` |
+| `MISSION_PIPELINE_NODE_KINDS` | `SWITCHYARD_NODE_KINDS` | `graph/definition` |
+| `MISSION_PIPELINE_ENGINE_PRINCIPAL_ID` | `SWITCHYARD_ENGINE_PRINCIPAL_ID` | `graph/definition` |
+| `validateMissionPipelineNode` | `validateSwitchyardNode` | `graph/definition` |
+| `validateMissionPipelineNodeBindingRef` | `validateSwitchyardNodeBindingRef` | `graph/definition` |
+| `MissionPipelineUnit` | `SwitchyardUnit` | `store/unit-store` |
+| `MISSION_PIPELINE_UNIT_SCHEMA_VERSION` | `SWITCHYARD_UNIT_SCHEMA_VERSION` | `store/unit-store` |
+
+All of them are also re-exported from the package root, as before.
+
 ## 1.0.1 — 2026-09-29
 
 First version published to GitHub Packages. No API or runtime behaviour change

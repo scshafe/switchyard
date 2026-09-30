@@ -23,11 +23,11 @@ import { snapshotGraphValidationData } from "../graph/limits.js";
 import {
   graphDefinitionRef,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
-  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
+  SWITCHYARD_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
-  validateMissionPipelineNode,
+  validateSwitchyardNode,
   type GraphDefinition,
-  type MissionPipelineNode
+  type SwitchyardNode
 } from "../graph/definition.js";
 import {
   assertIdentifier,
@@ -88,7 +88,7 @@ import {
 } from "./routing.js";
 import {
   MAX_UNIT_STORE_LIST_LIMIT,
-  MISSION_PIPELINE_UNIT_SCHEMA_VERSION,
+  SWITCHYARD_UNIT_SCHEMA_VERSION,
   nodeTurnFailureDigest,
   nodeTurnSettlementDigest,
   validateNodeTurnFailureMessage,
@@ -103,7 +103,7 @@ import {
   type JourneyRoutingEffect,
   type ListQueuedUnitsInput,
   type ListUnitEvidenceInput,
-  type MissionPipelineUnit,
+  type SwitchyardUnit,
   type QueueJoinProvenance,
   type QueuedUnit,
   type ReadJoinProgressInput,
@@ -198,7 +198,7 @@ interface RoutingPlan {
 }
 
 interface MemoryState {
-  readonly units: Map<string, MissionPipelineUnit>;
+  readonly units: Map<string, SwitchyardUnit>;
   readonly unitGraphs: Map<string, GraphDefinition>;
   readonly artifacts: Map<string, ArtifactEnvelope>;
   readonly queues: Map<string, UnitQueueOccurrence>;
@@ -235,7 +235,7 @@ export interface MemoryUnitStoreStateSnapshot {
     unitId: string;
     graph: GraphDefinition;
   }>[];
-  readonly units: readonly MissionPipelineUnit[];
+  readonly units: readonly SwitchyardUnit[];
   readonly artifacts: readonly ArtifactEnvelope[];
   readonly queues: readonly UnitQueueOccurrence[];
   readonly journey: readonly UnitJourneyRecord[];
@@ -256,7 +256,7 @@ export interface MemoryUnitStoreStateSnapshot {
 }
 
 export interface MemoryUnitStoreEvidenceSnapshot {
-  readonly units: readonly MissionPipelineUnit[];
+  readonly units: readonly SwitchyardUnit[];
   readonly artifacts: readonly ArtifactEnvelope[];
   readonly queues: readonly UnitQueueOccurrence[];
   readonly journey: readonly UnitJourneyRecord[];
@@ -406,17 +406,17 @@ function sameNodeRef(
   return left.id === right.id && left.version === right.version;
 }
 
-function validateSnapshotUnit(value: unknown, label: string): MissionPipelineUnit {
+function validateSnapshotUnit(value: unknown, label: string): SwitchyardUnit {
   const keys = [
     "schemaVersion", "unitId", "graph", "seedArtifact", "admittedAt",
     "principalId", "admissionDigest"
   ];
   const raw = snapshotRecord(value, keys, keys, label);
-  if (raw.schemaVersion !== MISSION_PIPELINE_UNIT_SCHEMA_VERSION) {
-    throw new Error(`${label}.schemaVersion must be ${MISSION_PIPELINE_UNIT_SCHEMA_VERSION}`);
+  if (raw.schemaVersion !== SWITCHYARD_UNIT_SCHEMA_VERSION) {
+    throw new Error(`${label}.schemaVersion must be ${SWITCHYARD_UNIT_SCHEMA_VERSION}`);
   }
   const base = deepFrozenClone({
-    schemaVersion: MISSION_PIPELINE_UNIT_SCHEMA_VERSION,
+    schemaVersion: SWITCHYARD_UNIT_SCHEMA_VERSION,
     unitId: assertEvidenceString(raw.unitId, `${label}.unitId`),
     graph: validateGraphDefinitionRef(raw.graph, `${label}.graph`),
     seedArtifact: validateArtifactRef(raw.seedArtifact),
@@ -1569,7 +1569,7 @@ function laneKey(graph: GraphDefinition): string {
   return `${graph.graphId}\0${graph.version}\0${graph.graphDigest}`;
 }
 
-function sharedNodeKey(node: MissionPipelineNode): string {
+function sharedNodeKey(node: SwitchyardNode): string {
   return `${node.nodeId}\0${node.ref.id}\0${node.ref.version}`;
 }
 
@@ -1646,7 +1646,7 @@ function sameOrdered(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function nodeForQueue(state: MemoryState, queue: UnitQueueOccurrence): MissionPipelineNode {
+function nodeForQueue(state: MemoryState, queue: UnitQueueOccurrence): SwitchyardNode {
   const graph = state.unitGraphs.get(queue.unitId);
   const node = graph === undefined ? undefined : compileGraph(graph).nodesById[queue.nodeId];
   if (graph === undefined || node === undefined) {
@@ -1760,7 +1760,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
     }
     const seedRef = artifactRef(seedArtifact);
     const admissionBase = {
-      schemaVersion: MISSION_PIPELINE_UNIT_SCHEMA_VERSION,
+      schemaVersion: SWITCHYARD_UNIT_SCHEMA_VERSION,
       unitId,
       graph: graphRef,
       seedArtifact: seedRef,
@@ -1836,7 +1836,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
     return deepFrozenClone({ created: true, unit, entryQueue }, "admitUnit result");
   }
 
-  async readUnit(inputRaw: ReadUnitInput): Promise<MissionPipelineUnit | undefined> {
+  async readUnit(inputRaw: ReadUnitInput): Promise<SwitchyardUnit | undefined> {
     const raw = captureCapabilityRecord(inputRaw, ["unitId"], ["unitId"], "readUnit input");
     const unit = this.#state.units.get(assertEvidenceString(raw.unitId, "readUnit input.unitId"));
     return unit === undefined ? undefined : deepFrozenClone(unit, "readUnit result");
@@ -2261,7 +2261,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
   ): {
     readonly raw: Record<string, unknown>;
     readonly queue: UnitQueueOccurrence;
-    readonly node: MissionPipelineNode;
+    readonly node: SwitchyardNode;
     readonly fingerprint: string;
     readonly inputDigest: string;
     readonly executionIdentityDigest?: string;
@@ -2636,7 +2636,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
       plannedArtifacts.set(artifactKey(input.outputArtifact), input.outputArtifact);
     }
 
-    const ensureJoin = (node: MissionPipelineNode): JoinProgress => {
+    const ensureJoin = (node: SwitchyardNode): JoinProgress => {
       if (node.join === undefined) {
         throw new Error(`MemoryUnitStore invariant: node ${node.nodeId} is not a join`);
       }
@@ -2666,7 +2666,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
       plannedArtifacts.get(artifactKey(ref)) ?? input.state.artifacts.get(artifactKey(ref));
 
     const addQueue = (
-      node: MissionPipelineNode,
+      node: SwitchyardNode,
       artifact: ArtifactEnvelope,
       at: string,
       sourceEvidenceDigest: string,
@@ -2713,7 +2713,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
     }, `join ${progress.unitId}/${progress.nodeId} edge ${edgeId} progress`);
 
     const queueJoinIfSatisfied = (
-      node: MissionPipelineNode,
+      node: SwitchyardNode,
       progress: JoinProgress,
       effects: JourneyRoutingEffect[],
       at: string,
@@ -3125,7 +3125,7 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
       recordedAt: entry.at,
       nodeId: entry.nodeId,
       outcome: "join_unsatisfiable" as const,
-      principalId: MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
+      principalId: SWITCHYARD_ENGINE_PRINCIPAL_ID,
       startedAt: entry.at,
       settledAt: entry.at,
       causeEvidenceDigest: entry.causeEvidenceDigest,

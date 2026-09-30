@@ -20,17 +20,17 @@ import { validateEdge, type Edge } from "./edge.js";
 import { snapshotGraphValidationData } from "./limits.js";
 import { validateOutcomeVocabulary, type OutcomeVocabulary } from "./outcome.js";
 
-export const MISSION_PIPELINE_NODE_KINDS = [
+export const SWITCHYARD_NODE_KINDS = [
   "code",
   "model",
   "agent",
   "human",
   "callback"
 ] as const;
-export type MissionPipelineNodeKind = (typeof MISSION_PIPELINE_NODE_KINDS)[number];
+export type SwitchyardNodeKind = (typeof SWITCHYARD_NODE_KINDS)[number];
 
 /** Engine-only identity; authored nodes can never claim synthetic authority. */
-export const MISSION_PIPELINE_ENGINE_PRINCIPAL_ID =
+export const SWITCHYARD_ENGINE_PRINCIPAL_ID =
   "mission_pipeline.engine" as const;
 /** Output contract emitted by an engine-synthesized unsatisfiable join. */
 export const JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT =
@@ -46,7 +46,7 @@ export const MAX_JOIN_INBOUND_EDGES = 256;
 export const MAX_NODE_TURN_LEASE_MS = 86_400_000;
 export const MAX_NODE_TURN_ATTEMPTS = 10;
 
-export interface MissionPipelineNodeRef {
+export interface SwitchyardNodeRef {
   readonly id: string;
   readonly version: number;
 }
@@ -56,14 +56,14 @@ export interface PrincipalRef {
   readonly id: string;
 }
 
-export interface MissionPipelineNodeBindingRef {
+export interface SwitchyardNodeBindingRef {
   readonly kind: "model";
   readonly bindingId: string;
   readonly version: number;
   readonly bindingDigest: string;
 }
 
-export interface MissionPipelineNodeTurn {
+export interface SwitchyardNodeTurn {
   readonly idempotency: typeof NODE_TURN_IDEMPOTENCY;
   readonly leaseMs: number;
   readonly maxAttempts: number;
@@ -72,22 +72,22 @@ export interface MissionPipelineNodeTurn {
 
 export type JoinRequirement = "all" | { readonly nOf: number };
 
-export interface MissionPipelineJoin {
+export interface SwitchyardJoin {
   /** Stable edge IDs; compileGraph requires exact equality with actual inbound edges. */
   readonly inbound: readonly string[];
   readonly require: JoinRequirement;
 }
 
-export interface MissionPipelineNode {
+export interface SwitchyardNode {
   readonly nodeId: string;
-  readonly ref: MissionPipelineNodeRef;
-  readonly kind: MissionPipelineNodeKind;
+  readonly ref: SwitchyardNodeRef;
+  readonly kind: SwitchyardNodeKind;
   readonly input: ContractId;
   readonly outcomes: OutcomeVocabulary;
   readonly principal: PrincipalRef;
-  readonly binding?: MissionPipelineNodeBindingRef;
-  readonly turn: MissionPipelineNodeTurn;
-  readonly join?: MissionPipelineJoin;
+  readonly binding?: SwitchyardNodeBindingRef;
+  readonly turn: SwitchyardNodeTurn;
+  readonly join?: SwitchyardJoin;
 }
 
 export interface TerminalOutcome {
@@ -100,7 +100,7 @@ export interface GraphDefinitionDraft {
   readonly version: number;
   readonly description: string;
   readonly entry: string;
-  readonly nodes: readonly MissionPipelineNode[];
+  readonly nodes: readonly SwitchyardNode[];
   readonly edges: readonly Edge[];
   readonly terminals: readonly TerminalOutcome[];
 }
@@ -110,7 +110,7 @@ export interface GraphDefinition {
   readonly version: number;
   readonly description: string;
   readonly entry: string;
-  readonly nodes: readonly MissionPipelineNode[];
+  readonly nodes: readonly SwitchyardNode[];
   readonly edges: readonly Edge[];
   readonly terminals: readonly TerminalOutcome[];
   readonly graphDigest: string;
@@ -160,7 +160,7 @@ const JOIN_KEYS = new Set(["inbound", "require"]);
 const N_OF_KEYS = new Set(["nOf"]);
 const TERMINAL_KEYS = new Set(["nodeId", "outcome"]);
 
-function validateNodeRef(value: unknown, label: string): MissionPipelineNodeRef {
+function validateNodeRef(value: unknown, label: string): SwitchyardNodeRef {
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, NODE_REF_KEYS, label);
   assertRequiredKeys(raw, NODE_REF_KEYS, label);
@@ -177,10 +177,10 @@ function validatePrincipalRef(value: unknown, label: string): PrincipalRef {
   return { id: assertIdentifier(raw.id, `${label}.id`) };
 }
 
-export function validateMissionPipelineNodeBindingRef(
+export function validateSwitchyardNodeBindingRef(
   value: unknown,
   label = "node binding"
-): MissionPipelineNodeBindingRef {
+): SwitchyardNodeBindingRef {
   value = snapshotGraphValidationData(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, BINDING_REF_KEYS, label);
@@ -211,7 +211,7 @@ function assertBoundedPositiveInt(
   return result;
 }
 
-function validateTurn(value: unknown, label: string): MissionPipelineNodeTurn {
+function validateTurn(value: unknown, label: string): SwitchyardNodeTurn {
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, TURN_KEYS, label);
   assertRequiredKeys(raw, TURN_KEYS, label);
@@ -243,7 +243,7 @@ function validateJoinRequirement(value: unknown, label: string): JoinRequirement
   };
 }
 
-function validateJoin(value: unknown, label: string): MissionPipelineJoin {
+function validateJoin(value: unknown, label: string): SwitchyardJoin {
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, JOIN_KEYS, label);
   assertRequiredKeys(raw, JOIN_KEYS, label);
@@ -266,10 +266,10 @@ function validateJoin(value: unknown, label: string): MissionPipelineJoin {
 }
 
 /** Validate one v2 node contract without resolving graph-level references. */
-export function validateMissionPipelineNode(
+export function validateSwitchyardNode(
   value: unknown,
   label = "mission pipeline node"
-): MissionPipelineNode {
+): SwitchyardNode {
   value = snapshotGraphValidationData(value, label);
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, NODE_KEYS, label);
@@ -279,13 +279,13 @@ export function validateMissionPipelineNode(
   const ref = validateNodeRef(raw.ref, `${nodeLabel}: ref`);
   if (
     typeof raw.kind !== "string"
-    || !(MISSION_PIPELINE_NODE_KINDS as readonly string[]).includes(raw.kind)
+    || !(SWITCHYARD_NODE_KINDS as readonly string[]).includes(raw.kind)
   ) {
     throw new Error(
-      `${nodeLabel}: kind must be one of ${MISSION_PIPELINE_NODE_KINDS.map((kind) => JSON.stringify(kind)).join(" | ")} (got ${typeof raw.kind === "string" ? JSON.stringify(raw.kind) : typeName(raw.kind)})`
+      `${nodeLabel}: kind must be one of ${SWITCHYARD_NODE_KINDS.map((kind) => JSON.stringify(kind)).join(" | ")} (got ${typeof raw.kind === "string" ? JSON.stringify(raw.kind) : typeName(raw.kind)})`
     );
   }
-  const kind = raw.kind as MissionPipelineNodeKind;
+  const kind = raw.kind as SwitchyardNodeKind;
   const input = validateContractId(raw.input, `${nodeLabel}: input`);
   const outcomes = validateOutcomeVocabulary(raw.outcomes, `${nodeLabel}: outcomes`);
   if (outcomes.version !== ref.version) {
@@ -293,14 +293,14 @@ export function validateMissionPipelineNode(
       `${nodeLabel}: outcome vocabulary version ${outcomes.version} must equal node ref version ${ref.version} (outcome changes require a new node version)`
     );
   }
-  let binding: MissionPipelineNodeBindingRef | undefined;
+  let binding: SwitchyardNodeBindingRef | undefined;
   if (Object.hasOwn(raw, "binding")) {
     if (raw.binding === undefined) {
       throw new Error(`${nodeLabel}: binding is present but undefined (omit the key instead)`);
     }
-    binding = validateMissionPipelineNodeBindingRef(raw.binding, `${nodeLabel}: binding`);
+    binding = validateSwitchyardNodeBindingRef(raw.binding, `${nodeLabel}: binding`);
   }
-  let join: MissionPipelineJoin | undefined;
+  let join: SwitchyardJoin | undefined;
   if (Object.hasOwn(raw, "join")) {
     if (raw.join === undefined) {
       throw new Error(`${nodeLabel}: join is present but undefined (omit the key instead)`);
@@ -359,7 +359,7 @@ function validateDefinitionBase(
     );
   }
   const nodes = raw.nodes.map((node, index) =>
-    validateMissionPipelineNode(node, `${label}: nodes[${index}]`)
+    validateSwitchyardNode(node, `${label}: nodes[${index}]`)
   );
   if (new Set(nodes.map((node) => node.nodeId)).size !== nodes.length) {
     throw new Error(`${label}: node IDs must be unique`);

@@ -152,7 +152,7 @@ try {
       type CompiledGraph,
       type GraphDefinition,
       type GraphDefinitionDraft,
-      type MissionPipelineNode,
+      type SwitchyardNode,
       type ModelBindingResolver,
       type OutcomePredicate,
       type OutcomeVocabulary,
@@ -177,7 +177,7 @@ try {
     const draft = undefined as unknown as GraphDefinitionDraft;
     const graph = undefined as unknown as GraphDefinition;
     const compiled = undefined as unknown as CompiledGraph;
-    const node = undefined as unknown as MissionPipelineNode;
+    const node = undefined as unknown as SwitchyardNode;
     const outcomes = undefined as unknown as OutcomeVocabulary;
     const predicate = undefined as unknown as OutcomePredicate;
     const store = undefined as unknown as UnitStore;
