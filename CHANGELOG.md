@@ -30,6 +30,12 @@ with the same digests.
 - `graphTurnBudget` bounds a review loop by `maxRounds` instead of reporting
   the graph as cyclic.
 
+### Known limitation
+
+- Rework rounds do not pass back through the node's approval, so a reviewer's feedback reaches the
+  node unscreened. Pair `approval` with reviewers that may see only what the node may see.
+  (Deferred; see `docs/DESIGN-APPROVAL-REVIEW.md` §11.)
+
 ## 2.1.0 — 2026-09-30
 
 The additive engine work first prepared as 1.1.0, rebased onto 2.0.0 with

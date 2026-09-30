@@ -216,3 +216,14 @@ topology. Because `compileGraph` requires the sealed graph to equal the
 re-derived expansion, the expansion rules are part of the sealed language: a
 later change to them must be versioned in the setting, or graphs sealed under
 2.2.0 stop compiling.
+
+## 11. Deferred: re-screening rework inputs
+
+Rework rounds do not pass back through the node's approval. A rework input carries the original
+(approved) input plus earlier outputs and the reviewer's feedback, and that feedback is never seen
+by the approver. When the approver exists to keep data away from the node (e.g. a local PII screen
+in front of a cloud model) and the reviewer saw data the node was not meant to see, the feedback
+can reintroduce it. Proposed fix: route `rejected` through the node's approver before
+`<node>::rework` whenever the node has `approval`, with a denial following `onDeny`. The owner
+deferred this on 2026-09-30 as a longer-term concern; until then, pair approval with reviewers
+that may see only what the node may see.
