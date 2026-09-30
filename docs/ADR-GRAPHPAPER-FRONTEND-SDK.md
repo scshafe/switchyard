@@ -316,11 +316,12 @@ the installed graphpaper and ELK peers for the complete set; the consumer
 serves the files together under its own routes, cache headers, and CSP.
 The browser entry re-exports nothing from graphpaper.
 
-The renderer is `scshafe/graphpaper`, pinned for development at commit
-`89240f15c171a26009430ad7eb45eb85ac2567aa` (0.5.0), not the unrelated registry
-package named `graphpaper`. The SDK's renderer peer is optional to avoid
-auto-installing that unrelated package; consumers install the intended source
-explicitly. Both packages have separate exact-payload manifests and gates.
+The renderer is `@scshafe/graphpaper` from GitHub Packages, pinned for
+development at exactly 0.5.2 (its renderer, types and stylesheet are
+byte-identical to the 0.5.0 source first tested here). The SDK's renderer peer
+(`^0.5.2`) is optional because model building needs only its types; consumers
+install it explicitly for the adapters. Both packages have separate
+exact-payload manifests and gates.
 
 ## Extended public API (proposed; not shipped)
 

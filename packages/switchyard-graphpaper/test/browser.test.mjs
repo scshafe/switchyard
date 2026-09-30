@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import test from "node:test";
-import { bindDiagramInteractions, clearDiagramNodeSelection as realClear, cleanupHydratedDiagram as realCleanup, layoutDiagram as realLayoutDiagram } from "graphpaper";
+import { bindDiagramInteractions, clearDiagramNodeSelection as realClear, cleanupHydratedDiagram as realCleanup, layoutDiagram as realLayoutDiagram } from "@scshafe/graphpaper";
 
 const state = { calls: [], selections: new WeakMap(), beforeHydrate: undefined, cleanups: 0 };
 globalThis.__pipelineViewerGraphpaperTest = state;
@@ -29,7 +29,7 @@ export function cleanupHydratedDiagram(container){state.cleanups+=1;state.select
 `;
 const mockUrl = `data:text/javascript,${encodeURIComponent(mockSource)}`;
 const hooks = registerHooks({ resolve(specifier, context, nextResolve) {
-  return specifier === "graphpaper" ? { url: mockUrl, shortCircuit: true } : nextResolve(specifier, context);
+  return specifier === "@scshafe/graphpaper" ? { url: mockUrl, shortCircuit: true } : nextResolve(specifier, context);
 } });
 const { mountPipelineViewer } = await import("switchyard-graphpaper/browser");
 hooks.deregister();

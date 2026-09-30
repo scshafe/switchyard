@@ -1,7 +1,7 @@
 # switchyard-graphpaper
 
 Unreleased **0.1.0**: a separately packaged, static diagram SDK for
-Switchyard 2.1.0 and the `scshafe/graphpaper` renderer. It lives in the
+Switchyard 2.1.0 and the `@scshafe/graphpaper` renderer. It lives in the
 engine repository but is not included in the engine's published payload.
 
 Implemented exports: `buildPipelineDiagram`, `validatePresentation`,
@@ -25,20 +25,27 @@ as `overlay`, `metrics`, and `update` are not accepted.
 Both this package and engine 2.1.0 are unreleased. Build and pack the two local
 packages for evaluation; do not assume either version is on npm.
 
-The intended renderer is **scshafe/graphpaper**, tested at commit
-`89240f15c171a26009430ad7eb45eb85ac2567aa` (package version 0.5.0).
-The npm registry's unrelated package named `graphpaper` is not this renderer.
-The renderer peer is optional to prevent npm from automatically installing
-that unrelated package. Install the intended renderer explicitly when using
+The renderer is **`@scshafe/graphpaper`**, published to GitHub Packages and
+tested at version 0.5.2. The peer range is `^0.5.2`; the peer is optional
+because model building needs only its types. Install it explicitly when using
 its types or either adapter. ELK is optional for model building and fallback
-server rendering, but is required by the complete `viewerAssets()` set:
+server rendering, but is required by the complete `viewerAssets()` set.
 
-```sh
-npm install 'git+https://github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa'
-npm install elkjs@0.10.2
+`@scshafe/*` packages come from GitHub Packages, not npmjs.org. Commit a
+project `.npmrc` with only the scope line, and keep the read token (a classic
+PAT with `read:packages`, or `GITHUB_TOKEN` in Actions) in your user-level
+npmrc or the installing process's environment, never in the project:
+
+```ini
+@scshafe:registry=https://npm.pkg.github.com
 ```
 
-The repository's dev dependency and lockfile pin that exact source; the SDK
+```sh
+pnpm add --save-exact @scshafe/graphpaper@0.5.2
+pnpm add --save-exact elkjs@0.10.2
+```
+
+The repository's dev dependency and lockfile pin that exact version; the SDK
 does not bundle it. The engine still has zero runtime dependencies. Supported
 Node versions match the engine: `>=22.22.0 <23 || >=24.18.0 <25`.
 

@@ -8,36 +8,32 @@ importers:
 
   .:
     devDependencies:
+      '@scshafe/graphpaper':
+        specifier: 0.5.2
+        version: 0.5.2(elkjs@0.10.2)
       '@types/node':
         specifier: ^22.15.0
         version: 22.20.1
       elkjs:
         specifier: 0.10.2
         version: 0.10.2
-      graphpaper:
-        specifier: git+https://github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa
-        version: git+ssh://git@github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa(elkjs@0.10.2)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
 
 packages:
 
+  '@scshafe/graphpaper@0.5.2':
+    resolution: {integrity: sha512-SpI+2LMZfjTYNsr0PrzUxNKHtAaoOuMHKAz+GKmoXvmUWvkYMWZupvxblEBnPG1EVYSb899BSaHVPJJjMjJg0A==, tarball: https://npm.pkg.github.com/download/@scshafe/graphpaper/0.5.2/585bca74bd0af2d67e6f32915419e99b85dd51cc}
+    engines: {node: '>=22.22.0 <23 || >=24.18.0 <25'}
+    peerDependencies:
+      elkjs: ^0.10.2
+
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
 
   elkjs@0.10.2:
     resolution: {integrity: sha512-Yx3ORtbAFrXelYkAy2g0eYyVY8QG0XEmGdQXmy0eithKKjbWRfl3Xe884lfkszfBF6UKyIy4LwfcZ3AZc8oxFw==}
-
-  graphpaper@git+ssh://git@github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa:
-    resolution: {commit: 89240f15c171a26009430ad7eb45eb85ac2567aa, repo: git@github.com:scshafe/graphpaper.git, type: git}
-    version: 0.5.0
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      elkjs: ^0.10.2
-    peerDependenciesMeta:
-      elkjs:
-        optional: true
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -49,15 +45,15 @@ packages:
 
 snapshots:
 
+  '@scshafe/graphpaper@0.5.2(elkjs@0.10.2)':
+    dependencies:
+      elkjs: 0.10.2
+
   '@types/node@22.20.1':
     dependencies:
       undici-types: 6.21.0
 
   elkjs@0.10.2: {}
-
-  graphpaper@git+ssh://git@github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa(elkjs@0.10.2):
-    optionalDependencies:
-      elkjs: 0.10.2
 
   typescript@5.9.3: {}
 

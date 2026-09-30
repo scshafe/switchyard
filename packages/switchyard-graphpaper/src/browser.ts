@@ -6,7 +6,7 @@ import {
   type DiagramLayoutEngine,
   type DiagramModel,
   type DiagramNode
-} from "graphpaper";
+} from "@scshafe/graphpaper";
 import { captureViewerRecord, validateNodeDetails, validateStaticLayoutResult, validateStaticModel } from "./viewer-data.js";
 import { staticViewerRenderOptions } from "./viewer-defaults.js";
 import type { NodeDetails } from "./viewer-types.js";

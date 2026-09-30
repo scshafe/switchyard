@@ -268,7 +268,7 @@ test("viewerAssets exposes only the fixed installed files with immutable exact E
   }
   assert.equal(viewerAssets(), assets);
   assert.equal(assets["viewer.js"].body.split('from "./graphpaper.js"').length, 2);
-  assert.ok(!assets["viewer.js"].body.includes('from "graphpaper"'));
+  assert.ok(!assets["viewer.js"].body.includes('from "@scshafe/graphpaper"'));
   for (const name of ["viewer.js", "viewer-data.js", "viewer-defaults.js", "types.js"]) {
     assert.doesNotMatch(assets[name].body, /(?:from|import\()\s*["'](?:node:|@scshafe\/switchyard)/u);
   }

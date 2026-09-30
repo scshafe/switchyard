@@ -1,4 +1,4 @@
-import type { DiagramEdge, DiagramModel, DiagramNode } from "graphpaper";
+import type { DiagramEdge, DiagramModel, DiagramNode } from "@scshafe/graphpaper";
 import type { GraphDisplayArrow } from "@scshafe/switchyard/graph/display";
 import { PIPELINE_DIAGRAM_SCHEMA_VERSION, type BuildPipelineDiagramInput, type PipelineDiagramMetadata } from "./types.js";
 import { frozenData, prepareDiagramInput } from "./validation.js";

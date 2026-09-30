@@ -1,5 +1,6 @@
 // Verify the separately packed SDK against exact, offline-installed peers.
-// The npm registry's graphpaper name is unrelated: use the committed Git pin.
+// The renderer is the registry package @scshafe/graphpaper (GitHub Packages),
+// pinned exactly by the root devDependency and the lockfile.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -12,9 +13,10 @@ import ts from "typescript";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const sdkRoot = join(root, "packages/switchyard-graphpaper");
-const graphpaperRoot = join(root, "node_modules/graphpaper");
+const graphpaperName = "@scshafe/graphpaper";
+const graphpaperVersion = "0.5.2";
+const graphpaperRoot = join(root, "node_modules", graphpaperName);
 const elkRoot = join(root, "node_modules/elkjs");
-const graphpaperCommit = "89240f15c171a26009430ad7eb45eb85ac2567aa";
 const scratch = await mkdtemp(join(tmpdir(), "switchyard-graphpaper-check-"));
 
 async function run(command, args, options = {}) {
@@ -74,7 +76,7 @@ function assertImportBoundary(path, source, knownFiles) {
         assert.ok(ts.isStringLiteral(specifier), `${path}: module specifier must be literal`);
         const name = specifier.text;
         const typeOnly = ts.isImportDeclaration(node) ? node.importClause?.isTypeOnly === true : node.isTypeOnly === true;
-        if (name === "graphpaper") {
+        if (name === graphpaperName) {
           assert.ok(typeOnly || browser || server, `${path}: graphpaper runtime imports belong only to adapters`);
         } else if (name.startsWith(".")) {
           const target = resolve(dirname(path), sourceTypeScript ? name.replace(/\.js$/, ".ts") : name);
@@ -148,8 +150,8 @@ try {
   assert.equal(packageJson.version, "0.1.0");
   assert.deepEqual(packageJson.dependencies ?? {}, {});
   assert.deepEqual(packageJson.optionalDependencies ?? {}, {});
-  assert.deepEqual(packageJson.peerDependencies, { "@scshafe/switchyard": "^2.1.0", graphpaper: "^0.5.0", elkjs: "^0.10.2" });
-  assert.deepEqual(packageJson.peerDependenciesMeta, { graphpaper: { optional: true }, elkjs: { optional: true } }, "the unrelated registry graphpaper must not be auto-installed; ELK is optional except for full viewer assets");
+  assert.deepEqual(packageJson.peerDependencies, { "@scshafe/switchyard": "^2.1.0", [graphpaperName]: `^${graphpaperVersion}`, elkjs: "^0.10.2" });
+  assert.deepEqual(packageJson.peerDependenciesMeta, { [graphpaperName]: { optional: true }, elkjs: { optional: true } }, "the renderer is needed only for its types and the adapters; ELK is optional except for full viewer assets");
   assert.deepEqual(Object.keys(packageJson.exports).sort(), [".", "./browser", "./package.json", "./server"]);
 
   const sourceFiles = await walk(join(sdkRoot, "src"));
@@ -198,16 +200,19 @@ try {
 
   const rootMetadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const lock = await readFile(join(root, "pnpm-lock.yaml"), "utf8");
-  assert.equal(rootMetadata.devDependencies.graphpaper, `git+https://github.com/scshafe/graphpaper.git#${graphpaperCommit}`);
-  // pnpm records the Git pin as a packages: entry keyed by the exact commit.
+  assert.equal(rootMetadata.devDependencies[graphpaperName], graphpaperVersion, "the renderer dev dependency must be an exact registry version (LIB-09)");
+  assert.equal(rootMetadata.devDependencies.graphpaper, undefined, "the unscoped graphpaper name must not be a dependency");
+  // pnpm records a registry package as a packages: entry with an integrity hash
+  // and the GitHub Packages tarball URL; Git, file, link and workspace sources are refused.
   const lockedGraphpaper = new RegExp(
-    `\\n  graphpaper@git\\+(?:ssh://git@|https://)github\\.com[/:]scshafe/graphpaper\\.git#${graphpaperCommit}:\\n` +
-    `    resolution: \\{commit: ${graphpaperCommit}, [^\\n]*type: git\\}\\n    version: 0\\.5\\.0\\n`
+    `\\n  '@scshafe/graphpaper@${graphpaperVersion.replaceAll(".", "\\.")}':\\n` +
+    `    resolution: \\{integrity: sha512-[A-Za-z0-9+/]+={0,2}, tarball: https://npm\\.pkg\\.github\\.com/download/@scshafe/graphpaper/${graphpaperVersion.replaceAll(".", "\\.")}/[a-f0-9]{40}\\}\\n`
   );
-  assert.match(lock, lockedGraphpaper, "pnpm-lock.yaml must pin graphpaper 0.5.0 to the exact Git commit");
+  assert.match(lock, lockedGraphpaper, `pnpm-lock.yaml must lock ${graphpaperName} ${graphpaperVersion} from GitHub Packages by integrity`);
+  assert.doesNotMatch(lock, /git\+(?:ssh|https):|github:|\b(?:file|link|workspace):/u, "pnpm-lock.yaml must not carry Git, file, link or workspace sources");
   const graphpaperMetadata = JSON.parse(await readFile(join(graphpaperRoot, "package.json"), "utf8"));
-  assert.equal(graphpaperMetadata.name, "graphpaper");
-  assert.equal(graphpaperMetadata.version, "0.5.0");
+  assert.equal(graphpaperMetadata.name, graphpaperName);
+  assert.equal(graphpaperMetadata.version, graphpaperVersion);
   assert.equal(graphpaperMetadata.exports["."].default, "./src/index.js");
   const engine = await pack(root, join(scratch, "engine"));
   const graphpaper = await pack(graphpaperRoot, join(scratch, "graphpaper"));
@@ -228,7 +233,7 @@ try {
 import assert from "node:assert/strict";
 import { compileGraph, projectGraphDisplay } from "@scshafe/switchyard";
 import { buildPipelineDiagram, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION } from "switchyard-graphpaper";
-import { layoutDiagram, renderDiagramSvg } from "graphpaper";
+import { layoutDiagram, renderDiagramSvg } from "@scshafe/graphpaper";
 import { renderPipelineFigure, viewerAssets } from "switchyard-graphpaper/server";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { SUPPORT_TRIAGE_GRAPH, SUPPORT_TRIAGE_PRESENTATION, SUPPORT_TRIAGE_GOAL_MANIFEST } from "./test/fixtures/switchyard/support-triage-example.mjs";
@@ -255,7 +260,7 @@ console.log("SDK packed server figure + ELK + complete viewer assets smoke passe
   await writeFile(join(consumer, "smoke.ts"), `
 import { buildPipelineDiagram, validatePresentation, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION, type PipelinePresentation, type BuildPipelineDiagramInput, type PipelineDiagramMetadata } from "switchyard-graphpaper";
 import type { GraphDisplayProjection, GraphDefinition, GoalManifest } from "@scshafe/switchyard";
-import type { DiagramModel, DiagramLegendEntry, DiagramRenderOptions } from "graphpaper";
+import type { DiagramModel, DiagramLegendEntry, DiagramRenderOptions } from "@scshafe/graphpaper";
 import { renderPipelineFigure, viewerAssets, type RenderPipelineFigureOptions } from "switchyard-graphpaper/server";
 import { mountPipelineViewer, type MountPipelineViewerOptions, type PipelineViewerHandle } from "switchyard-graphpaper/browser";
 import type { NodeDetails } from "switchyard-graphpaper";
@@ -286,7 +291,7 @@ void html; void handle; void viewerAssets();
 `);
   await writeFile(join(consumer, "tsconfig.json"), `${JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022", strict: true, noEmit: true, skipLibCheck: false }, files: ["smoke.ts"] }, null, 2)}\n`);
   await run(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "--project", "tsconfig.json"], { cwd: consumer, show: true });
-  console.log(JSON.stringify({ result: "pass", package: packageJson.name, version: packageJson.version, exactFiles: expectedPayload.size, sha256: hash("sha256", first.bytes), peerGraphpaper: `0.5.0@${graphpaperCommit}`, checks: "payload, manifest, reproducibility, NUL, import boundary, offline packed tests, renderer, strict TypeScript" }));
+  console.log(JSON.stringify({ result: "pass", package: packageJson.name, version: packageJson.version, exactFiles: expectedPayload.size, sha256: hash("sha256", first.bytes), peerGraphpaper: `${graphpaperName}@${graphpaperVersion}`, checks: "payload, manifest, reproducibility, NUL, import boundary, offline packed tests, renderer, strict TypeScript" }));
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

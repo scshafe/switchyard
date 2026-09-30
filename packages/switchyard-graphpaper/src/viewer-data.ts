@@ -1,4 +1,4 @@
-import type { DiagramModel, DiagramModelInput } from "graphpaper";
+import type { DiagramModel, DiagramModelInput } from "@scshafe/graphpaper";
 import type { GraphDefinitionRef } from "@scshafe/switchyard";
 import { PIPELINE_DIAGRAM_SCHEMA_VERSION } from "./types.js";
 import type { NodeDetails } from "./viewer-types.js";

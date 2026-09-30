@@ -1,4 +1,4 @@
-import type { DiagramLegendEntry, DiagramModel, DiagramRenderOptions } from "graphpaper";
+import type { DiagramLegendEntry, DiagramModel, DiagramRenderOptions } from "@scshafe/graphpaper";
 import { snapshotViewerData as frozenData } from "./viewer-data.js";
 
 const STATIC_LEGEND: readonly DiagramLegendEntry[] = frozenData([

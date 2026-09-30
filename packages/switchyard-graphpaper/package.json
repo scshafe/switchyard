@@ -15,8 +15,8 @@
   },
   "files": ["src", "lib", "assets/pipeline.css", "README.md", "LICENSE"],
   "sideEffects": false,
-  "peerDependencies": { "@scshafe/switchyard": "^2.1.0", "graphpaper": "^0.5.0", "elkjs": "^0.10.2" },
-  "peerDependenciesMeta": { "graphpaper": { "optional": true }, "elkjs": { "optional": true } },
+  "peerDependencies": { "@scshafe/switchyard": "^2.1.0", "@scshafe/graphpaper": "^0.5.2", "elkjs": "^0.10.2" },
+  "peerDependenciesMeta": { "@scshafe/graphpaper": { "optional": true }, "elkjs": { "optional": true } },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "npm --prefix ../.. run check"

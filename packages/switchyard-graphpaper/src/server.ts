@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { layoutDiagram, renderDiagramSvg, type DiagramLayout, type DiagramLayoutEngine, type DiagramModel, type DiagramRenderOptions } from "graphpaper";
+import { layoutDiagram, renderDiagramSvg, type DiagramLayout, type DiagramLayoutEngine, type DiagramModel, type DiagramRenderOptions } from "@scshafe/graphpaper";
 import { captureCapabilityMethod, captureCapabilityRecord } from "@scshafe/switchyard/internal/capability";
 import { deepFrozenClone, snapshotBoundedValidationData } from "@scshafe/switchyard/internal/evidence";
 import { validateStaticLayoutResult, validateStaticModel } from "./viewer-data.js";
@@ -125,8 +125,8 @@ export function viewerAssets(): Readonly<Record<string, PipelineViewerAsset>> {
     { name: "viewer-data.js", source: () => ownFile("./viewer-data.js"), owner: "built SDK viewer validator" },
     { name: "viewer-defaults.js", source: () => ownFile("./viewer-defaults.js"), owner: "built SDK viewer defaults" },
     { name: "types.js", source: () => ownFile("./types.js"), owner: "built SDK schema constants" },
-    { name: "graphpaper.js", source: () => require.resolve("graphpaper"), owner: "installed scshafe/graphpaper peer" },
-    { name: "diagram.css", source: () => require.resolve("graphpaper/diagram.css"), owner: "installed scshafe/graphpaper peer" },
+    { name: "graphpaper.js", source: () => require.resolve("@scshafe/graphpaper"), owner: "installed @scshafe/graphpaper peer" },
+    { name: "diagram.css", source: () => require.resolve("@scshafe/graphpaper/diagram.css"), owner: "installed @scshafe/graphpaper peer" },
     { name: "pipeline.css", source: () => ownFile("../assets/pipeline.css"), owner: "installed SDK stylesheet" },
     { name: "elk.js", source: () => require.resolve("elkjs/lib/elk.bundled.js"), owner: "installed elkjs peer" }
   ];
@@ -139,7 +139,7 @@ export function viewerAssets(): Readonly<Record<string, PipelineViewerAsset>> {
       throw new Error(`viewerAssets cannot read ${file.name}; provide the ${file.owner}`);
     }
     if (file.name === "viewer.js") {
-      const specifier = 'from "graphpaper"';
+      const specifier = 'from "@scshafe/graphpaper"';
       if (body.split(specifier).length !== 2) throw new Error("viewerAssets browser module must contain exactly one graphpaper import");
       body = body.replace(specifier, 'from "./graphpaper.js"');
     }

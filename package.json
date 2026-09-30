@@ -62,9 +62,9 @@
     "release:manifest": "node scripts/write-release-manifest.mjs"
   },
   "devDependencies": {
+    "@scshafe/graphpaper": "0.5.2",
     "@types/node": "^22.15.0",
     "elkjs": "0.10.2",
-    "graphpaper": "git+https://github.com/scshafe/graphpaper.git#89240f15c171a26009430ad7eb45eb85ac2567aa",
     "typescript": "^5.8.3"
   }
 }
