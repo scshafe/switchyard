@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { reviewNotes } from "@scshafe/switchyard/execute/approval-review";
+import { binaryQuestion } from "@scshafe/switchyard/graph/binary";
 import { MemoryUnitStore } from "@scshafe/switchyard/store/memory-unit-store";
 import {
   ACTORS,
@@ -251,6 +252,53 @@ test("review inside a join: a final rejection makes the leg impossible and an al
   assert.ok(path.includes("right:done"));
   const progress = await harness.unitStore.readJoinProgress({ unitId: "unit-1", nodeId: "gather" });
   assert.equal(progress.status, "unsatisfiable");
+});
+
+test("binary-first: yes|no|unsure escalates unsure to a bigger model, then to a person", async () => {
+  const fragment = binaryQuestion({
+    nodeId: "pii",
+    ref: { id: "fixture.pii", version: 1 },
+    input: CONTRACTS.question,
+    principal: { id: PRINCIPALS.small },
+    binding: BINDINGS.small,
+    turn: TURN,
+    escalate: [ACTORS.big, ACTORS.human],
+    yes: { to: "answer" },
+    no: "terminal"
+  });
+  const graph = seal({
+    graphId: "fixture.binary",
+    version: 1,
+    description: "A small yes/no/unsure judge with escalation.",
+    entry: "pii",
+    nodes: [...fragment.nodes, node("answer", ["answered"])],
+    edges: [...fragment.edges],
+    terminals: [...fragment.terminals, { nodeId: "answer", outcome: "answered" }]
+  });
+  const run = async (answers) => {
+    const harness = createHarness({ graph, models: answers, code: { answer: async () => ({ outcome: "answered" }) } });
+    await harness.admit();
+    await harness.drain();
+    return harness;
+  };
+  const sure = await run({ pii: "yes" });
+  assert.deepEqual(await sure.path(), ["pii:yes", "answer:answered"]);
+
+  const escalated = await run({ pii: "unsure", "pii.escalate-1": "unsure" });
+  assert.deepEqual(await escalated.path(), ["pii:unsure", "pii.escalate-1:unsure"]);
+  assert.deepEqual(escalated.modelLog.map((call) => [call.nodeId, call.bindingId]), [
+    ["pii", BINDINGS.small.bindingId],
+    ["pii.escalate-1", BINDINGS.big.bindingId]
+  ]);
+  // The person sees the original question, unchanged.
+  assert.deepEqual(await escalated.openQueues(), [`pii.escalate-2<${CONTRACTS.question}>`]);
+  await escalated.decide("pii.escalate-2", "yes");
+  await escalated.drain();
+  assert.deepEqual(await escalated.path(), ["pii:unsure", "pii.escalate-1:unsure", "pii.escalate-2:yes", "answer:answered"]);
+  assert.deepEqual(escalated.codeLog[0].input, { question: "What is the capital of France?" });
+
+  const declined = await run({ pii: "unsure", "pii.escalate-1": "no" });
+  assert.deepEqual(await declined.path(), ["pii:unsure", "pii.escalate-1:no"]);
 });
 
 test("fail closed: without the port decorator a reviewed node's raw output is refused", async () => {

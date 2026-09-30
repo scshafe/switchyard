@@ -13,6 +13,7 @@ import {
   approvalReviewEdgeIds,
   approvalReviewRole
 } from "@scshafe/switchyard/graph/approval-review";
+import { binaryQuestion } from "@scshafe/switchyard/graph/binary";
 import { graphTurnBudget } from "@scshafe/switchyard/graph/budget";
 import { compileGraph } from "@scshafe/switchyard/graph/compile";
 import { createGraphDefinition, validateGraphDefinition } from "@scshafe/switchyard/graph/definition";
@@ -319,4 +320,53 @@ test("records: forged or inconsistent review records are refused", () => {
   // Nodes without a role pass the answer through unchanged.
   const untouched = { outcome: "published" };
   assert.equal(applyApprovalReviewCompletion(graph, { nodeId: "publish", inputArtifact: output, completion: untouched }), untouched);
+});
+
+test("binary-first: the fragment is ordinary authoring with one decision per tier", () => {
+  const fragment = binaryQuestion({
+    nodeId: "screen",
+    ref: { id: "fixture.screen", version: 2 },
+    input: CONTRACTS.question,
+    principal: { id: PRINCIPALS.small },
+    binding: BINDINGS.small,
+    turn: TURN,
+    escalate: ACTORS.human,
+    yes: "terminal",
+    no: { to: "next" }
+  });
+  assert.deepEqual(plain(fragment.tiers), ["screen.escalate-1"]);
+  assert.deepEqual(fragment.nodes.map((candidate) => [candidate.nodeId, candidate.kind, candidate.ref.id, candidate.outcomes.outcomes.join("|")]), [
+    ["screen", "model", "fixture.screen", "yes|no|unsure"],
+    ["screen.escalate-1", "human", "fixture.screen.escalate-1.human", "yes|no"]
+  ]);
+  assert.deepEqual(plain(fragment.nodes[0].outputs), { unsure: CONTRACTS.question });
+  assert.deepEqual(fragment.edges.map((edge) => `${edge.edgeId}:${edge.to.join(",")}`), [
+    "screen.no:next",
+    "screen.unsure:screen.escalate-1",
+    "screen.escalate-1.no:next"
+  ]);
+  assert.deepEqual(plain(fragment.terminals), [
+    { nodeId: "screen", outcome: "yes" },
+    { nodeId: "screen.escalate-1", outcome: "yes" }
+  ]);
+  // It composes with a review setting on a tier after the fact.
+  const graph = seal({
+    graphId: "fixture.binary-review",
+    version: 1,
+    description: "A binary screen whose human tier is reviewed.",
+    entry: "screen",
+    nodes: [
+      fragment.nodes[0],
+      { ...plain(fragment.nodes[1]), review: { by: ACTORS.reviewer, onReject: "terminal", maxRounds: 1 } },
+      node("next", ["done"])
+    ],
+    edges: [...fragment.edges],
+    terminals: [...fragment.terminals, { nodeId: "next", outcome: "done" }]
+  });
+  compileGraph(graph);
+  const base = { nodeId: "q", ref: { id: "fixture.q", version: 1 }, input: CONTRACTS.question, principal: { id: "p" }, binding: BINDINGS.small, turn: TURN, yes: "terminal", no: "terminal" };
+  assert.throws(() => binaryQuestion({ ...base, escalate: [] }), /must name 1\.\.4 tiers/);
+  assert.throws(() => binaryQuestion({ ...base, escalate: [ACTORS.human, ACTORS.human, ACTORS.human, ACTORS.human, ACTORS.human] }), /must name 1\.\.4 tiers/);
+  assert.throws(() => binaryQuestion({ ...base, escalate: { kind: "code", principal: { id: "p" } } }), /kind: must be "human" \| "model"/);
+  assert.throws(() => binaryQuestion({ ...base, escalate: ACTORS.human, yes: "maybe" }), /yes: must be "terminal" or \{ to: nodeId \}/);
 });

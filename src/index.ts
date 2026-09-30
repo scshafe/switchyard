@@ -33,6 +33,7 @@ export {
   type ApprovalReviewRole,
   type ApprovalReviewRoleKind
 } from "./graph/approval-review.js";
+export * from "./graph/binary.js";
 export * from "./graph/display.js";
 export * from "./graph/diff.js";
 export * from "./graph/budget.js";
