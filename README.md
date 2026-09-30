@@ -153,6 +153,76 @@ under `JOIN_INPUT_ARTIFACT_CONTRACT` (`switchyard.join-input.v1`).
 See the [P7/P8 contracts](docs/IMPLEMENTED-P7-P8.md) for aggregation and explicit
 failure-to-outcome policy, including downstream adapter requirements.
 
+## Approval and review
+
+Any node can require **approval before it runs** and/or **review after it
+runs**, by a person or by another model. Both are node settings; the actor
+shape is the same for either kind:
+
+```js
+const reviewer = { kind: "model", binding: strongModelBinding, principal: { id: "reviewer" } };
+const person = { kind: "human", principal: { id: "console" } };
+
+{
+  nodeId: "draft",
+  kind: "model",
+  // ...the ordinary node fields...
+  approval: { by: person, onDeny: "terminal" },
+  review: { by: reviewer, onReject: { to: "escalate" }, maxRounds: 2 }
+}
+```
+
+`createGraphDefinition` seals the settings as ordinary nodes and edges, so
+queues, journeys, evidence and stores treat them like any other node:
+`draft::approval` (outcomes `approved | denied`) sees the node's exact input;
+`draft::review` sees a `switchyard.review-request.v1` with the node's input,
+its outcome and output, the round and every earlier round. The reviewer
+answers `accepted` or `rejected` (optionally with `reviewNotes(text)`). An
+acceptance is recorded as `accepted:<outcome>` and carries the node's output
+on along the node's own edges, which keep their ids (a downstream join is
+unchanged). A rejection before round `maxRounds` (default 2) is recorded as
+`rework` and runs the same body again at `draft::rework`, whose fixed input
+`switchyard.rework.v1` holds the original input and the notes; the last
+rejection is `rejected` and routes per `onReject` (`"terminal"`,
+`{ to: nodeId }` receiving `switchyard.review-rejected.v1`, or
+`{ retry: true }` for no bound). `onDeny` takes the same routes; its retry
+re-asks a human approver.
+
+Hosts wrap their worker ports once and shape human answers with one helper;
+a host that forgets fails closed, because the compiled node declares the
+composed contracts:
+
+```js
+import {
+  approvalReviewHumanDecision,
+  recordHumanNodeDecision,
+  reviewNotes,
+  withApprovalReviewPorts
+} from "@scshafe/switchyard";
+
+const ports = withApprovalReviewPorts({ code, model }, { graphs: [graph] });
+const decision = approvalReviewHumanDecision(graph, {
+  queued,                       // a QueuedUnit at draft::approval / draft::review
+  outcome: "rejected",
+  outputArtifact: reviewNotes("Cite a source."),
+  actor: { actorId: "editor-1" }
+});
+await recordHumanNodeDecision({ store, principalId: "console", decision });
+```
+
+A reworking body tells the rounds apart by `context.nodeId` (`draft` vs
+`draft::rework`); register the same code body under both ids. Review is not
+available on `agent` nodes, nor approval on join nodes, in 2.2.0. The rules
+and the reasons are in [the design note](docs/DESIGN-APPROVAL-REVIEW.md).
+
+**Binary first.** A small model is most reliable on one yes/no question if
+it may say it does not know. `binaryQuestion({ nodeId, ref, input, principal,
+binding, turn, escalate, yes, no })` returns the nodes, edges and terminals of
+a `yes | no | unsure` model node whose `unsure` carries the unchanged input to
+`escalate` — one actor or a list, e.g. a bigger model and then a person — and
+routes every tier's `yes` / `no` to the same place. Spread the fragment into a
+draft.
+
 ## Execution and stores
 
 The v2 execution modules are:
@@ -207,6 +277,10 @@ behavior are authored as nodes and edges.
 - `execute/code-port` provides `codeNodePortByNode`: one code body per node
   behind the kind-keyed worker port; an unregistered node fails terminally
   before any body runs.
+- `execute/approval-review` provides `withApprovalReviewPorts`,
+  `approvalReviewHumanDecision`, `applyApprovalReviewCompletion` and
+  `reviewNotes`; `graph/approval-review` names the synthesized ids and roles
+  (`approvalReviewRole`); `graph/binary` provides `binaryQuestion`.
 - `contracts/` provides canonical-JSON SHA-256 digests, artifact envelopes,
   artifact refs, and usage receipts.
 - `model/binding` and `prompt/` provide sealed model/prompt identities.

@@ -7,6 +7,29 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
+## 2.2.0 — unreleased (W1: approval and review settings)
+
+Additive. Graphs without the new settings seal and run exactly as in 2.1.0,
+with the same digests.
+
+- Nodes accept `approval: { by, onDeny }` and `review: { by, onReject,
+  maxRounds? }`, where `by` is a `SwitchyardActor`
+  (`{ kind: "human", principal }` or `{ kind: "model", binding, principal }`)
+  and routes are `"terminal"`, `{ retry: true }` or `{ to: nodeId }`.
+  `createGraphDefinition` seals them as ordinary nodes and edges
+  (`<id>::approval`, `<id>::review`, `<id>::rework`); `compileGraph` refuses a
+  sealed graph that is not exactly that expansion. New contracts:
+  `switchyard.review-request.v1`, `switchyard.rework.v1`,
+  `switchyard.review-rejected.v1`, `switchyard.review-notes.v1`. See
+  `docs/DESIGN-APPROVAL-REVIEW.md`.
+- `withApprovalReviewPorts`, `approvalReviewHumanDecision`,
+  `applyApprovalReviewCompletion` and `reviewNotes` compose the review and
+  rework records host-side. No runner, store or conformance-suite change.
+- `binaryQuestion` builds a `yes | no | unsure` model node with escalation
+  tiers; `validateSwitchyardActor` validates an actor.
+- `graphTurnBudget` bounds a review loop by `maxRounds` instead of reporting
+  the graph as cyclic.
+
 ## 2.1.0 — 2026-09-30
 
 The additive engine work first prepared as 1.1.0, rebased onto 2.0.0 with
