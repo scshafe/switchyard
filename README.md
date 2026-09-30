@@ -17,6 +17,11 @@ no compatibility aliases. [`CHANGELOG.md`](CHANGELOG.md) lists every old and
 new name. There is no compatibility execution path for the retired v1
 traversal engine.
 
+**New here?** [Your first switchyard](docs/FIRST-GRAPH.md) goes from an empty
+directory to watching units move through a three-node graph in PostgreSQL:
+a small-model yes/no check, a model approval in front of a "cloud" model,
+and a person reviewing the result.
+
 ## Install
 
 The package is private and published to GitHub Packages. Map the scope in the

@@ -4,6 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   NODE_TURN_IDEMPOTENCY,
@@ -148,6 +149,13 @@ function harness(graph = firstGraph()) {
     }
   };
 }
+
+test("the test graph is the guide's graph: same sealed digest as docs/FIRST-GRAPH.md shows", async () => {
+  const guide = await readFile(new URL("../docs/FIRST-GRAPH.md", import.meta.url), "utf8");
+  const shown = guide.match(/graph first-switchyard v1, digest ([0-9a-f]{16})\.\.\./);
+  assert.ok(shown, "the guide shows the graph digest");
+  assert.equal(firstGraph().graphDigest.slice(0, 16), shown[1]);
+});
 
 test("workerPrincipals lists code/model/agent principals once, in node order, and skips people", () => {
   assert.deepEqual(workerPrincipals([firstGraph()]), ["local-model", "cloud-model", "worker"]);

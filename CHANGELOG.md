@@ -26,6 +26,10 @@ Additive. No graph, digest, runner, store or wire change.
   node (`approved | denied` at an approval, `accepted | rejected` at a
   review, the node's outcomes elsewhere), to pair with
   `approvalReviewHumanDecision`.
+- `docs/FIRST-GRAPH.md`, "Your first switchyard": from an empty directory to
+  a unit moving through a three-node graph in PostgreSQL, against the
+  published 2.2.0 and switchyard-postgres 0.1.1, with the project in
+  `docs/first-graph-example/` (kept equal to the guide by a test).
 
 ## 2.2.0 — unreleased (W1: approval and review settings)
 

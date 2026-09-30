@@ -33,6 +33,14 @@ records written before the 2.0.0 rename and use the 1.x names; `CHANGELOG.md`
 maps them to the current ones.
 [phase plan](PLAN-NODE-GRAPH-V2.md) for executable evidence.
 
+## Start here
+
+- [Your first switchyard](FIRST-GRAPH.md) builds a project from an empty
+  directory: install from GitHub Packages, PostgreSQL in Docker, a
+  three-node graph with a binary question, a model approval and a human
+  review, a worker loop, human decisions, and SQL to watch units move. The
+  finished project is in [`first-graph-example/`](first-graph-example/).
+
 ## Building pipelines from focused objectives
 
 Application guidance for consumers that split broad model nodes into small,
