@@ -14,6 +14,25 @@ export * from "./graph/outcome.js";
 export * from "./graph/edge.js";
 export * from "./graph/definition.js";
 export { compileGraph, sameDeclaredOutputs, type CompiledGraph } from "./graph/compile.js";
+export {
+  SWITCHYARD_REVIEW_REQUEST_CONTRACT,
+  SWITCHYARD_REWORK_CONTRACT,
+  SWITCHYARD_REVIEW_REJECTED_CONTRACT,
+  SWITCHYARD_REVIEW_NOTES_CONTRACT,
+  APPROVAL_OUTCOMES,
+  REVIEWER_OUTCOMES,
+  REVIEW_ACCEPTED_OUTCOME_PREFIX,
+  REVIEW_REWORK_OUTCOME,
+  REVIEW_REJECTED_OUTCOME,
+  approvalNodeId,
+  reviewNodeId,
+  reworkNodeId,
+  reviewAcceptedOutcome,
+  approvalReviewEdgeIds,
+  approvalReviewRole,
+  type ApprovalReviewRole,
+  type ApprovalReviewRoleKind
+} from "./graph/approval-review.js";
 export * from "./graph/display.js";
 export * from "./graph/diff.js";
 export * from "./graph/budget.js";

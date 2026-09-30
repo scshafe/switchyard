@@ -1,6 +1,7 @@
 // graph/compile.ts — compile a sealed v2 graph to frozen executor indexes.
 
 import {
+  createGraphDefinition,
   declaredNodeOutput,
   declaredNodeOutputs,
   graphDefinitionRef,
@@ -8,6 +9,7 @@ import {
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
   SWITCHYARD_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
+  validateSwitchyardNode,
   type GraphDefinitionRef,
   type SwitchyardNode,
   type TerminalOutcome
@@ -17,6 +19,10 @@ import {
   predicateOutcomes,
   type Edge
 } from "./edge.js";
+import {
+  hasApprovalReviewSettings,
+  reviewedSubjectView
+} from "./approval-review.js";
 
 export interface CompiledGraph {
   readonly graph: GraphDefinitionRef;
@@ -100,20 +106,40 @@ function validateBindingRules(node: SwitchyardNode): void {
  */
 export function compileGraph(definitionRaw: unknown): CompiledGraph {
   const definition = validateGraphDefinition(definitionRaw);
+  // Approval/review settings are sealed in expanded form. Re-derive the
+  // expansion from the settings and require the sealed graph to be exactly
+  // it, so a hand-edited synthesized node or edge cannot run.
+  let nodes = definition.nodes;
+  if (hasApprovalReviewSettings(definition)) {
+    const { graphDigest: _sealed, ...draft } = definition;
+    const resealed = createGraphDefinition(draft);
+    if (resealed.graphDigest !== definition.graphDigest) {
+      throw new Error(
+        `Graph ${definition.graphId}@${definition.version} is not the approval/review expansion of its own settings; reseal the draft with createGraphDefinition`
+      );
+    }
+    // A reviewed node's body output is carried to its reviewer inside a
+    // review request, so the executed node declares that contract.
+    nodes = Object.freeze(definition.nodes.map((node) =>
+      Object.hasOwn(node, "review")
+        ? validateSwitchyardNode(reviewedSubjectView(node), `compiled node ${node.nodeId}`)
+        : node
+    ));
+  }
   const nodesById = frozenRecord(
-    definition.nodes.map((node) => [node.nodeId, node])
+    nodes.map((node) => [node.nodeId, node])
   );
   const edgesById = frozenRecord(
     definition.edges.map((edge) => [edge.edgeId, edge])
   );
   const inboundByNode = frozenRecord(
-    definition.nodes.map((node) => [
+    nodes.map((node) => [
       node.nodeId,
       Object.freeze(definition.edges.filter((edge) => edge.to.includes(node.nodeId)))
     ])
   );
   const outboundByNode = frozenRecord(
-    definition.nodes.map((node) => [
+    nodes.map((node) => [
       node.nodeId,
       Object.freeze(definition.edges.filter((edge) => edge.from === node.nodeId))
     ])
@@ -184,7 +210,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
     terminalPairs.add(pairKey(terminal.nodeId, terminal.outcome));
   }
 
-  for (const node of definition.nodes) {
+  for (const node of nodes) {
     validateBindingRules(node);
     const join = Object.hasOwn(node, "join") ? node.join : undefined;
     if (join?.compose === "envelope" && node.input !== JOIN_INPUT_ARTIFACT_CONTRACT) {
@@ -307,7 +333,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
       unconditionalPairs.add(pairKey(edge.from, outcome));
     }
   }
-  for (const node of definition.nodes) {
+  for (const node of nodes) {
     for (const outcome of node.outcomes.outcomes) {
       const key = pairKey(node.nodeId, outcome);
       if (!unconditionalPairs.has(key) && !terminalPairs.has(key)) {
@@ -332,7 +358,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
       }
     }
   }
-  for (const node of definition.nodes) {
+  for (const node of nodes) {
     if (!reachable.has(node.nodeId)) {
       throw new Error(
         `Graph node ${node.nodeId} is unreachable from entry ${definition.entry}`
@@ -345,7 +371,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
   const compiled = Object.freeze({
     graph: graphDefinitionRef(definition),
     entry: definition.entry,
-    nodes: definition.nodes,
+    nodes,
     edges: definition.edges,
     terminals: definition.terminals,
     nodesById,
