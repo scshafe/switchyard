@@ -74,6 +74,10 @@ recommended pattern, and what is only proposed.
   teardown; reduced-motion activation remains unverified. Runtime modes,
   viewer updates, goal scopes, and Inbox adoption remain proposed; no
   merge-readiness or deployed-consumer claim follows.
+- [Design: approval before, review after](DESIGN-APPROVAL-REVIEW.md) records
+  the 2.2.0 node settings: the sealed expansion, how a node is sent back with
+  the reviewer's notes, how rounds are counted, and how the settings interact
+  with joins, retries and terminals.
 - [Workflow: a graph change includes its picture](WORKFLOW-GRAPH-CHANGES.md)
   states the expectation that presentation, examples, and verification land
   with every definition change, and the checks that prove it.

@@ -12,7 +12,15 @@
 // entry once; one source settlement creates one occurrence per distinct
 // ordinary target regardless of how many edges match; a join queues at most
 // once per unit (DESIGN §10.2).
+//
+// A review with rework is a structural loop (`X::review` -> `X::rework` ->
+// `X::review`) whose traversals are bounded by the sealed `maxRounds`. Its
+// back edge is not reported as a cycle: the review node counts `maxRounds`
+// occurrences per arrival, the rework twin `maxRounds - 1`, and the review's
+// successors one arrival per chain. Under `onReject: { retry: true }` the
+// loop is unbounded and is reported as a cycle.
 
+import { boundedReviewLoops } from "./approval-review.js";
 import { compileGraph, type CompiledGraph } from "./compile.js";
 import type { GraphDefinitionRef, SwitchyardNodeKind } from "./definition.js";
 
@@ -69,9 +77,14 @@ interface Arc {
 }
 
 /** Every (edge, target) pair leaving a node, in authored edge and target order. */
-function arcsFrom(compiled: CompiledGraph, nodeId: string): readonly Arc[] {
+function arcsFrom(
+  compiled: CompiledGraph,
+  nodeId: string,
+  skip: ReadonlySet<string>
+): readonly Arc[] {
   const arcs: Arc[] = [];
   for (const edge of compiled.outboundByNode[nodeId] ?? []) {
+    if (skip.has(edge.edgeId)) continue;
     for (const to of edge.to) arcs.push({ edgeId: edge.edgeId, from: edge.from, to });
   }
   return arcs;
@@ -82,11 +95,14 @@ function arcsFrom(compiled: CompiledGraph, nodeId: string): readonly Arc[] {
  * the walk stack closes a cycle; every such arc is reported so a reader can
  * see each loop the sealed graph contains.
  */
-function findCycleEdges(compiled: CompiledGraph): readonly GraphCycleEdge[] {
+function findCycleEdges(
+  compiled: CompiledGraph,
+  skip: ReadonlySet<string>
+): readonly GraphCycleEdge[] {
   const state = new Map<string, "active" | "done">();
   const cycleEdges: GraphCycleEdge[] = [];
   const stack: { readonly nodeId: string; readonly arcs: readonly Arc[]; next: number }[] = [
-    { nodeId: compiled.entry, arcs: arcsFrom(compiled, compiled.entry), next: 0 }
+    { nodeId: compiled.entry, arcs: arcsFrom(compiled, compiled.entry, skip), next: 0 }
   ];
   state.set(compiled.entry, "active");
   while (stack.length > 0) {
@@ -105,18 +121,23 @@ function findCycleEdges(compiled: CompiledGraph): readonly GraphCycleEdge[] {
     }
     if (seen === "done") continue;
     state.set(arc.to, "active");
-    stack.push({ nodeId: arc.to, arcs: arcsFrom(compiled, arc.to), next: 0 });
+    stack.push({ nodeId: arc.to, arcs: arcsFrom(compiled, arc.to, skip), next: 0 });
   }
   return Object.freeze(cycleEdges);
 }
 
 /** Topological order of an acyclic compiled graph, entry first, authored tie order. */
-function topologicalOrder(compiled: CompiledGraph): readonly string[] {
+function topologicalOrder(
+  compiled: CompiledGraph,
+  skip: ReadonlySet<string>
+): readonly string[] {
   const remaining = new Map<string, number>();
   for (const node of compiled.nodes) remaining.set(node.nodeId, 0);
   for (const node of compiled.nodes) {
     const sources = new Set<string>();
-    for (const edge of compiled.inboundByNode[node.nodeId] ?? []) sources.add(edge.from);
+    for (const edge of compiled.inboundByNode[node.nodeId] ?? []) {
+      if (!skip.has(edge.edgeId)) sources.add(edge.from);
+    }
     remaining.set(node.nodeId, sources.size);
   }
   const order: string[] = [];
@@ -127,7 +148,7 @@ function topologicalOrder(compiled: CompiledGraph): readonly string[] {
     const nodeId = ready.shift()!;
     order.push(nodeId);
     const targets = new Set<string>();
-    for (const arc of arcsFrom(compiled, nodeId)) targets.add(arc.to);
+    for (const arc of arcsFrom(compiled, nodeId, skip)) targets.add(arc.to);
     for (const target of compiled.nodes.map((node) => node.nodeId)) {
       if (!targets.has(target)) continue;
       const left = remaining.get(target)! - 1;
@@ -148,13 +169,19 @@ function topologicalOrder(compiled: CompiledGraph): readonly string[] {
  */
 export function graphTurnBudget(definitionRaw: unknown): GraphTurnBudget {
   const compiled = compileGraph(definitionRaw);
-  const cycleEdges = findCycleEdges(compiled);
+  const loops = boundedReviewLoops(compiled.nodes);
+  const reworkLoops = new Map([...loops.values()].map((loop) => [loop.reworkId, loop]));
+  const skip = new Set([...loops.values()].map((loop) => loop.edgeId));
+  const cycleEdges = findCycleEdges(compiled, skip);
   const acyclic = cycleEdges.length === 0;
 
   const depth = new Map<string, number>();
   const occurrences = new Map<string, number>();
+  // What a bounded review loop passes on: one accepted or rejected chain end
+  // per arrival at its subject, however many rounds it took.
+  const exits = new Map<string, { readonly depth: number; readonly occurrences: number }>();
   if (acyclic) {
-    for (const nodeId of topologicalOrder(compiled)) {
+    for (const nodeId of topologicalOrder(compiled, skip)) {
       const node = compiled.nodesById[nodeId]!;
       if (nodeId === compiled.entry) {
         depth.set(nodeId, 0);
@@ -162,12 +189,30 @@ export function graphTurnBudget(definitionRaw: unknown): GraphTurnBudget {
         continue;
       }
       const sources = new Set<string>();
-      for (const edge of compiled.inboundByNode[nodeId] ?? []) sources.add(edge.from);
+      for (const edge of compiled.inboundByNode[nodeId] ?? []) {
+        if (!skip.has(edge.edgeId)) sources.add(edge.from);
+      }
       let longest = 0;
       let arrivals = 0;
       for (const source of sources) {
-        longest = Math.max(longest, depth.get(source)! + 1);
-        arrivals += occurrences.get(source)!;
+        const exit = exits.get(source);
+        longest = Math.max(longest, (exit?.depth ?? depth.get(source)!) + 1);
+        arrivals += exit?.occurrences ?? occurrences.get(source)!;
+      }
+      const loop = loops.get(nodeId);
+      const rework = reworkLoops.get(nodeId);
+      if (loop !== undefined) {
+        const extra = 2 * (loop.maxRounds - 1);
+        depth.set(nodeId, longest + extra);
+        occurrences.set(nodeId, arrivals * loop.maxRounds);
+        exits.set(nodeId, { depth: longest + extra, occurrences: arrivals });
+        continue;
+      }
+      if (rework !== undefined) {
+        const subjectDepth = depth.get(rework.subjectId)!;
+        depth.set(nodeId, subjectDepth + 2 * (rework.maxRounds - 1));
+        occurrences.set(nodeId, occurrences.get(rework.subjectId)! * (rework.maxRounds - 1));
+        continue;
       }
       depth.set(nodeId, longest);
       // A join queues at most once; an ordinary target queues once per source

@@ -19,6 +19,7 @@ import { deepFrozenClone } from "../internal/evidence.js";
 import { validateEdge, type Edge } from "./edge.js";
 import { snapshotGraphValidationData } from "./limits.js";
 import { validateOutcomeVocabulary, type OutcomeVocabulary } from "./outcome.js";
+import { hasApprovalReviewSettings, normalizeApprovalReview } from "./approval-review.js";
 
 export const SWITCHYARD_NODE_KINDS = [
   "code",
@@ -96,6 +97,46 @@ export interface SwitchyardNodeConfigurationRef {
   readonly digest: string;
 }
 
+/** Who approves or reviews: a person, or a model under its own sealed binding. */
+export type SwitchyardActor =
+  | { readonly kind: "human"; readonly principal: PrincipalRef }
+  | {
+      readonly kind: "model";
+      readonly binding: SwitchyardNodeBindingRef;
+      readonly principal: PrincipalRef;
+    };
+
+/**
+ * Where a denial or a final rejection goes: nowhere (a terminal), back again
+ * (`retry`), or to a named node of the draft.
+ */
+export type SwitchyardRoute =
+  | "terminal"
+  | { readonly retry: true }
+  | { readonly to: string };
+
+/** Approval before the node runs; expanded into `<nodeId>::approval`. */
+export interface SwitchyardApproval {
+  readonly by: SwitchyardActor;
+  readonly onDeny: SwitchyardRoute;
+}
+
+/**
+ * Review after the node runs; expanded into `<nodeId>::review` and, when a
+ * rework can happen, `<nodeId>::rework`. `maxRounds` counts reviewed
+ * attempts; it is written into the sealed graph (default 2) and is absent
+ * under `onReject: { retry: true }`, which has no bound.
+ */
+export interface SwitchyardReview {
+  readonly by: SwitchyardActor;
+  readonly onReject: SwitchyardRoute;
+  readonly maxRounds?: number;
+}
+
+export const SWITCHYARD_ACTOR_KINDS = ["human", "model"] as const;
+export const DEFAULT_REVIEW_MAX_ROUNDS = 2;
+export const MAX_REVIEW_MAX_ROUNDS = 10;
+
 export interface SwitchyardNode {
   readonly nodeId: string;
   readonly ref: SwitchyardNodeRef;
@@ -115,6 +156,10 @@ export interface SwitchyardNode {
   readonly configuration?: SwitchyardNodeConfigurationRef;
   readonly turn: SwitchyardNodeTurn;
   readonly join?: SwitchyardJoin;
+  /** Approval before this node runs (see docs/DESIGN-APPROVAL-REVIEW.md). */
+  readonly approval?: SwitchyardApproval;
+  /** Review after this node runs (see docs/DESIGN-APPROVAL-REVIEW.md). */
+  readonly review?: SwitchyardReview;
 }
 
 export interface TerminalOutcome {
@@ -170,7 +215,9 @@ const NODE_KEYS = new Set([
   "binding",
   "configuration",
   "turn",
-  "join"
+  "join",
+  "approval",
+  "review"
 ]);
 const NODE_REQUIRED_KEYS = new Set([
   "nodeId",
@@ -190,6 +237,13 @@ const JOIN_KEYS = new Set(["inbound", "require", "compose"]);
 const JOIN_REQUIRED_KEYS = new Set(["inbound", "require"]);
 const N_OF_KEYS = new Set(["nOf"]);
 const TERMINAL_KEYS = new Set(["nodeId", "outcome"]);
+const HUMAN_ACTOR_KEYS = new Set(["kind", "principal"]);
+const MODEL_ACTOR_KEYS = new Set(["kind", "binding", "principal"]);
+const APPROVAL_KEYS = new Set(["by", "onDeny"]);
+const REVIEW_KEYS = new Set(["by", "onReject", "maxRounds"]);
+const REVIEW_REQUIRED_KEYS = new Set(["by", "onReject"]);
+const RETRY_ROUTE_KEYS = new Set(["retry"]);
+const TO_ROUTE_KEYS = new Set(["to"]);
 
 function validateNodeRef(value: unknown, label: string): SwitchyardNodeRef {
   const raw = assertPlainObject(value, label);
@@ -354,6 +408,86 @@ function validateJoin(value: unknown, label: string): SwitchyardJoin {
   };
 }
 
+/** Validate, detach, and freeze an approval / review / escalation actor. */
+export function validateSwitchyardActor(value: unknown, label = "actor"): SwitchyardActor {
+  value = snapshotGraphValidationData(value, label);
+  return deepFrozenClone(validateActor(value, label), label);
+}
+
+function validateActor(value: unknown, label: string): SwitchyardActor {
+  const raw = assertPlainObject(value, label);
+  if (raw.kind === "human") {
+    assertStrictKeys(raw, HUMAN_ACTOR_KEYS, label);
+    assertRequiredKeys(raw, HUMAN_ACTOR_KEYS, label);
+    return { kind: "human", principal: validatePrincipalRef(raw.principal, `${label}.principal`) };
+  }
+  if (raw.kind === "model") {
+    assertStrictKeys(raw, MODEL_ACTOR_KEYS, label);
+    assertRequiredKeys(raw, MODEL_ACTOR_KEYS, label);
+    return {
+      kind: "model",
+      binding: validateSwitchyardNodeBindingRef(raw.binding, `${label}.binding`),
+      principal: validatePrincipalRef(raw.principal, `${label}.principal`)
+    };
+  }
+  throw new Error(
+    `${label}.kind: must be ${SWITCHYARD_ACTOR_KINDS.map((kind) => JSON.stringify(kind)).join(" | ")} (got ${typeof raw.kind === "string" ? JSON.stringify(raw.kind) : typeName(raw.kind)})`
+  );
+}
+
+function validateRoute(value: unknown, label: string): SwitchyardRoute {
+  if (value === "terminal") return "terminal";
+  const raw = assertPlainObject(value, label);
+  if (Object.hasOwn(raw, "retry")) {
+    assertStrictKeys(raw, RETRY_ROUTE_KEYS, label);
+    if (raw.retry !== true) throw new Error(`${label}.retry: must be true`);
+    return { retry: true };
+  }
+  if (Object.hasOwn(raw, "to")) {
+    assertStrictKeys(raw, TO_ROUTE_KEYS, label);
+    return { to: assertIdentifier(raw.to, `${label}.to`) };
+  }
+  throw new Error(`${label}: must be "terminal", { retry: true } or { to: nodeId }`);
+}
+
+function isRetryRoute(route: SwitchyardRoute): boolean {
+  return typeof route === "object" && Object.hasOwn(route, "retry");
+}
+
+function validateApproval(value: unknown, label: string): SwitchyardApproval {
+  const raw = assertPlainObject(value, label);
+  assertStrictKeys(raw, APPROVAL_KEYS, label);
+  assertRequiredKeys(raw, APPROVAL_KEYS, label);
+  const by = validateActor(raw.by, `${label}.by`);
+  const onDeny = validateRoute(raw.onDeny, `${label}.onDeny`);
+  if (isRetryRoute(onDeny) && by.kind !== "human") {
+    throw new Error(
+      `${label}.onDeny: { retry: true } re-asks the approver and is accepted only for a human approver (a ${by.kind} approver would answer the same input again without bound)`
+    );
+  }
+  return { by, onDeny };
+}
+
+function validateReview(value: unknown, label: string): SwitchyardReview {
+  const raw = assertPlainObject(value, label);
+  assertStrictKeys(raw, REVIEW_KEYS, label);
+  assertRequiredKeys(raw, REVIEW_REQUIRED_KEYS, label);
+  const by = validateActor(raw.by, `${label}.by`);
+  const onReject = validateRoute(raw.onReject, `${label}.onReject`);
+  if (isRetryRoute(onReject)) {
+    if (Object.hasOwn(raw, "maxRounds")) {
+      throw new Error(
+        `${label}.maxRounds: onReject { retry: true } sends every rejection back without bound; omit maxRounds or choose "terminal" / { to }`
+      );
+    }
+    return { by, onReject };
+  }
+  const maxRounds = Object.hasOwn(raw, "maxRounds")
+    ? assertBoundedPositiveInt(raw.maxRounds, MAX_REVIEW_MAX_ROUNDS, `${label}.maxRounds`)
+    : DEFAULT_REVIEW_MAX_ROUNDS;
+  return { by, onReject, maxRounds };
+}
+
 /** Validate one v2 node contract without resolving graph-level references. */
 export function validateSwitchyardNode(
   value: unknown,
@@ -413,6 +547,30 @@ export function validateSwitchyardNode(
     }
     join = validateJoin(raw.join, `${nodeLabel}: join`);
   }
+  let approval: SwitchyardApproval | undefined;
+  if (Object.hasOwn(raw, "approval")) {
+    if (raw.approval === undefined) {
+      throw new Error(`${nodeLabel}: approval is present but undefined (omit the key instead)`);
+    }
+    approval = validateApproval(raw.approval, `${nodeLabel}: approval`);
+    if (join !== undefined) {
+      throw new Error(
+        `${nodeLabel}: approval on a join node is not supported; approve the branch nodes, or add a node after the join and approve that`
+      );
+    }
+  }
+  let review: SwitchyardReview | undefined;
+  if (Object.hasOwn(raw, "review")) {
+    if (raw.review === undefined) {
+      throw new Error(`${nodeLabel}: review is present but undefined (omit the key instead)`);
+    }
+    review = validateReview(raw.review, `${nodeLabel}: review`);
+    if (kind === "agent") {
+      throw new Error(
+        `${nodeLabel}: review on an agent node is not supported; an agent result is awaited without its input, so the review record cannot be composed durably`
+      );
+    }
+  }
   return deepFrozenClone(
     {
       nodeId,
@@ -425,7 +583,9 @@ export function validateSwitchyardNode(
       ...(binding === undefined ? {} : { binding }),
       ...(configuration === undefined ? {} : { configuration }),
       turn: validateTurn(raw.turn, `${nodeLabel}: turn`),
-      ...(join === undefined ? {} : { join })
+      ...(join === undefined ? {} : { join }),
+      ...(approval === undefined ? {} : { approval }),
+      ...(review === undefined ? {} : { review })
     },
     nodeLabel
   );
@@ -518,14 +678,25 @@ function validateDefinitionBase(
   return { graphId, version, description, entry, nodes, edges, terminals };
 }
 
-/** Validate and seal a graph draft with canonical-JSON SHA-256. */
+/**
+ * Validate and seal a graph draft with canonical-JSON SHA-256. A draft whose
+ * nodes carry `approval` / `review` settings is sealed in its expanded form
+ * (docs/DESIGN-APPROVAL-REVIEW.md); a draft without them seals exactly as
+ * before. Resealing an already expanded graph is idempotent.
+ */
 export function createGraphDefinition(input: unknown): GraphDefinition {
   const label = "graph definition";
   input = snapshotGraphValidationData(input, label);
   const raw = assertPlainObject(input, label);
   assertStrictKeys(raw, DRAFT_KEYS, label);
   assertRequiredKeys(raw, DRAFT_KEYS, label);
-  const base = validateDefinitionBase(raw, label);
+  let base = validateDefinitionBase(raw, label);
+  if (hasApprovalReviewSettings(base)) {
+    base = validateDefinitionBase(
+      normalizeApprovalReview(base) as unknown as Record<string, unknown>,
+      `${label} (approval/review expansion)`
+    );
+  }
   return deepFrozenClone({ ...base, graphDigest: digest(base) }, label);
 }
 
