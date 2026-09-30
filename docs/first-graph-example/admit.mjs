@@ -15,7 +15,7 @@ if (unitId === undefined || text === undefined) {
   process.exit(2);
 }
 
-const { pool, graphStore, unitStore } = openStores();
+const { graphStore, unitStore, close } = openStores();
 try {
   // Publishing the same sealed graph again changes nothing.
   await graphStore.publishGraph(graph);
@@ -36,5 +36,5 @@ try {
   console.error(`${unitId} is already admitted; admit the message under a new unit id`);
   process.exitCode = 1;
 } finally {
-  await pool.end();
+  await close();
 }

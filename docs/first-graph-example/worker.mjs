@@ -66,7 +66,7 @@ function report({ claim, result }) {
 const stop = new AbortController();
 process.once("SIGINT", () => stop.abort());
 
-const { pool, unitStore } = openStores();
+const { unitStore, close } = openStores();
 console.log(`worker: principals ${workerPrincipals([graph]).join(", ")}`);
 try {
   await runWorker({
@@ -79,5 +79,5 @@ try {
     onSettled: report
   });
 } finally {
-  await pool.end();
+  await close();
 }

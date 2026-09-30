@@ -1,10 +1,8 @@
 // docs/FIRST-GRAPH.md and docs/first-graph-example/ must agree byte for byte:
 // every file the guide shows (marked `<!-- file: NAME -->` before its fenced
 // block) is the file in the example directory, and the directory holds
-// nothing else except, optionally, the pnpm-lock.yaml of a run against the
-// published packages. (The guide installs switchyard 2.3.0; its lockfile is
-// added once 2.3.0 is on the registry, since one made from a local tarball
-// would point at that tarball.)
+// nothing else except the pnpm-lock.yaml of the guide's install from the
+// registry.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,26 +40,25 @@ test("the example pins the published packages the guide installs", async () => {
     assert.match(version, /^\d+\.\d+\.\d+$/, `${name} is pinned exactly`);
     assert.ok(guide.includes(`${name}@${version}`), `the guide installs ${name}@${version}`);
   }
-  const lock = await readFile(new URL("pnpm-lock.yaml", exampleUrl), "utf8").catch((error) => {
-    if (error.code === "ENOENT") return undefined;
-    throw error;
-  });
+  const lock = await readFile(new URL("pnpm-lock.yaml", exampleUrl), "utf8");
   for (const [name, version] of Object.entries(manifest.dependencies)) {
-    if (lock === undefined) break;
     assert.ok(lock.includes(`'${name}':\n        specifier: ${version}`) || lock.includes(`${name}:\n        specifier: ${version}`),
       `pnpm-lock.yaml pins ${name} ${version}`);
-    assert.ok(!lock.includes("file:"), "pnpm-lock.yaml resolves from the registry, not a local tarball");
   }
+  // Not a local tarball or directory (pnpm writes those as file:...; the
+  // setting excludeLinksFromLockfile is not one).
+  assert.ok(!/(?<![A-Za-z])file:/.test(lock), "pnpm-lock.yaml resolves from the registry, not a local tarball");
+  assert.ok(!/_authToken|ghp_|github_pat_/.test(lock), "pnpm-lock.yaml holds no credential");
   const npmrc = await readFile(new URL(".npmrc", exampleUrl), "utf8");
   assert.equal(npmrc, "@scshafe:registry=https://npm.pkg.github.com\n");
 });
 
-test("the guide links to the repository absolutely and marks the switchyard-postgres 0.2.0 spots", async () => {
+test("the guide links to the repository absolutely and has no open 0.2.0 markers", async () => {
   const guide = await readFile(guideUrl, "utf8");
   // A reader may have only this file: no relative links into the repository.
   const relative = [...guide.matchAll(/\]\((?!https:\/\/|#)([^)]+)\)/g)].map((match) => match[1]);
   assert.deepEqual(relative, []);
-  assert.ok(guide.includes("<!-- postgres-0.2.0"), "postgres 0.2.0 simplifications are marked");
+  assert.ok(!guide.includes("<!-- postgres-0.2.0"), "the switchyard-postgres 0.2.0 simplifications are done");
   assert.ok(guide.includes("docker rm -f -v first-switchyard-db"), "clean-up removes the data volume");
   assert.ok(!/docker rm -f first-switchyard-db/.test(guide), "every docker rm removes the volume");
 });

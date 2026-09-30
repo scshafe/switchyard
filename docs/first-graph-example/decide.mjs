@@ -1,15 +1,10 @@
 // decide.mjs: list the turns waiting for a person, or answer one.
 //   node --env-file=.env decide.mjs
 //   node --env-file=.env decide.mjs <unit-id> <answer> ["notes"]
-import {
-  SWITCHYARD_REVIEW_REQUEST_CONTRACT,
-  approvalReviewHumanDecision,
-  humanNodeAnswers,
-  reviewNotes
-} from "@scshafe/switchyard";
+import { SWITCHYARD_REVIEW_REQUEST_CONTRACT } from "@scshafe/switchyard";
+import { InvalidHumanAnswerError } from "@scshafe/switchyard-postgres";
 
 import { openStores } from "./db.mjs";
-import { graph } from "./graph.mjs";
 
 const actorId = process.env.ACTOR ?? "alice";
 
@@ -26,40 +21,37 @@ function subjectOf(turn) {
 }
 
 const [unitId, answer, notes] = process.argv.slice(2);
-const { pool, humanDecisions } = openStores();
+const { humanDecisions, close } = openStores();
 try {
-  const pending = await humanDecisions.listPending({ limit: 1_000 });
   if (unitId === undefined) {
+    const pending = await humanDecisions.listPending({ limit: 1_000 });
     if (pending.length === 0) console.log("nothing is waiting for a person");
     for (const turn of pending) {
-      const answers = humanNodeAnswers(graph, turn.nodeId);
-      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${answers.join(" | ")}`);
+      // turn.answers: what a person may answer here, in the node's order.
+      console.log(`${turn.unitId} at ${turn.nodeId}, answers: ${turn.answers.join(" | ")}`);
       console.log(`  ${subjectOf(turn).replaceAll("\n", "\n  ")}`);
     }
   } else {
-    const turn = pending.find((candidate) => candidate.unitId === unitId);
+    // In this graph a unit waits for a person at one node at a time.
+    const [turn] = await humanDecisions.listPending({ unitId });
     if (turn === undefined) throw new Error(`unit ${unitId} is not waiting for a person`);
-    if (turn.graph.digest !== graph.graphDigest) {
-      throw new Error(`unit ${unitId} runs another version of the graph`);
-    }
-    // Check the answer and shape it for this node: at a review, "rejected"
-    // is stored as "rework" (or "rejected" in the last round) and carries
-    // the notes; "accepted" as "accepted:composed".
-    const decision = approvalReviewHumanDecision(graph, {
-      queued: turn,
-      outcome: answer,
-      ...(notes === undefined ? {} : { outputArtifact: reviewNotes(notes) }),
-      actor: { actorId }
-    });
-    // Record it. The engine settles the turn and routes the unit on.
-    await humanDecisions.record({
+    // Record the answer. The store checks it against turn.answers and stores
+    // what the node records: at a review, "accepted" as "accepted:composed",
+    // "rejected" as "rework" with the notes (or "rejected" in the last
+    // round). The engine then settles the turn and routes the unit on.
+    const recorded = await humanDecisions.recordAnswer({
       queueId: turn.queueId,
-      outcome: decision.outcome,
-      ...(decision.outputArtifact === undefined ? {} : { outputArtifact: decision.outputArtifact }),
+      answer,
+      ...(notes === undefined ? {} : { notes }),
       actorId
     });
-    console.log(`${unitId} at ${turn.nodeId}: recorded ${decision.outcome}`);
+    console.log(`${unitId} at ${turn.nodeId}: recorded ${recorded.outcome}`);
   }
+} catch (error) {
+  // A typo, or notes with an answer that takes none. Nothing was recorded.
+  if (!(error instanceof InvalidHumanAnswerError)) throw error;
+  console.error(error.message);
+  process.exitCode = 1;
 } finally {
-  await pool.end();
+  await close();
 }
