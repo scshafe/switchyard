@@ -5,7 +5,8 @@
 // model node from a host rule (an outcome, a completion, or a function of the
 // input) and attaches a no-telemetry receipt, so a graph runs end to end with
 // no model server. Swap it for a real `ModelNodePort` without touching the
-// graph.
+// graph; `providerReportedUsageReceipt` is the receipt such a port returns
+// when its provider reports token counts.
 
 import { types as nodeTypes } from "node:util";
 
@@ -14,8 +15,10 @@ import {
   UNAVAILABLE_USAGE_FLOOR,
   USAGE_RECEIPT_BOUNDS,
   USAGE_RECEIPT_SCHEMA_VERSION,
+  validateUsageReceipt,
   type UsageReceipt
 } from "../contracts/usage-receipt.js";
+import { captureCapabilityRecord } from "../internal/capability.js";
 import { assertIdentifier } from "../internal/guards.js";
 import { ExecutionFailureError } from "./failure.js";
 import type {
@@ -46,6 +49,49 @@ export function unavailableUsageReceipt(durationMs = 0): UsageReceipt {
     observedCostMicroUsd: null,
     chargedCostMicroUsd: UNAVAILABLE_USAGE_FLOOR.chargedCostMicroUsd,
     durationMs
+  });
+}
+
+export interface ProviderReportedUsage {
+  /** Prompt tokens the provider reported. */
+  readonly inputTokens: number;
+  /** Completion tokens the provider reported. */
+  readonly outputTokens: number;
+  /** What the call is charged, in micro-USD: 0 for a local server with no price. */
+  readonly chargedCostMicroUsd: number;
+  readonly durationMs?: number;
+}
+
+/**
+ * The receipt for a model turn whose provider reported its token counts
+ * (trust `provider_reported`): the observed tokens, charged as their sum, and
+ * the cost the host charges for them. When the provider reports no usage,
+ * use `unavailableUsageReceipt` instead; never report missing counts as 0.
+ */
+export function providerReportedUsageReceipt(usage: ProviderReportedUsage): UsageReceipt {
+  const raw = captureCapabilityRecord(
+    usage,
+    ["inputTokens", "outputTokens", "chargedCostMicroUsd", "durationMs"],
+    ["inputTokens", "outputTokens", "chargedCostMicroUsd"],
+    "providerReportedUsageReceipt input"
+  );
+  const tokens = (value: unknown, label: string): number => {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > USAGE_RECEIPT_BOUNDS.maxChargedTokens) {
+      throw new Error(`providerReportedUsageReceipt: ${label} must be an integer in 0..${USAGE_RECEIPT_BOUNDS.maxChargedTokens}`);
+    }
+    return value;
+  };
+  const inputTokens = tokens(raw.inputTokens, "inputTokens");
+  const outputTokens = tokens(raw.outputTokens, "outputTokens");
+  return validateUsageReceipt({
+    schemaVersion: USAGE_RECEIPT_SCHEMA_VERSION,
+    trust: "provider_reported",
+    observedInputTokens: inputTokens,
+    observedOutputTokens: outputTokens,
+    chargedTokens: inputTokens + outputTokens,
+    observedCostMicroUsd: null,
+    chargedCostMicroUsd: raw.chargedCostMicroUsd,
+    durationMs: raw.durationMs ?? 0
   });
 }
 

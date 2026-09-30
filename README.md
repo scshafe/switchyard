@@ -286,11 +286,19 @@ behavior are authored as nodes and edges.
   `runNextUnitTurns` (every worker principal in turn, idle sleep, stop
   signal, per-turn report), and `workerPrincipals`.
 - `execute/fake-model` provides `fakeModelPort`, a deterministic model port
-  for first runs and tests, and `unavailableUsageReceipt`.
+  for first runs and tests, and the two receipts a model port usually
+  returns: `unavailableUsageReceipt` (no telemetry, charging the floor) and
+  `providerReportedUsageReceipt` (the provider's token counts).
 - `execute/approval-review` provides `withApprovalReviewPorts`,
   `approvalReviewHumanDecision`, `humanNodeAnswers`,
-  `applyApprovalReviewCompletion` and `reviewNotes`; `graph/approval-review` names the synthesized ids and roles
-  (`approvalReviewRole`); `graph/binary` provides `binaryQuestion`.
+  `applyApprovalReviewCompletion`, `reviewNotes` and `latestReviewNotes`, and
+  the record types `ReviewRequestPayload`, `ReworkPayload`,
+  `ReviewHistoryEntry` and `EmbeddedArtifact`; `graph/approval-review` names
+  the synthesized ids, roles (`approvalReviewRole`) and contract ids
+  (`SWITCHYARD_REVIEW_REQUEST_CONTRACT`, `SWITCHYARD_REWORK_CONTRACT`, ...);
+  `graph/binary` provides `binaryQuestion`. What each of these nodes
+  receives and returns is in
+  [Your first switchyard, "What a node receives"](docs/FIRST-GRAPH.md#what-a-node-receives-and-returns).
 - `contracts/` provides canonical-JSON SHA-256 digests, artifact envelopes,
   artifact refs, and usage receipts.
 - `model/binding` and `prompt/` provide sealed model/prompt identities.

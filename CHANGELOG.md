@@ -22,14 +22,37 @@ Additive. No graph, digest, runner, store or wire change.
   and tests: per node an outcome, a completion or a function of the input,
   with the required usage receipt attached. `unavailableUsageReceipt(ms)` is
   that receipt (trust `unavailable`, charging the policy floor).
+- `providerReportedUsageReceipt({ inputTokens, outputTokens,
+  chargedCostMicroUsd, durationMs? })` is the receipt for a model turn whose
+  provider reported its token counts (trust `provider_reported`, charged
+  tokens = their sum; a local server may charge 0 micro-USD). A turn with no
+  reported usage uses `unavailableUsageReceipt`, never zeros.
 - `humanNodeAnswers(graph, nodeId)` gives the answers a person gives at a
   node (`approved | denied` at an approval, `accepted | rejected` at a
   review, the node's outcomes elsewhere), to pair with
   `approvalReviewHumanDecision`.
+- `latestReviewNotes(record)` reads the reviewer's latest `reviewNotes`
+  from a `switchyard.rework.v1` (or review-request) record, so a rework body
+  does not dig through `history`. The record types `ReviewRequestPayload`,
+  `ReworkPayload`, `ReviewHistoryEntry` and `EmbeddedArtifact` and the
+  contract-id constants were already exported; the guide now documents them.
+- Clearer errors on a first run (messages only; codes, classes and stored
+  identities unchanged):
+  - `approvalReviewHumanDecision` checks a person's answer against
+    `humanNodeAnswers` first: `human answer at node compose-reply::review:
+    "accept" is not an answer here; answer one of accepted | rejected`
+    (before, a mistyped review answer was reported as a node "body result").
+  - Every "returned undeclared outcome" error lists the node's outcomes.
+  - `admitUnit`'s `TurnEvidenceConflictError` names the admission fields
+    that differ (graph, seed artifact, `admittedAt`, `principalId`) and says
+    that only an identical admission replays as `created: false`.
 - `docs/FIRST-GRAPH.md`, "Your first switchyard": from an empty directory to
-  a unit moving through a three-node graph in PostgreSQL, against the
-  published 2.2.0 and switchyard-postgres 0.1.1, with the project in
-  `docs/first-graph-example/` (kept equal to the guide by a test).
+  a unit moving through a three-node graph in PostgreSQL, on 2.3.0 and
+  switchyard-postgres 0.1.1, with the project in
+  `docs/first-graph-example/` (kept equal to the guide by a test). It
+  documents what approval, review and rework nodes receive and return.
+  `docs/PROPOSAL-ADMISSION-REPLAY.md` proposes (does not implement) letting
+  a retried admission replay regardless of `admittedAt`.
 
 ## 2.2.0 — unreleased (W1: approval and review settings)
 

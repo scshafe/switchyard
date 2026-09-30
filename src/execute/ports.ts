@@ -388,7 +388,7 @@ export function validateNodeTurnCompletion<K extends SwitchyardNodeKind>(
     }
     if (!node.outcomes.outcomes.includes(outcome)) {
       throw new Error(
-        `${label}: node ${node.nodeId} returned undeclared outcome ${JSON.stringify(outcome)}`
+        `${label}: node ${node.nodeId} returned undeclared outcome ${JSON.stringify(outcome)} (its outcomes: ${node.outcomes.outcomes.join(" | ")})`
       );
     }
 

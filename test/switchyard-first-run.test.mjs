@@ -1,6 +1,8 @@
 // First-run helpers: runWorker, workerPrincipals, fakeModelPort,
-// unavailableUsageReceipt and humanNodeAnswers, driven through the graph of
-// docs/FIRST-GRAPH.md on the memory stores.
+// unavailableUsageReceipt, providerReportedUsageReceipt, humanNodeAnswers and
+// latestReviewNotes, driven through the graph of docs/FIRST-GRAPH.md on the
+// memory stores, plus the messages a first run meets (a mistyped answer, a
+// re-used unit id) and the record shapes the guide documents.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -9,7 +11,12 @@ import { readFile } from "node:fs/promises";
 import {
   NODE_TURN_IDEMPOTENCY,
   NODE_TURN_RETRY_TAXONOMY,
+  SWITCHYARD_REVIEW_NOTES_CONTRACT,
+  SWITCHYARD_REVIEW_REQUEST_CONTRACT,
+  SWITCHYARD_REWORK_CONTRACT,
+  TurnEvidenceConflictError,
   approvalReviewHumanDecision,
+  applyApprovalReviewCompletion,
   binaryQuestion,
   codeNodePortByNode,
   createArtifactEnvelope,
@@ -18,6 +25,8 @@ import {
   fakeModelPort,
   graphDefinitionRef,
   humanNodeAnswers,
+  latestReviewNotes,
+  providerReportedUsageReceipt,
   recordHumanNodeDecision,
   reviewNotes,
   runWorker,
@@ -87,10 +96,12 @@ function firstGraph() {
   });
 }
 
+const reworkInputs = [];
 const compose = async (input, context) => {
-  const rework = context.nodeId === "compose-reply::rework";
+  const rework = context.inputArtifact.contractId === SWITCHYARD_REWORK_CONTRACT;
+  if (rework) reworkInputs.push(input);
   const draft = rework ? input.input.payload : input;
-  const notes = rework ? input.history.at(-1).feedback?.payload.notes : undefined;
+  const notes = rework ? latestReviewNotes(input) : undefined;
   return {
     outcome: "composed",
     outputArtifact: createArtifactEnvelope("reply.v1", { body: `${draft.answer}${notes ? ` [${notes}]` : ""}` })
@@ -323,4 +334,134 @@ test("humanNodeAnswers gives the answers people give at each kind of node", () =
   assert.deepEqual(humanNodeAnswers(graph, "compose-reply"), ["composed"]);
   assert.deepEqual(humanNodeAnswers(graph, "is-question"), ["yes", "no", "unsure"]);
   assert.throws(() => humanNodeAnswers(graph, "nope"), /has no node "nope"/);
+});
+
+test("the review and rework records have the shape docs/FIRST-GRAPH.md documents", async () => {
+  const h = harness();
+  await h.admit("u1", "What are your opening hours?");
+  await runWorker({ store: h.unitStore, ports: h.ports, graphs: [h.graph], leaseOwner: "w", untilIdle: true, now: h.now });
+  const [request] = await h.unitStore.listQueuedUnits({ principalId: "console", nodeId: "compose-reply::review" });
+  assert.equal(request.inputArtifact.contractId, SWITCHYARD_REVIEW_REQUEST_CONTRACT);
+  const review = request.inputArtifact.payload;
+  assert.deepEqual(Object.keys(review).sort(), ["history", "input", "maxRounds", "outcome", "output", "round", "schemaVersion", "subject"]);
+  assert.deepEqual(review.subject, { nodeId: "compose-reply", nodeRef: { id: "first.compose-reply", version: 1 } });
+  assert.equal(review.round, 1);
+  assert.equal(review.maxRounds, 2);
+  assert.equal(review.outcome, "composed");
+  assert.equal(review.input.contractId, "draft.v1");
+  assert.equal(review.input.payload.question, "What are your opening hours?");
+  assert.equal(review.output.contractId, "reply.v1");
+  assert.equal(review.output.payload.body, "echo: What are your opening hours?");
+  assert.deepEqual(review.history, []);
+  assert.equal(latestReviewNotes(review), undefined);
+
+  reworkInputs.length = 0;
+  await h.decide("u1", "compose-reply::review", "rejected", "Say when we open.");
+  await runWorker({ store: h.unitStore, ports: h.ports, graphs: [h.graph], leaseOwner: "w", untilIdle: true, now: h.now });
+  const [rework] = reworkInputs;
+  assert.deepEqual(Object.keys(rework).sort(), ["history", "input", "maxRounds", "round", "schemaVersion", "subject"]);
+  assert.equal(rework.schemaVersion, SWITCHYARD_REWORK_CONTRACT);
+  assert.equal(rework.round, 2);
+  assert.deepEqual(rework.input, review.input);
+  assert.equal(rework.history.length, 1);
+  assert.equal(rework.history[0].round, 1);
+  assert.equal(rework.history[0].output.payload.body, "echo: What are your opening hours?");
+  assert.equal(rework.history[0].feedback.contractId, SWITCHYARD_REVIEW_NOTES_CONTRACT);
+  assert.equal(latestReviewNotes(rework), "Say when we open.");
+
+  const [second] = await h.unitStore.listQueuedUnits({ principalId: "console", nodeId: "compose-reply::review" });
+  assert.equal(second.inputArtifact.payload.round, 2);
+  assert.equal(latestReviewNotes(second.inputArtifact.payload), "Say when we open.");
+});
+
+test("latestReviewNotes reads only reviewNotes feedback", () => {
+  const entry = (feedback) => ({ history: [{ round: 1, outcome: "composed", output: {}, feedback }] });
+  assert.equal(latestReviewNotes({ history: [] }), undefined);
+  assert.equal(latestReviewNotes(entry(null)), undefined);
+  assert.equal(latestReviewNotes(entry({ contractId: "other.v1", digest: "x", payload: { notes: "no" } })), undefined);
+  assert.equal(latestReviewNotes(entry({ contractId: SWITCHYARD_REVIEW_NOTES_CONTRACT, digest: "x", payload: { notes: "yes" } })), "yes");
+  assert.throws(() => latestReviewNotes(null), /review or rework record/);
+});
+
+test("a mistyped human answer names the answers the node takes, and is not called a body result", async () => {
+  const h = harness();
+  await h.admit("u1", "What are your opening hours?");
+  await h.admit("u3", "I need to talk to someone about my order");
+  await runWorker({ store: h.unitStore, ports: h.ports, graphs: [h.graph], leaseOwner: "w", untilIdle: true, now: h.now });
+  const queued = async (nodeId) => (await h.unitStore.listQueuedUnits({ principalId: "console", nodeId }))[0];
+  const review = await queued("compose-reply::review");
+  const escalation = await queued("is-question.escalate-1");
+  const answer = (turn, outcome) => () => approvalReviewHumanDecision(h.graph, { queued: turn, outcome, actor: { actorId: "alice" } });
+  assert.throws(answer(review, "accept"), (error) => {
+    assert.equal(
+      error.message,
+      'human answer at node compose-reply::review: "accept" is not an answer here; answer one of accepted | rejected'
+    );
+    return true;
+  });
+  assert.throws(answer(escalation, "yess"), /human answer at node is-question\.escalate-1: "yess" is not an answer here; answer one of yes \| no$/);
+  assert.throws(answer(review, 7), /number is not an answer here/);
+  // A reviewer body's wrong answer still says "body result" and lists the node's outcomes.
+  assert.throws(
+    () => applyApprovalReviewCompletion(h.graph, { nodeId: "compose-reply::review", inputArtifact: review.inputArtifact, completion: { outcome: "accept" } }),
+    /node compose-reply::review body result: node compose-reply::review returned undeclared outcome "accept" \(its outcomes: accepted \| rejected\)/
+  );
+});
+
+test("re-admitting a unit id: identical admissions replay, others name what differs", async () => {
+  const h = harness();
+  await h.admit("u1", "Hello?");
+  const input = (overrides) => ({
+    unitId: "u9",
+    graph: graphDefinitionRef(h.graph),
+    seedArtifact: createArtifactEnvelope("ticket.v1", { text: "Hello?" }),
+    admittedAt: "2026-09-30T12:00:00.000Z",
+    principalId: "admitter",
+    ...overrides
+  });
+  assert.equal((await h.unitStore.admitUnit(input({}))).created, true);
+  assert.equal((await h.unitStore.admitUnit(input({}))).created, false);
+  await assert.rejects(h.unitStore.admitUnit(input({ admittedAt: "2026-09-30T12:00:01.000Z" })), (error) => {
+    assert.ok(error instanceof TurnEvidenceConflictError);
+    assert.match(error.message, /^admitUnit: unit u9 conflicts with immutable admission [0-9a-f]{64}; requested [0-9a-f]{64}/);
+    assert.match(error.message, /differs in admittedAt: stored 2026-09-30T12:00:00\.000Z, requested 2026-09-30T12:00:01\.000Z\)/);
+    assert.match(error.message, /returns created: false only when graph, seed artifact, admittedAt and principalId are all identical/);
+    return true;
+  });
+  await assert.rejects(
+    h.unitStore.admitUnit(input({ seedArtifact: createArtifactEnvelope("ticket.v1", { text: "Other" }), principalId: "someone" })),
+    /differs in seed artifact: stored ticket\.v1 [0-9a-f]{12}, requested ticket\.v1 [0-9a-f]{12}; principalId: stored admitter, requested someone\)/
+  );
+});
+
+test("usage receipts: what the guide's fake and real model ports return is what validation accepts", () => {
+  // Fake (no telemetry): trust unavailable must charge at least 1 token and 1 micro-USD.
+  const fake = unavailableUsageReceipt(3);
+  assert.equal(fake.trust, "unavailable");
+  assert.equal(fake.chargedTokens, 1);
+  assert.equal(fake.chargedCostMicroUsd, 1);
+  assert.deepEqual(validateUsageReceipt(fake), fake);
+  assert.throws(() => validateUsageReceipt({ ...fake, chargedTokens: 0 }), /must charge at least 1 token/);
+  assert.throws(() => validateUsageReceipt({ ...fake, chargedCostMicroUsd: 0 }), /must charge at least 1 micro-USD/);
+
+  // Real (the server reported its token counts): charged = observed sum, a local server may charge 0 micro-USD.
+  const real = providerReportedUsageReceipt({ inputTokens: 20, outputTokens: 3, chargedCostMicroUsd: 0, durationMs: 40 });
+  assert.deepEqual({ ...real }, {
+    schemaVersion: "usage-receipt.v1",
+    trust: "provider_reported",
+    observedInputTokens: 20,
+    observedOutputTokens: 3,
+    chargedTokens: 23,
+    observedCostMicroUsd: null,
+    chargedCostMicroUsd: 0,
+    durationMs: 40
+  });
+  assert.deepEqual(validateUsageReceipt(real), real);
+  // A server that reports zero tokens is still an observation; zero is accepted.
+  assert.equal(providerReportedUsageReceipt({ inputTokens: 0, outputTokens: 0, chargedCostMicroUsd: 0 }).chargedTokens, 0);
+  // A hosted API's price goes in chargedCostMicroUsd.
+  assert.equal(providerReportedUsageReceipt({ inputTokens: 1000, outputTokens: 200, chargedCostMicroUsd: 450 }).chargedCostMicroUsd, 450);
+  assert.throws(() => providerReportedUsageReceipt({ inputTokens: -1, outputTokens: 0, chargedCostMicroUsd: 0 }), /inputTokens/);
+  assert.throws(() => providerReportedUsageReceipt({ inputTokens: 1, outputTokens: 0 }), /chargedCostMicroUsd/);
+  assert.throws(() => providerReportedUsageReceipt({ inputTokens: 1, outputTokens: 0, chargedCostMicroUsd: -1 }), /chargedCostMicroUsd/);
 });

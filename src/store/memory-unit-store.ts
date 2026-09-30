@@ -27,6 +27,7 @@ import {
   validateGraphDefinition,
   validateSwitchyardNode,
   type GraphDefinition,
+  type GraphDefinitionRef,
   type SwitchyardNode
 } from "../graph/definition.js";
 import {
@@ -1914,6 +1915,37 @@ function graphRefEqual(
 }
 
 /** Memory UnitStore; also forwards GraphStore for ergonomic hermetic use. */
+/** Which admission fields differ, for the conflict message (no payloads). */
+function admissionDifferences(
+  existing: {
+    readonly graph: GraphDefinitionRef;
+    readonly seedArtifact: ArtifactRef;
+    readonly admittedAt: string;
+    readonly principalId: string;
+  },
+  requested: {
+    readonly graph: GraphDefinitionRef;
+    readonly seedArtifact: ArtifactRef;
+    readonly admittedAt: string;
+    readonly principalId: string;
+  }
+): string {
+  const differences: string[] = [];
+  if (digest(existing.graph) !== digest(requested.graph)) {
+    differences.push(`graph: stored ${existing.graph.id}@${existing.graph.version}, requested ${requested.graph.id}@${requested.graph.version}`);
+  }
+  if (digest(existing.seedArtifact) !== digest(requested.seedArtifact)) {
+    differences.push(`seed artifact: stored ${existing.seedArtifact.contractId} ${existing.seedArtifact.digest.slice(0, 12)}, requested ${requested.seedArtifact.contractId} ${requested.seedArtifact.digest.slice(0, 12)}`);
+  }
+  if (existing.admittedAt !== requested.admittedAt) {
+    differences.push(`admittedAt: stored ${existing.admittedAt}, requested ${requested.admittedAt}`);
+  }
+  if (existing.principalId !== requested.principalId) {
+    differences.push(`principalId: stored ${existing.principalId}, requested ${requested.principalId}`);
+  }
+  return differences.length === 0 ? "schema version" : differences.join("; ");
+}
+
 export class MemoryUnitStore implements UnitStore, GraphStore {
   readonly #graphStore: GraphStore;
   readonly #now: () => Date;
@@ -1987,6 +2019,9 @@ export class MemoryUnitStore implements UnitStore, GraphStore {
       if (existing.admissionDigest !== admissionDigest) {
         throw new TurnEvidenceConflictError(
           `admitUnit: unit ${unitId} conflicts with immutable admission ${existing.admissionDigest}; requested ${admissionDigest}`
+          + ` (differs in ${admissionDifferences(existing, admissionBase)}).`
+          + " A unit id is admitted once; admitting it again returns created: false only when"
+          + " graph, seed artifact, admittedAt and principalId are all identical."
         );
       }
       const entryQueue = [...this.#state.queues.values()].find(
