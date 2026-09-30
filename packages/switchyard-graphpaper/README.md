@@ -22,8 +22,8 @@ as `overlay`, `metrics`, and `update` are not accepted.
 
 ## Installation and package identity
 
-Both this package and engine 2.1.0 are unreleased. Build and pack the two local
-packages for evaluation; do not assume either version is on npm.
+This package is unreleased; build and pack it locally for evaluation. Engine
+2.1.0 is `@scshafe/switchyard` on GitHub Packages.
 
 The renderer is **`@scshafe/graphpaper`**, published to GitHub Packages and
 tested at version 0.5.2. The peer range is `^0.5.2`; the peer is optional

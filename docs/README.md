@@ -56,7 +56,7 @@ recommended pattern, and what is only proposed.
   by node, declared output contracts, the node configuration ref, and the
   goal manifest with its closure projection, and model turn invocation
   request. The closing section records the remaining engine display/diff
-  projections implemented in unreleased 2.1.0. P7 join envelopes and P8
+  projections implemented in 2.1.0. P7 join envelopes and P8
   declared-failure policies were subsequently implemented at the user's
   request; their [contract and verification record](IMPLEMENTED-P7-P8.md)
   distinguishes local implementation from downstream adoption. The historical
@@ -64,7 +64,7 @@ recommended pattern, and what is only proposed.
 - [ADR: graphpaper frontend SDK](ADR-GRAPHPAPER-FRONTEND-SDK.md) proposes a
   framework-independent viewer package between this engine and graphpaper,
   with ownership boundaries, contracts, a consumer integration sketch, and an
-  extraction plan. Engine extraction is complete in unreleased 2.1.0,
+  extraction plan. Engine extraction is complete in 2.1.0,
   including `projectGraphDisplay` and `graphDefinitionDiff`. The
   [static SDK](../packages/switchyard-graphpaper/README.md) is
   implemented as a separate in-repository package, version 0.1.0 unreleased;
