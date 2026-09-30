@@ -37,6 +37,7 @@ import {
   reviewMaxRounds,
   reviewNodeId,
   reviewedOutcomes,
+  reworkNodeId,
   type ApprovalReviewRole
 } from "../graph/approval-review.js";
 import {
@@ -482,6 +483,9 @@ export function humanNodeAnswers(graphRaw: GraphDefinition, nodeId: string): rea
   return Object.freeze(reviewedOutcomes(node).slice());
 }
 
+const REVIEW_NODE_SUFFIX = reviewNodeId("");
+const REWORK_NODE_SUFFIX = reworkNodeId("");
+
 export interface ApprovalReviewPortOptions {
   /** Every sealed graph whose units these ports run. Others pass through. */
   readonly graphs: readonly GraphDefinition[];
@@ -522,9 +526,25 @@ export function withApprovalReviewPorts(
     graphs.set(graph.graphDigest, graph);
   }
 
+  const given = [...graphs.values()].map((graph) => `${graph.graphId} v${graph.version}`);
   const roleFor = (context: WorkerNodeTurnContext): ApprovalReviewRole | undefined => {
     const graph = graphs.get(context.graph.digest);
-    if (graph === undefined) return undefined;
+    if (graph === undefined) {
+      // `X::review` and `X::rework` ids are reserved for review settings, so
+      // this turn needs a record only the unit's own graph can build. Fail
+      // before the body runs, saying which version is missing.
+      if (context.nodeId.endsWith(REVIEW_NODE_SUFFIX) || context.nodeId.endsWith(REWORK_NODE_SUFFIX)) {
+        throw new ExecutionFailureError(
+          "immutable_stage_contract_rejected",
+          false,
+          undefined,
+          `withApprovalReviewPorts was not given graph ${context.graph.id} v${context.graph.version}, `
+          + `the version unit ${context.unitId} runs on, so it cannot build the record for ${context.nodeId} `
+          + `(it has ${given.length === 0 ? "no graph" : given.join(", ")}). Pass every graph version with units in flight in options.graphs`
+        );
+      }
+      return undefined;
+    }
     const role = approvalReviewRole(graph, context.nodeId);
     if (role === undefined || role.role === "approval") return undefined;
     return Object.hasOwn(role.subject, "review") ? role : undefined;

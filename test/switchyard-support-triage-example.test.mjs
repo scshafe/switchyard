@@ -196,7 +196,7 @@ test("support triage: deterministic grounding refuses a quote the ticket does no
 test("support triage: a provider outage dead-letters after bounded retries; a lifecycle failure is not a decision", async () => {
   const { harness, results } = await runFixture("provider-outage");
   assert.deepEqual(results.map((result) => result.status), ["succeeded", "terminal"]);
-  assert.deepEqual(results[1], { status: "terminal", errorCode: "dependency_unavailable", attempts: 2 });
+  assert.deepEqual(results[1], { status: "terminal", errorCode: "dependency_unavailable", errorMessage: "dependency_unavailable", attempts: 2 });
   const journey = await harness.journey();
   assert.deepEqual(journeyPath(journey), [
     "normalize:ready",

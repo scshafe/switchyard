@@ -248,6 +248,12 @@ The v2 execution modules are:
 - `store/memory-graph-store` and `store/memory-unit-store` — the hermetic
   executable specification.
 
+A failed attempt is recorded with a stable `errorCode` and a readable
+`errorMessage` (the `turn_failed` journey record; a terminal
+`runClaimedUnitTurn` result and the failure outbox context carry it too).
+`new ExecutionFailureError(code, retryable, cause?, message?)` takes the
+message, or the message of an `Error` cause, or else the code.
+
 The store owns routing. A node body receives no graph, store, lease token,
 credentials, admission capability, or successor-selection authority. The
 settlement invariant is one transaction: journey append, output retention,
@@ -284,9 +290,16 @@ behavior are authored as nodes and edges.
   before any body runs.
 - `execute/worker` provides `runWorker`, the polling worker loop around
   `runNextUnitTurns` (every worker principal in turn, idle sleep, stop
-  signal, per-turn report), and `workerPrincipals`.
+  signal, per-turn report), and `workerPrincipals`. Given `graphs`, it runs
+  only units of those sealed graph versions: pass every version that still
+  has units in flight. A claimed turn of another version is not run; it is
+  reported through `onSkipped` (or one process warning per version) with a
+  message naming the unit's version and the given ones, and it waits, its
+  lease lapsing after the node's `leaseMs`.
 - `execute/fake-model` provides `fakeModelPort`, a deterministic model port
-  for first runs and tests, and the two receipts a model port usually
+  for first runs and tests (a node without a rule fails with
+  `no fake-model rule for node "X"; it has rules for ...`), and the two
+  receipts a model port usually
   returns: `unavailableUsageReceipt` (no telemetry, charging the floor) and
   `providerReportedUsageReceipt` (the provider's token counts).
 - `execute/approval-review` provides `withApprovalReviewPorts`,

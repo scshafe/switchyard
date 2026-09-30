@@ -135,12 +135,23 @@ function captureRules(rulesRaw: unknown): FakeModelRules {
   return Object.freeze(captured);
 }
 
+function missingRuleMessage(nodeId: unknown, keys: readonly string[]): string {
+  const node = typeof nodeId === "string" ? JSON.stringify(nodeId) : String(nodeId);
+  const listed = keys.length === 0
+    ? "it has none"
+    : `it has rules for ${keys.map((key) => JSON.stringify(key)).join(", ")}`;
+  const message = `no fake-model rule for node ${node}; ${listed}. Add a rule keyed by the node id to fakeModelPort({ ... })`;
+  // A failure message is bounded evidence; long rule lists are cut.
+  return message.length <= 1_000 ? message : `${message.slice(0, 997)}...`;
+}
+
 /**
  * A `ModelNodePort` that answers `rules[context.nodeId]` and attaches an
  * `unavailableUsageReceipt`. A string rule is the outcome; an object rule is
  * `{ outcome, outputArtifact? }`; a function rule receives the validated
  * input and the turn context and returns either. A node without a rule fails
- * terminally with `immutable_configuration_rejected`.
+ * terminally with `immutable_configuration_rejected` and the message
+ * `no fake-model rule for node "X"; it has rules for "a", "b". ...`.
  */
 export function fakeModelPort(rulesRaw: FakeModelRules): ModelNodePort {
   const rules = captureRules(rulesRaw);
@@ -151,7 +162,8 @@ export function fakeModelPort(rulesRaw: FakeModelRules): ModelNodePort {
         throw new ExecutionFailureError(
           "immutable_configuration_rejected",
           false,
-          new Error(`fake model has no rule for node ${String(nodeId)}`)
+          undefined,
+          missingRuleMessage(nodeId, Object.keys(rules))
         );
       }
       const started = Date.now();

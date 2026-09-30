@@ -14,17 +14,53 @@ export interface ExecutionFailure {
 const FAILURE_CODE_PATTERN = /^[a-z][a-z0-9._:-]{0,159}$/;
 const executionFailureErrors = new WeakSet<object>();
 
-/** A deliberate failure whose stable code and retry disposition are trusted. */
+/**
+ * A deliberate failure whose stable code and retry disposition are trusted.
+ *
+ * `message` is what a person reads next to the code: the runner records it as
+ * the failed attempt's `errorMessage` and returns it on a terminal result.
+ * When it is omitted, it is the message of an `Error` `cause`, else the code.
+ */
 export class ExecutionFailureError extends Error {
   readonly code: string;
   readonly retryable: boolean;
 
-  constructor(code: string, retryable: boolean, cause?: unknown) {
-    super(code, cause === undefined ? undefined : { cause });
+  constructor(code: string, retryable: boolean, cause?: unknown, message?: string) {
+    super(
+      typeof message === "string" && message.length > 0
+        ? message
+        : errorMessageOf(cause) ?? code,
+      cause === undefined ? undefined : { cause }
+    );
     this.name = "ExecutionFailureError";
     this.code = code;
     this.retryable = retryable;
     executionFailureErrors.add(this);
+  }
+}
+
+/**
+ * The own or inherited string `message` of an `Error` (read through data
+ * descriptors only, never a Proxy or accessor), or `undefined`.
+ */
+function errorMessageOf(value: unknown): string | undefined {
+  if (!isObjectLike(value) || nodeTypes.isProxy(value)) return undefined;
+  try {
+    let cursor: object | null = value;
+    let isError = false;
+    while (cursor !== null) {
+      if (nodeTypes.isProxy(cursor)) return undefined;
+      if (cursor === Error.prototype) {
+        isError = true;
+        break;
+      }
+      cursor = Object.getPrototypeOf(cursor);
+    }
+    if (!isError) return undefined;
+    const message = inheritedStringDataProperty(value, "message");
+    return message === undefined || message.length === 0 ? undefined : message;
+  } catch {
+    return undefined;
   }
 }
 

@@ -141,7 +141,8 @@ export class GraphPublicationConflictError extends Error {
     requestedDigest: string
   ) {
     super(
-      `publishGraph: graph ${graphId}@${graphVersion} is already published with digest ${publishedDigest}; requested digest ${requestedDigest} conflicts with immutable evidence`
+      `publishGraph: graph ${graphId}@${graphVersion} is already published with digest ${publishedDigest}; requested digest ${requestedDigest} conflicts with immutable evidence. `
+      + `A published version never changes: publish the changed graph under a new version (units admitted to ${graphId}@${graphVersion} keep running on it)`
     );
     this.name = "GraphPublicationConflictError";
     this.graphId = graphId;

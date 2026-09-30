@@ -1332,7 +1332,7 @@ async function recordFailure(
   failedAt: string,
   failure: CapturedTurnFailure,
   suppliedOutbox: TurnOutboxEvents | undefined
-): Promise<{ readonly terminal: boolean; readonly errorCode: string }> {
+): Promise<{ readonly terminal: boolean; readonly errorCode: string; readonly errorMessage: string }> {
   let input: RecordTurnFailureInput;
   let outbox: CapturedTurnOutboxEvents;
   let submittedDigests: readonly string[];
@@ -1397,7 +1397,8 @@ async function recordFailure(
   }
   return Object.freeze({
     terminal: failure.terminal,
-    errorCode: failure.errorCode
+    errorCode: failure.errorCode,
+    errorMessage: failure.errorMessage
   });
 }
 
@@ -1531,6 +1532,8 @@ export interface TurnFailureOutboxContext extends PreparedAttemptIdentity {
   readonly unitId: string;
   readonly node: SwitchyardNode;
   readonly errorCode: string;
+  /** The failure's readable message, as recorded with the failed attempt. */
+  readonly errorMessage: string;
   readonly retryable: boolean;
   readonly terminal: boolean;
   readonly usage: readonly UsageReceipt[];
@@ -1663,6 +1666,12 @@ export type UnitTurnRunResult =
   | {
       readonly status: "terminal";
       readonly errorCode: string;
+      /**
+       * The readable message recorded with the failure (at most 2000
+       * characters, control characters replaced), when this run recorded
+       * it. Absent when the store reported the turn already terminal.
+       */
+      readonly errorMessage?: string;
       readonly attempts: number;
     };
 
@@ -1858,6 +1867,7 @@ export async function runClaimedUnitTurn(
                 node,
                 ...attempt,
                 errorCode: failure.errorCode,
+                errorMessage: failure.errorMessage,
                 retryable: failure.retryable,
                 terminal: failure.terminal,
                 usage: failure.usage
@@ -1882,6 +1892,7 @@ export async function runClaimedUnitTurn(
           return Object.freeze({
             status: "terminal" as const,
             errorCode: failed.errorCode,
+            errorMessage: failed.errorMessage,
             attempts: attempt.attemptIndex
           });
         }

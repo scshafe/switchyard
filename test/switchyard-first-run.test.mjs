@@ -193,7 +193,7 @@ test("runWorker drives the first graph: triage, PII screen, review with rework, 
       seen.push(`${principalId}/${claim.unitId}/${claim.nodeId}/${result.value.completion.outcome}`);
     }
   });
-  assert.deepEqual({ ...first }, { passes: 3, turns: 8, succeeded: 8, terminal: 0, rejected: 0, stoppedBy: "idle" });
+  assert.deepEqual({ ...first }, { passes: 3, turns: 8, succeeded: 8, terminal: 0, rejected: 0, skipped: 0, stoppedBy: "idle" });
   assert.deepEqual(seen, [
     "local-model/u1/is-question/yes",
     "local-model/u2/is-question/yes",
@@ -276,7 +276,7 @@ test("runWorker sleeps when idle and stops on its signal", async () => {
   const aborted = new AbortController();
   aborted.abort();
   const none = await runWorker({ store: h.unitStore, ports: h.ports, graphs: [h.graph], leaseOwner: "w", signal: aborted.signal });
-  assert.deepEqual({ ...none }, { passes: 0, turns: 0, succeeded: 0, terminal: 0, rejected: 0, stoppedBy: "signal" });
+  assert.deepEqual({ ...none }, { passes: 0, turns: 0, succeeded: 0, terminal: 0, rejected: 0, skipped: 0, stoppedBy: "signal" });
 
   const long = new AbortController();
   setTimeout(() => long.abort(), 20);

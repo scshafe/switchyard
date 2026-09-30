@@ -149,7 +149,12 @@ test("code port by node: runs real turns through the engine and dead-letters a n
 
   // The orphan's turn is terminal on its first attempt: no body, no retry, no successor.
   const orphan = await run();
-  assert.deepEqual(orphan, { status: "terminal", errorCode: "immutable_configuration_rejected", attempts: 1 });
+  assert.deepEqual(orphan, {
+    status: "terminal",
+    errorCode: "immutable_configuration_rejected",
+    errorMessage: "code node port has no body registered for node orphan",
+    attempts: 1
+  });
   const deadLetters = await unitStore.listDeadLetters({ unitId: "unit-code-port" });
   assert.equal(deadLetters.length, 1);
   assert.equal(deadLetters[0].nodeId, "orphan");
