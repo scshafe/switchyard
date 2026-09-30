@@ -19,10 +19,29 @@ const graphpaperRoot = join(root, "node_modules", graphpaperName);
 const elkRoot = join(root, "node_modules/elkjs");
 const scratch = await mkdtemp(join(tmpdir(), "switchyard-graphpaper-check-"));
 
+const npmLogs = join(scratch, "npm-logs");
+
+// npm prints only "A complete log of this run can be found in …" on some
+// failures; the cause is in its debug log, so a failing npm call appends the
+// tail of every debug log it wrote.
+async function npmLogTail() {
+  try {
+    const names = (await readdir(npmLogs)).sort();
+    const tails = [];
+    for (const name of names) {
+      const lines = (await readFile(join(npmLogs, name), "utf8")).trimEnd().split("\n");
+      tails.push(`--- ${name} (last 60 lines)\n${lines.slice(-60).join("\n")}`);
+    }
+    return tails.join("\n");
+  } catch {
+    return "(no npm debug log)";
+  }
+}
+
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
     cwd: options.cwd ?? root,
-    env: { ...process.env, npm_config_offline: "true", npm_config_audit: "false", npm_config_fund: "false" },
+    env: { ...process.env, npm_config_offline: "true", npm_config_audit: "false", npm_config_fund: "false", npm_config_logs_dir: npmLogs },
     stdio: ["ignore", "pipe", "pipe"]
   });
   const stdout = [];
@@ -32,7 +51,8 @@ async function run(command, args, options = {}) {
   const [code] = await once(child, "close");
   const output = Buffer.concat(stdout);
   if (code !== 0) {
-    throw new Error(`${command} ${args.join(" ")} exited ${code}:\n${output.toString("utf8")}\n${Buffer.concat(stderr).toString("utf8")}`);
+    const logs = command === "npm" ? `\n${await npmLogTail()}` : "";
+    throw new Error(`${command} ${args.join(" ")} exited ${code}:\n${output.toString("utf8")}\n${Buffer.concat(stderr).toString("utf8")}${logs}`);
   }
   return output;
 }
