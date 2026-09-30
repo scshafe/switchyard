@@ -36,10 +36,10 @@ import {
   MODEL_BINDING,
   TURN,
   node
-} from "./fixtures/mission-pipeline/node-graph-v2-fixtures.mjs";
+} from "./fixtures/switchyard/node-graph-v2-fixtures.mjs";
 
 const goldenPath = new URL(
-  "./fixtures/mission-pipeline/graph-v2-digest-golden-vectors.json",
+  "./fixtures/switchyard/graph-v2-digest-golden-vectors.json",
   import.meta.url
 );
 const GOLDEN = JSON.parse(readFileSync(goldenPath, "utf8"));

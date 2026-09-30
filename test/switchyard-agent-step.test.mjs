@@ -15,7 +15,7 @@ import {
 
 const mirror = (name) => new URL(`../schemas/${name}`, import.meta.url);
 const fixture = (name) =>
-  new URL(`./fixtures/mission-pipeline/${name}`, import.meta.url);
+  new URL(`./fixtures/switchyard/${name}`, import.meta.url);
 
 const ENVIRONMENT = Object.freeze({
   schemaVersion: "environment-descriptor.v1",

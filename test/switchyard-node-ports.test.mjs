@@ -18,7 +18,7 @@ import {
 import {
   MODEL_BINDING,
   node
-} from "./fixtures/mission-pipeline/node-graph-v2-fixtures.mjs";
+} from "./fixtures/switchyard/node-graph-v2-fixtures.mjs";
 
 const RECEIPT = Object.freeze({
   schemaVersion: "usage-receipt.v1",

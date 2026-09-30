@@ -346,7 +346,7 @@ async function withObjectPrototypeProperties(descriptors, operation) {
 }
 
 const goldenPath = new URL(
-  "./fixtures/mission-pipeline/node-turn-v2-digest-golden-vectors.json",
+  "./fixtures/switchyard/node-turn-v2-digest-golden-vectors.json",
   import.meta.url
 );
 let storeSequence = 1;

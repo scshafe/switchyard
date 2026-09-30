@@ -45,9 +45,9 @@ const forbiddenPaths = [
   "src/memory-store.ts",
   "src/node.ts",
   "src/store.ts",
-  "test/mission-pipeline-bound-runner.test.mjs",
-  "test/mission-pipeline-durable.test.mjs",
-  "test/mission-pipeline-node-model.test.mjs",
+  "test/switchyard-bound-runner.test.mjs",
+  "test/switchyard-durable.test.mjs",
+  "test/switchyard-node-model.test.mjs",
   "test/reference-ddl.test.mjs"
 ];
 

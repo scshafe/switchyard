@@ -4,7 +4,7 @@
 // node is one turn of an EAL-executed agent — a brief + input artifacts + an
 // environment descriptor in, a typed artifact out. The frozen sources live at
 // schemas/agent-step-{request,result}.v1.schema.json; these runtime types +
-// LOUD validators are pinned to them by test/mission-pipeline-agent-step.test.mjs.
+// LOUD validators are pinned to them by test/switchyard-agent-step.test.mjs.
 //
 // Two design rulings are load-bearing here:
 //   - `usage` is a REQUIRED ARRAY of usage-receipt.v1 (never a single optional
