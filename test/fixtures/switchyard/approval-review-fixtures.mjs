@@ -1,7 +1,16 @@
-// Approval / review fixtures: small graphs with approval and review settings.
+// Approval / review fixtures: small graphs, scripted ports, and a memory-store
+// harness that drains every worker principal and records human decisions.
 
 import { createArtifactEnvelope } from "@scshafe/switchyard/contracts/artifact";
-import { createGraphDefinition } from "@scshafe/switchyard/graph/definition";
+import { codeNodePortByNode } from "@scshafe/switchyard/execute/code-port";
+import {
+  approvalReviewHumanDecision,
+  withApprovalReviewPorts
+} from "@scshafe/switchyard/execute/approval-review";
+import { recordHumanNodeDecision, runNextUnitTurn } from "@scshafe/switchyard/execute/unit-runner";
+import { createGraphDefinition, graphDefinitionRef } from "@scshafe/switchyard/graph/definition";
+import { MemoryGraphStore } from "@scshafe/switchyard/store/memory-graph-store";
+import { MemoryUnitStore } from "@scshafe/switchyard/store/memory-unit-store";
 
 export const TURN = Object.freeze({
   idempotency: "per (unitId, nodeId, attemptNumber)",
@@ -29,6 +38,7 @@ export const PRINCIPALS = Object.freeze({
   console: "ar_console",
   admitter: "ar_admitter"
 });
+const WORKER_PRINCIPALS = [PRINCIPALS.worker, PRINCIPALS.cloud, PRINCIPALS.screen, PRINCIPALS.reviewer, PRINCIPALS.small, PRINCIPALS.big];
 
 export const CONTRACTS = Object.freeze({ question: "fixture.question.v1", answer: "fixture.answer.v1" });
 
@@ -114,6 +124,128 @@ export function fanoutDraft({ review, require = "all" } = {}) {
   };
 }
 
+export function receipt(tokens = 10) {
+  return {
+    schemaVersion: "usage-receipt.v1",
+    trust: "provider_reported",
+    observedInputTokens: tokens,
+    observedOutputTokens: 1,
+    chargedTokens: tokens + 1,
+    observedCostMicroUsd: 0,
+    chargedCostMicroUsd: 0,
+    durationMs: 5
+  };
+}
+
 export const answer = (payload) => createArtifactEnvelope(CONTRACTS.answer, payload);
+
+/**
+ * A model port answering from per-node scripts. A script entry is an outcome
+ * string, a completion object without usage, or a function of
+ * (input, context) returning one. Every call is logged.
+ */
+export function scriptedModelPort(scripts, log) {
+  const cursors = new Map();
+  return {
+    async invoke(input, bindingRef, context) {
+      const script = scripts[context.nodeId];
+      if (script === undefined) throw new Error(`no model script for ${context.nodeId}`);
+      const index = cursors.get(context.nodeId) ?? 0;
+      cursors.set(context.nodeId, index + 1);
+      let step = Array.isArray(script) ? script[Math.min(index, script.length - 1)] : script;
+      if (typeof step === "function") step = step(input, context);
+      if (typeof step === "string") step = { outcome: step };
+      log.push({ nodeId: context.nodeId, bindingId: bindingRef.bindingId, input, contractId: context.inputArtifact.contractId, outcome: step.outcome });
+      return { ...step, usage: step.usage ?? [receipt()] };
+    }
+  };
+}
+
+export function createHarness({ graph, models = {}, code = {}, decorate = true, unitId = "unit-1", initialState, prefix = "ar", startAt = "2026-09-29T10:00:00.000Z" } = {}) {
+  let epoch = Date.parse(startAt);
+  let sequence = 0;
+  const now = () => new Date((epoch += 1_000));
+  const graphStore = new MemoryGraphStore();
+  const unitStore = new MemoryUnitStore({
+    graphStore,
+    now,
+    idFactory: (kind) => `${prefix}-${kind}-${++sequence}`,
+    ...(initialState === undefined ? {} : { initialState })
+  });
+  const modelLog = [];
+  const codeLog = [];
+  const bodies = Object.fromEntries(Object.entries(code).map(([nodeId, body]) => [nodeId, async (input, context) => {
+    codeLog.push({ nodeId, input, contractId: context.inputArtifact.contractId });
+    return body(input, context);
+  }]));
+  const raw = { code: codeNodePortByNode(bodies), model: scriptedModelPort(models, modelLog) };
+  const ports = decorate ? withApprovalReviewPorts(raw, { graphs: [graph] }) : raw;
+
+  async function admit(seed = { question: "What is the capital of France?" }) {
+    await graphStore.publishGraph(graph);
+    return unitStore.admitUnit({
+      unitId,
+      graph: graphDefinitionRef(graph),
+      seedArtifact: createArtifactEnvelope(CONTRACTS.question, seed),
+      admittedAt: now().toISOString(),
+      principalId: PRINCIPALS.admitter
+    });
+  }
+
+  async function drain() {
+    const results = [];
+    for (let progressed = true; progressed;) {
+      progressed = false;
+      for (const principalId of WORKER_PRINCIPALS) {
+        const result = await runNextUnitTurn({ store: unitStore, principalId, leaseOwner: "ar-worker", ports, now });
+        if (result !== undefined) {
+          results.push(result);
+          progressed = true;
+        }
+      }
+    }
+    return results;
+  }
+
+  async function decide(nodeId, outcome, { outputArtifact, actorId = "person-1" } = {}) {
+    const queued = await unitStore.listQueuedUnits({ principalId: PRINCIPALS.console, nodeId });
+    if (queued.length !== 1) throw new Error(`expected one unit queued at ${nodeId}, found ${queued.length}`);
+    const decision = approvalReviewHumanDecision(graph, {
+      queued: queued[0],
+      outcome,
+      ...(outputArtifact === undefined ? {} : { outputArtifact }),
+      actor: { actorId }
+    });
+    return recordHumanNodeDecision({ store: unitStore, principalId: PRINCIPALS.console, decision, now });
+  }
+
+  async function openQueues() {
+    const open = [];
+    for (const graphNode of graph.nodes) {
+      for (const entry of await unitStore.listQueuedUnits({ principalId: graphNode.principal.id, nodeId: graphNode.nodeId })) {
+        open.push(`${graphNode.nodeId}<${entry.inputArtifact.contractId}>`);
+      }
+    }
+    return open;
+  }
+
+  const journey = () => unitStore.readJourney({ unitId });
+  return {
+    graph,
+    unitStore,
+    admit,
+    drain,
+    decide,
+    openQueues,
+    journey,
+    path: async () => (await journey())
+      .filter((record) => record.kind === "turn_settled" || record.kind === "join_unsatisfiable")
+      .map((record) => `${record.nodeId}:${record.outcome}`),
+    settled: async (nodeId) => (await journey()).filter((record) => record.kind === "turn_settled" && record.nodeId === nodeId),
+    artifact: (ref) => unitStore.getArtifact({ artifact: ref }),
+    modelLog,
+    codeLog
+  };
+}
 
 export const seal = (draft) => createGraphDefinition(draft);

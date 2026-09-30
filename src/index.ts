@@ -51,6 +51,7 @@ export * from "./execute/turn.js";
 export * from "./execute/turn-evidence.js";
 export * from "./execute/unit-runner.js";
 export * from "./execute/code-port.js";
+export * from "./execute/approval-review.js";
 export {
   withDeclaredFailureOutcomes,
   type DeclaredFailurePortKind,

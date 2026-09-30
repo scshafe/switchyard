@@ -3,7 +3,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { createArtifactEnvelope } from "@scshafe/switchyard/contracts/artifact";
 import { digest } from "@scshafe/switchyard/contracts/digest";
+import {
+  applyApprovalReviewCompletion,
+  reviewNotes
+} from "@scshafe/switchyard/execute/approval-review";
 import {
   approvalReviewEdgeIds,
   approvalReviewRole
@@ -278,4 +283,40 @@ test("refusal: reserved ids and tampered expansions are refused", () => {
   const skipped = unseal(graph);
   skipped.entry = "draft";
   assert.throws(() => compileGraph(forge(skipped)), /not the approval\/review expansion of its own settings/);
+});
+
+test("records: forged or inconsistent review records are refused", () => {
+  const graph = seal(qaDraft({ review: { by: ACTORS.reviewer, onReject: "terminal", maxRounds: 3 } }));
+  const input = createArtifactEnvelope(CONTRACTS.question, { question: "q" });
+  const output = answer({ text: "a" });
+  const usage = [{
+    schemaVersion: "usage-receipt.v1",
+    trust: "provider_reported",
+    observedInputTokens: 1,
+    observedOutputTokens: 1,
+    chargedTokens: 2,
+    observedCostMicroUsd: 0,
+    chargedCostMicroUsd: 0,
+    durationMs: 1
+  }];
+  const request = applyApprovalReviewCompletion(graph, { nodeId: "draft", inputArtifact: input, completion: { outcome: "done", outputArtifact: output, usage } });
+  assert.equal(request.outcome, "done");
+  assert.equal(request.outputArtifact.contractId, "switchyard.review-request.v1");
+  assert.equal(request.usage.length, 1);
+  assert.equal(request.outputArtifact.payload.maxRounds, 3);
+  // The subject's raw result must satisfy the authored contract first.
+  assert.throws(() => applyApprovalReviewCompletion(graph, { nodeId: "draft", inputArtifact: input, completion: { outcome: "done", outputArtifact: input, usage } }), /must carry fixture\.answer\.v1/);
+  const rework = applyApprovalReviewCompletion(graph, { nodeId: "draft::review", inputArtifact: request.outputArtifact, completion: { outcome: "rejected", outputArtifact: reviewNotes("n"), usage } });
+  assert.equal(rework.outcome, "rework");
+  assert.equal(rework.outputArtifact.payload.round, 2);
+  assert.throws(() => applyApprovalReviewCompletion(graph, { nodeId: "draft::review", inputArtifact: request.outputArtifact, completion: { outcome: "accepted", outputArtifact: reviewNotes("n"), usage } }), /takes no feedback artifact/);
+  assert.throws(() => applyApprovalReviewCompletion(graph, { nodeId: "draft::review", inputArtifact: request.outputArtifact, completion: { outcome: "rework", usage } }), /undeclared outcome "rework"/);
+  // A rework record whose history does not match its round.
+  const forged = createArtifactEnvelope("switchyard.rework.v1", { ...rework.outputArtifact.payload, round: 3 });
+  assert.throws(() => applyApprovalReviewCompletion(graph, { nodeId: "draft::rework", inputArtifact: forged, completion: { outcome: "done", outputArtifact: output, usage } }), /round 3 carries exactly 2 earlier round\(s\)/);
+  const unbounded = createArtifactEnvelope("switchyard.rework.v1", { ...rework.outputArtifact.payload, maxRounds: null });
+  assert.throws(() => applyApprovalReviewCompletion(graph, { nodeId: "draft::rework", inputArtifact: unbounded, completion: { outcome: "done", outputArtifact: output, usage } }), /does not match the sealed 3/);
+  // Nodes without a role pass the answer through unchanged.
+  const untouched = { outcome: "published" };
+  assert.equal(applyApprovalReviewCompletion(graph, { nodeId: "publish", inputArtifact: output, completion: untouched }), untouched);
 });
