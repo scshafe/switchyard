@@ -7,6 +7,86 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
+## 2.4.0 — unreleased (draft: readable failures)
+
+Additive. No graph, digest, store contract, schema or wire change: a store
+that implements the 2.3.0 `UnitStore` contract (switchyard-postgres 0.2.0
+included) works unchanged. From the second fresh-eyes run of the first-run
+guide.
+
+- **Failures carry a readable message.** `ExecutionFailureError` takes an
+  optional fourth argument, `message`; without it the message is the
+  `message` of an `Error` `cause` (read through data properties only), else
+  the code, as before. The runner already recorded `error.message` as the
+  failed attempt's `errorMessage` (in `recordTurnFailure` and the
+  `turn_failed` journey record; switchyard-postgres keeps it in
+  `turn_failures.error_message`), but the engine's own failures passed their
+  explanation only as the `cause`, so the stored message was the bare code.
+  Now every engine failure built with an `Error` cause stores that cause's
+  text, and so does a host's `new ExecutionFailureError(code, retryable,
+  providerError)`: pass `message` to choose what is stored instead (a plain
+  thrown `Error` was always stored with its message). A terminal `runClaimedUnitTurn` / `runNextUnitTurns` result has
+  `errorMessage` next to `errorCode` when that run recorded the failure, and
+  the `failureOutboxEvents` context has `errorMessage`.
+- **`fakeModelPort` names the missing rule**: a model node without a rule
+  still fails terminally with `immutable_configuration_rejected`, with the
+  message `no fake-model rule for node "in-scope"; it has rules for
+  "is-question", "draft-answer". Add a rule keyed by the node id to
+  fakeModelPort({ ... })`.
+- **`runWorker` runs only the graph versions it was given.** With `graphs`,
+  a claimed turn of a graph (or graph version) not among them is not run:
+  nothing is recorded, the unit waits, and `onSkipped({ principalId,
+  queueId, unitId, nodeId, graph, given, message })` reports it, e.g.
+  `unit u6 waits at compose-reply::rework: it runs on graph
+  first-switchyard v1, which this worker was not given (it has
+  first-switchyard v2). Pass that version in the worker's graphs to run
+  it.` Without `onSkipped`, one process warning
+  (`SWITCHYARD_WORKER_GRAPH_NOT_GIVEN`) per such version. The result counts
+  them as `skipped`. Before, such a unit ran with ports built for another
+  version and its reviewed nodes failed for good with
+  `immutable_stage_contract_rejected`. A claim is per principal and returns
+  one node of one graph lane; the store contract has no graph filter and no
+  lease release, so the worker claims such a batch, withholds it and claims
+  again in the same pass (the store then offers the next lane). The
+  withheld turns stay leased until their `leaseMs` lapses, which delays a
+  worker that does have that version by up to that long. Behaviour change
+  for hosts that passed `graphs` only to name principals while running other
+  graphs too: pass `principals` without `graphs` to run every claimed turn,
+  as in 2.3.0.
+- **`withApprovalReviewPorts`** fails an `X::review` or `X::rework` turn of a
+  graph version it was not given before the body runs (so no model is
+  called), with `withApprovalReviewPorts was not given graph
+  first-switchyard v1, the version unit u6 runs on, so it cannot build the
+  record for compose-reply::rework (it has first-switchyard v2). Pass every
+  graph version with units in flight in options.graphs`. The code is still
+  `immutable_stage_contract_rejected`; before, the turn ran and failed on
+  the contract with a message that did not name the version. Other nodes of
+  graphs it was not given pass through, as before.
+- **`GraphPublicationConflictError`** (a changed graph published under a
+  version that is already published) adds: `A published version never
+  changes: publish the changed graph under a new version (units admitted to
+  first-switchyard@1 keep running on it)`. switchyard-postgres throws this
+  class, so its `publishGraph` says the same.
+
+Not in this version (they need a store contract or schema change):
+
+- **A claim filtered by graph version.** `ClaimUnitTurnsInput` would take
+  the graph versions a worker runs (`MemoryUnitStore` would restrict its
+  lane choice to them; switchyard-postgres would pass the filter to it and
+  could narrow its `claim_worker` hydration and `hasClaimableWorkerTurns`
+  pre-check), so `runWorker` would never lease a turn it will not run. A
+  `releaseTurnLease` (fenced by the lease token, no attempt consumed) would
+  serve hosts that decide after claiming.
+- **Readable failures in switchyard-postgres's views.** The message is
+  already stored (`turn_failures.error_message`); the `turns` view has only
+  `error_code` and `unit_positions` only `last_error_code`. Adding
+  `error_message` / `last_error_message` there is a view-only migration.
+  `UnitDeadLetterRecord` has no `errorMessage`; adding it is a store
+  contract change (and a `dead_letters` column).
+- **Retrying or retiring a failed unit.** Evidence is append-only and no
+  store operation reopens a terminally failed queue or closes a unit; a host
+  admits the input again under a new unit id.
+
 ## 2.3.0 — unreleased (W4: first-run helpers)
 
 Additive. No graph, digest, runner, store or wire change.
