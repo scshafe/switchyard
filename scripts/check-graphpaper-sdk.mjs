@@ -16,7 +16,6 @@ const sdkRoot = join(root, "packages/switchyard-graphpaper");
 const graphpaperName = "@scshafe/graphpaper";
 const graphpaperVersion = "0.5.2";
 const graphpaperRoot = join(root, "node_modules", graphpaperName);
-const elkRoot = join(root, "node_modules/elkjs");
 const scratch = await mkdtemp(join(tmpdir(), "switchyard-graphpaper-check-"));
 
 const npmLogs = join(scratch, "npm-logs");
@@ -41,7 +40,7 @@ async function npmLogTail() {
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
     cwd: options.cwd ?? root,
-    env: { ...process.env, npm_config_offline: "true", npm_config_audit: "false", npm_config_fund: "false", npm_config_logs_dir: npmLogs },
+    env: { ...process.env, npm_config_offline: options.online ? "false" : "true", npm_config_audit: "false", npm_config_fund: "false", npm_config_logs_dir: npmLogs },
     stdio: ["ignore", "pipe", "pipe"]
   });
   const stdout = [];
@@ -150,6 +149,22 @@ async function pack(packageRoot, directory) {
   return { path, report: report[0], bytes };
 }
 
+// A third-party peer is not re-packed from node_modules (npm 11.16 on hosted
+// runners exits 1 silently packing elkjs there); the exact published tarball
+// is fetched from its registry and must match the lockfile's integrity.
+async function fetchLocked(lock, name, version, directory) {
+  const escaped = `${name}@${version}`.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const match = new RegExp(`\\n  '?${escaped}'?:\\n    resolution: \\{integrity: (sha512-[A-Za-z0-9+/]+={0,2})\\}`).exec(lock);
+  assert.ok(match, `pnpm-lock.yaml must lock ${name}@${version} by integrity`);
+  await mkdir(directory);
+  const report = JSON.parse((await run("npm", ["pack", `${name}@${version}`, "--json", "--ignore-scripts", "--pack-destination", directory], { cwd: directory, online: true })).toString("utf8"));
+  assert.equal(report.length, 1, "npm pack must return exactly one artifact");
+  const path = join(directory, report[0].filename);
+  const bytes = await readFile(path);
+  assert.equal(`sha512-${hash("sha512", bytes, "base64")}`, match[1], `${name}@${version} tarball must match the lockfile integrity`);
+  return { path, report: report[0], bytes };
+}
+
 function parseManifest(text) {
   const entries = new Map();
   for (const [index, line] of text.split(/\r?\n/).entries()) {
@@ -236,7 +251,7 @@ try {
   assert.equal(graphpaperMetadata.exports["."].default, "./src/index.js");
   const engine = await pack(root, join(scratch, "engine"));
   const graphpaper = await pack(graphpaperRoot, join(scratch, "graphpaper"));
-  const elk = await pack(elkRoot, join(scratch, "elk"));
+  const elk = await fetchLocked(lock, "elkjs", "0.10.2", join(scratch, "elk"));
   assert.equal(elk.report.name, "elkjs");
   assert.equal(elk.report.version, "0.10.2");
   const consumer = join(scratch, "consumer");
