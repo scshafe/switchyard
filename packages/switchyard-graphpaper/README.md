@@ -1,7 +1,7 @@
-# mission-pipeline-graphpaper
+# switchyard-graphpaper
 
 Unreleased **0.1.0**: a separately packaged, static diagram SDK for
-mission-pipeline 1.1.0 and the `scshafe/graphpaper` renderer. It lives in the
+Switchyard 2.1.0 and the `scshafe/graphpaper` renderer. It lives in the
 engine repository but is not included in the engine's published payload.
 
 Implemented exports: `buildPipelineDiagram`, `validatePresentation`,
@@ -22,7 +22,7 @@ as `overlay`, `metrics`, and `update` are not accepted.
 
 ## Installation and package identity
 
-Both this package and engine 1.1.0 are unreleased. Build and pack the two local
+Both this package and engine 2.1.0 are unreleased. Build and pack the two local
 packages for evaluation; do not assume either version is on npm.
 
 The intended renderer is **scshafe/graphpaper**, tested at commit
@@ -50,7 +50,7 @@ import {
   buildPipelineDiagram, validatePresentation,
   PIPELINE_PRESENTATION_SCHEMA_VERSION,
   type PipelinePresentation
-} from "mission-pipeline-graphpaper";
+} from "switchyard-graphpaper";
 
 // `graph` is a consumer-owned sealed GraphDefinition.
 const projection = projectGraphDisplay(compileGraph(graph));
@@ -83,7 +83,7 @@ Presentation text is bounded to 8,192 characters per field and rows to 64.
 
 The model carries the exact graph reference and a canonical-JSON SHA-256 of
 the complete presentation at `metadata.pipeline`, with schema
-`mission-pipeline-diagram.v1` and mode `static`. A graph digest carried in a
+`switchyard-diagram.v1` and mode `static`. A graph digest carried in a
 copied projection is **not** a seal of the projection payload. Without
 `definition`, validation checks shape and coverage only; pass the original
 sealed definition to recompile it and require exact projection equality.
@@ -91,7 +91,7 @@ It verifies self-consistency, not publisher authorization.
 
 ## Consumer presentation and rendering rules
 
-`PipelinePresentation` uses schema `mission-pipeline-presentation.v1`:
+`PipelinePresentation` uses schema `switchyard-presentation.v1`:
 
 - `nodes` must cover exactly the projection's node IDs. Names, summaries,
   questions, and extra rows are consumer text. `model: { bindingDigest, name }`
@@ -142,7 +142,7 @@ After building a model as above, a Node host can render a complete figure:
 
 ```ts
 import ELK from "elkjs/lib/elk.bundled.js";
-import { renderPipelineFigure, viewerAssets } from "mission-pipeline-graphpaper/server";
+import { renderPipelineFigure, viewerAssets } from "switchyard-graphpaper/server";
 
 const figure = await renderPipelineFigure(model, {
   layoutEngine: new ELK(), // Optional; graphpaper has a built-in fallback.

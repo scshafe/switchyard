@@ -10,7 +10,7 @@ import {
   PIPELINE_RENDER_OPTIONS,
   PIPELINE_PRESENTATION_SCHEMA_VERSION,
   validatePresentation
-} from "mission-pipeline-graphpaper";
+} from "switchyard-graphpaper";
 import { fixtureGraphs, node } from "./fixtures/switchyard/node-graph-v2-fixtures.mjs";
 import {
   SUPPORT_TRIAGE_GRAPH,
@@ -98,7 +98,7 @@ test("Inbox static golden preserves the independent existing builder modulo meta
   assert.equal(JSON.stringify(model, null, 2) + "\n", fixtureText("inbox-graph8.static.golden.json"));
   assert.deepEqual(pipeline.graph, { id: source.definition.graphId, version: 8, digest: source.definition.graphDigest });
   assert.equal(pipeline.mode, "static");
-  assert.equal(pipeline.schemaVersion, "mission-pipeline-diagram.v1");
+  assert.equal(pipeline.schemaVersion, "switchyard-diagram.v1");
 });
 
 test("Inbox witness hashes and model labels remain tied to the retained exact graph", () => {

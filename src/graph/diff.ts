@@ -47,7 +47,7 @@ export interface GraphTerminalDiff {
 }
 
 export interface GraphDefinitionDiff {
-  readonly schemaVersion: "mission-pipeline-graph-definition-diff.v1";
+  readonly schemaVersion: "switchyard-graph-definition-diff.v1";
   readonly sealed: Readonly<{ graphId: string; version: number; digest: string }>;
   readonly candidate: Readonly<{ graphId: string; version: number; digest: string }>;
   readonly sameFamily: boolean;
@@ -219,7 +219,7 @@ export function graphDefinitionDiff(sealedRaw: unknown, candidateRaw: unknown): 
   const description = fieldChange("description", sealed.description, candidate.description);
   const entry = fieldChange("entry", sealed.entry, candidate.entry);
   return frozenRecord({
-    schemaVersion: "mission-pipeline-graph-definition-diff.v1" as const,
+    schemaVersion: "switchyard-graph-definition-diff.v1" as const,
     sealed: frozenRecord({ graphId: sealed.graphId, version: sealed.version, digest: sealed.graphDigest }),
     candidate: frozenRecord({ graphId: candidate.graphId, version: candidate.version, digest: candidate.graphDigest }),
     sameFamily: sealed.graphId === candidate.graphId,

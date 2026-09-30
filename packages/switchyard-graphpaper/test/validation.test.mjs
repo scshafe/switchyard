@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compileGraph, createGraphDefinition, JOIN_INPUT_ARTIFACT_CONTRACT, projectGraphDisplay } from "@scshafe/switchyard";
-import { renderPipelineFigure } from "mission-pipeline-graphpaper/server";
-import { buildPipelineDiagram, PIPELINE_PRESENTATION_SCHEMA_VERSION, validatePresentation } from "mission-pipeline-graphpaper";
+import { renderPipelineFigure } from "switchyard-graphpaper/server";
+import { buildPipelineDiagram, PIPELINE_PRESENTATION_SCHEMA_VERSION, validatePresentation } from "switchyard-graphpaper";
 import { fixtureGraphs } from "./fixtures/switchyard/node-graph-v2-fixtures.mjs";
 import {
   SUPPORT_TRIAGE_GRAPH,
@@ -172,13 +172,13 @@ test("source verification refuses stale definitions and a tampered graph seal", 
 });
 
 test("unknown schemas and future runtime modes fail instead of silently drawing static state", () => {
-  for (const schemaVersion of ["mission-pipeline-presentation.v2", "", null]) {
+  for (const schemaVersion of ["switchyard-presentation.v2", "", null]) {
     const value = input();
     value.presentation.schemaVersion = schemaVersion;
     assert.throws(() => buildPipelineDiagram(value), /schema/u);
   }
   const projection = input();
-  projection.projection = { ...projection.projection, schemaVersion: "mission-pipeline-graph-display.v2" };
+  projection.projection = { ...projection.projection, schemaVersion: "switchyard-graph-display.v2" };
   assert.throws(() => buildPipelineDiagram(projection), /schema/u);
   for (const unsupported of ["overlay", "metrics"]) {
     assert.throws(() => buildPipelineDiagram({ ...input(), [unsupported]: {} }), /key|field|unsupported|overlay|metrics/u);

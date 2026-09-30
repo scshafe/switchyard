@@ -1,10 +1,10 @@
-# ADR: a standard graphpaper frontend SDK for mission-pipeline graphs
+# ADR: a standard graphpaper frontend SDK for Switchyard graphs
 
 **Status: static SDK core and adapters implemented; supported local Browser checks recorded, reduced-motion activation unverified (2026-09-11).**
 The separately packaged SDK lives at
-[`packages/mission-pipeline-graphpaper`](../packages/mission-pipeline-graphpaper/README.md),
+[`packages/switchyard-graphpaper`](../packages/switchyard-graphpaper/README.md),
 version 0.1.0 unreleased, outside the engine payload. All engine exports it relies on are implemented in
-unreleased 1.1.0: `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
+unreleased 2.1.0: `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
 `projectGoalClosures`, and `graphDefinitionDiff`; see
 [`REVIEW-INTERFACE-FRICTION.md`](REVIEW-INTERFACE-FRICTION.md). The SDK and
 consumer interfaces below remain proposals unless explicitly marked otherwise.
@@ -31,7 +31,7 @@ this ADR:
 | `graph-console.ts` | 313 | One registry entry per sealed graph: definition, presentation, proposal, output contract bindings, human questions, implementation pointers, prompt views; exact (id, version, digest) lookup including frozen historical snapshots; enrolled versus registered | The registry shape is generic; its contents are consumer data |
 | `pipeline-node-panel.ts` | 486 | The slide-over panel: server-rendered empty shell beside the figure, DOM-built browser module that reads one node API, refuses a payload whose graph identity differs, never paints a stale answer over a newer pick | Generic shell and stale-fetch rule; Inbox-specific sections (action candidates, decisions) |
 | `model-prompt-view.ts` | 369 | The exact prompt and inference parameters for a model node, shown only when the lane's binding equals the sealed binding digest; otherwise withheld with the reason | The honesty rule is generic; catalog resolution is consumer-owned |
-| `graph-proposal-diff.ts` | 259 | Pure diff of two `GraphDefinition`s by identity (node id, edge id, terminal pair) | Entirely generic; imports only from mission-pipeline |
+| `graph-proposal-diff.ts` | 259 | Pure diff of two `GraphDefinition`s by identity (node id, edge id, terminal pair) | Entirely generic; imports only from Switchyard |
 | `pipeline-proposal-diagram.ts` | 219 | Union of sealed and candidate definitions with added/removed/changed marks, one edge per declared edge, candidate roles from the candidate definition | Generic |
 | `pipeline-http.ts` | 898 | Routes; exact graph identity from the unit, never the URL; version-unavailable responses; per-unit visit derivation from the console projection; endpoint delivery states from outbox and relay rows | Routes and authorization are consumer-owned; the identity and "unavailable, not substituted" rules are generic |
 
@@ -60,15 +60,15 @@ graphpaper. The engine provides the pure projections the static SDK consumes
 and its proposed runtime modes would use.
 
 ```
-mission-pipeline (engine, dependency-free)
-  projectGraphDisplay(compiled)   -> GraphDisplayProjection      [implemented, unreleased 1.1.0]
-  projectUnitPath(journey)        -> UnitPathProjection          [implemented, 1.1.0]
-  createGoalManifest(graph, draft)-> GoalManifest                 [implemented, 1.1.0; consumer-authored, engine-sealed]
-  projectGoalClosures(manifest, path) -> GoalClosureProjection   [implemented, 1.1.0]
-  graphDefinitionDiff(a, b)       -> GraphDefinitionDiff         [implemented, unreleased 1.1.0; adapted from Inbox]
+Switchyard (engine, dependency-free)
+  projectGraphDisplay(compiled)   -> GraphDisplayProjection      [implemented, unreleased 2.1.0]
+  projectUnitPath(journey)        -> UnitPathProjection          [implemented, 2.1.0]
+  createGoalManifest(graph, draft)-> GoalManifest                 [implemented, 2.1.0; consumer-authored, engine-sealed]
+  projectGoalClosures(manifest, path) -> GoalClosureProjection   [implemented, 2.1.0]
+  graphDefinitionDiff(a, b)       -> GraphDefinitionDiff         [implemented, unreleased 2.1.0; adapted from Inbox]
           │
           ▼
-mission-pipeline-graphpaper (SDK, peer-depends on both; no DOM in core)
+switchyard-graphpaper (SDK, peer-depends on both; no DOM in core)
   core:    buildPipelineDiagram, validatePresentation, static legend/options [implemented, 0.1.0]
            buildProposalDiagram, overlays and metrics [proposed]
   server:  renderPipelineFigure (SSR, optional injected ELK), viewerAssets [implemented, 0.1.0]
@@ -85,12 +85,12 @@ consumer: presentation words, goal manifest, endpoints; run overlays; metrics;
 
 | Concern | Owner | Never |
 | --- | --- | --- |
-| Topology, kinds, contracts, outcomes, bindings, joins, terminals | mission-pipeline (`GraphDefinition`) | duplicated in the SDK or the consumer |
-| Display projection of a compiled graph (depth, merged arrows, marks, fan-outs, joins) | mission-pipeline, pure function | computed differently per consumer |
-| Execution state of one unit (settled, pending, failed, dead, join progress) | mission-pipeline, pure over the journey | inferred from a picture |
+| Topology, kinds, contracts, outcomes, bindings, joins, terminals | Switchyard (`GraphDefinition`) | duplicated in the SDK or the consumer |
+| Display projection of a compiled graph (depth, merged arrows, marks, fan-outs, joins) | Switchyard, pure function | computed differently per consumer |
+| Execution state of one unit (settled, pending, failed, dead, join progress) | Switchyard, pure over the journey | inferred from a picture |
 | Delivery, outbox, relay, and "reached" states | consumer, supplied explicitly | inferred by the SDK |
 | Names, summaries, questions, goal names, endpoints, quiet ends, arrow notes | consumer presentation | placed in the graph definition |
-| Goal membership, entries, and resolutions | consumer-authored goal manifest, sealed and validated by mission-pipeline (`createGoalManifest`) | inferred from names or from a presentation grouping |
+| Goal membership, entries, and resolutions | consumer-authored goal manifest, sealed and validated by Switchyard (`createGoalManifest`) | inferred from names or from a presentation grouping |
 | Model, prompt, contract, implementation details | consumer, through an authorized provider callback | bundled into the viewer or fetched by it |
 | Metrics per graph version | consumer, with unavailable distinct from zero | invented by the SDK |
 | Layout, SVG, popovers, selection gestures, pan and zoom, keyboard, reduced motion | graphpaper | forked or reimplemented in the SDK |
@@ -98,7 +98,7 @@ consumer: presentation words, goal manifest, endpoints; run overlays; metrics;
 
 ## Contracts
 
-### From the engine (implemented in unreleased 1.1.0)
+### From the engine (implemented in unreleased 2.1.0)
 
 `projectGraphDisplay(compiled)` in `src/graph/display.ts` returns a
 serializable, digest-carrying `GraphDisplayProjection` of one compiled graph.
@@ -106,15 +106,15 @@ It contains no presentation words, only structure:
 
 ```ts
 interface GraphDisplayProjection {
-  readonly schemaVersion: "mission-pipeline-graph-display.v1";
+  readonly schemaVersion: "switchyard-graph-display.v1";
   readonly graph: GraphDefinitionRef;                       // id, version, digest
   readonly entry: string;
   readonly nodes: readonly {
-    readonly nodeId: string; readonly kind: MissionPipelineNodeKind;
-    readonly ref: MissionPipelineNodeRef; readonly input: ContractId;
+    readonly nodeId: string; readonly kind: SwitchyardNodeKind;
+    readonly ref: SwitchyardNodeRef; readonly input: ContractId;
     readonly outcomes: readonly string[]; readonly outputs?: Readonly<Record<string, ContractId>>;
-    readonly binding?: MissionPipelineNodeBindingRef; readonly configuration?: MissionPipelineNodeConfigurationRef;
-    readonly join?: MissionPipelineJoin; readonly maxAttempts: number;
+    readonly binding?: SwitchyardNodeBindingRef; readonly configuration?: SwitchyardNodeConfigurationRef;
+    readonly join?: SwitchyardJoin; readonly maxAttempts: number;
     readonly depth: number;                                  // longest path from entry; any cycle: BFS depth for all nodes
     readonly marks: boolean;                                 // multiple outcomes, identical guaranteed successors, no terminals or conditional-only extras
   }[];
@@ -161,7 +161,7 @@ occurrence, outcomes, edges taken, join progress, open queues, and usage.
 
 `graphDefinitionDiff(a, b)` in `src/graph/diff.ts` compares two sealed graph
 definitions. `GraphDefinitionDiff` carries the schema
-`mission-pipeline-graph-definition-diff.v1`, both exact identities as `sealed`
+`switchyard-graph-definition-diff.v1`, both exact identities as `sealed`
 and `candidate` (`graphId`, `version`, `digest`), `sameFamily`, graph-level
 `description` and `entry` changes, `nodes`, `edges`, `terminals`, `unchanged`
 counts, and `empty`.
@@ -187,16 +187,16 @@ so a structurally valid sealed proposal can be inspected before it is runnable.
 The presentation subset below is implemented in SDK 0.1.0. Its full exported
 type also includes optional consumer model-name/binding-digest pairs, unit
 noun, diagram ID/description/publication, and endpoint wording/metadata;
-see [`types.ts`](../packages/mission-pipeline-graphpaper/src/types.ts).
+see [`types.ts`](../packages/switchyard-graphpaper/src/types.ts).
 Goal labels require a validated manifest and original sealed definition;
 membership is checked but goal scopes are not rendered. `NodeDetails` is the
 implemented authorized-provider subset in
-[`viewer-types.ts`](../packages/mission-pipeline-graphpaper/src/viewer-types.ts).
+[`viewer-types.ts`](../packages/switchyard-graphpaper/src/viewer-types.ts).
 The overlay and metrics contracts in this block remain proposed.
 
 ```ts
 interface PipelinePresentation {                            // implemented static subset, 0.1.0
-  readonly schemaVersion: "mission-pipeline-presentation.v1";
+  readonly schemaVersion: "switchyard-presentation.v1";
   readonly title: string; readonly subtitle?: string;
   readonly nodes: Readonly<Record<string, { name: string; summary?: string; question?: string; rows?: readonly { label: string; value: string }[] }>>;
   readonly arrows?: Readonly<Record<`${string}->${string}`, readonly { outcomes: readonly string[]; label?: string; note?: string }[]>>;
@@ -232,7 +232,7 @@ interface NodeMetrics {
 
 interface NodeDetails {                                     // implemented static details seam, 0.1.0
   readonly graph: GraphDefinitionRef; readonly nodeId: string;
-  readonly sealed: { ref: MissionPipelineNodeRef; kind: "code" | "model" | "human" | "agent" | "callback"; input: ContractId; outcomes: readonly string[]; maxAttempts: number; leaseMs: number; binding?: MissionPipelineNodeBindingRef };
+  readonly sealed: { ref: SwitchyardNodeRef; kind: "code" | "model" | "human" | "agent" | "callback"; input: ContractId; outcomes: readonly string[]; maxAttempts: number; leaseMs: number; binding?: SwitchyardNodeBindingRef };
   readonly outputs?: readonly { outcome: string; contractId: ContractId }[];
   readonly model?: { name: string; id: string; version: number; providerId?: string; parameters: Readonly<Record<string, string | number>>;
     prompt: { digest: string; systemPrompt: string } | { withheld: string } };
@@ -246,7 +246,7 @@ graph reference, a canonical presentation digest, and structured
 `unclaimedTerminals`. The expanded metadata contract below remains proposed:
 
 ```ts
-{ schemaVersion: "mission-pipeline-diagram.v1", graph: GraphDefinitionRef,
+{ schemaVersion: "switchyard-diagram.v1", graph: GraphDefinitionRef,
   mode: "static" | "run" | "metrics" | "proposal", unitId?: string, presentationDigest: string }
 ```
 
@@ -262,13 +262,13 @@ validatePresentation(projection: GraphDisplayProjection, presentation: PipelineP
 pipelineLegend(mode?: "static"): readonly DiagramLegendEntry[];
 PIPELINE_RENDER_OPTIONS: DiagramRenderOptions;
 
-// mission-pipeline-graphpaper/server (Node only)
+// switchyard-graphpaper/server (Node only)
 renderPipelineFigure(model: DiagramModel, options?: {
   layoutEngine?: DiagramLayoutEngine; figureId?: string; modelElementId?: string;
 }): Promise<string>;
 viewerAssets(): Readonly<Record<string, { contentType: string; body: string; etag: string }>>;
 
-// mission-pipeline-graphpaper/browser (ES module, no framework)
+// switchyard-graphpaper/browser (ES module, no framework)
 mountPipelineViewer(container: Element, options?: {
   model?: DiagramModel | string;                            // default: embedded inert model JSON
   onSelect?: (pick: { nodeId: string | null; node: DiagramNode | null; source: string }) => void;
@@ -325,7 +325,7 @@ explicitly. Both packages have separate exact-payload manifests and gates.
 ## Extended public API (proposed; not shipped)
 
 ```ts
-// mission-pipeline-graphpaper  (core: no DOM, no fetch, no timers)
+// switchyard-graphpaper  (core: no DOM, no fetch, no timers)
 buildPipelineDiagram(input: {
   projection: GraphDisplayProjection; presentation: PipelinePresentation;
   overlay?: ExecutionOverlay; metrics?: VersionMetrics; historical?: boolean;
@@ -349,9 +349,9 @@ interface ProposedPipelineViewerHandle {
 Server side, one request:
 
 ```ts
-import { compileGraph, projectGraphDisplay } from "mission-pipeline";
-import { buildPipelineDiagram, validatePresentation } from "mission-pipeline-graphpaper";
-import { renderPipelineFigure } from "mission-pipeline-graphpaper/server";
+import { compileGraph, projectGraphDisplay } from "@scshafe/switchyard";
+import { buildPipelineDiagram, validatePresentation } from "switchyard-graphpaper";
+import { renderPipelineFigure } from "switchyard-graphpaper/server";
 import { TRIAGE_PRESENTATION } from "./triage-presentation.js";                          // consumer words
 
 const projection = projectGraphDisplay(compileGraph(graph));                            // consumer-resolved sealed graph
@@ -539,8 +539,8 @@ legend visibility. They do not accept arbitrary renderer options.
 ## Test strategy
 
 Engine projection tests run today in
-[`mission-pipeline-graph-display.test.mjs`](../test/mission-pipeline-graph-display.test.mjs)
-and [`mission-pipeline-graph-diff.test.mjs`](../test/mission-pipeline-graph-diff.test.mjs):
+[`switchyard-graph-display.test.mjs`](../test/switchyard-graph-display.test.mjs)
+and [`switchyard-graph-diff.test.mjs`](../test/switchyard-graph-diff.test.mjs):
 golden projections and diffs over the fixture graphs and the support-triage
 example, plus routing, depth, identity-comparison, seal-validation, and
 hostile-input cases. The example's existing presentation coverage, Mermaid
@@ -548,7 +548,7 @@ diagram, and goal-manifest seals remain checked against the same unchanged
 graph definitions.
 
 Static SDK checks run today under
-[`packages/mission-pipeline-graphpaper/test`](../packages/mission-pipeline-graphpaper/test/diagram.test.mjs)
+[`packages/switchyard-graphpaper/test`](../packages/switchyard-graphpaper/test/diagram.test.mjs)
 through an offline installed-tarball consumer. They cover the independent
 Inbox graph8 golden (only `metadata.pipeline` excluded), a support-triage
 static golden, shape/coverage, hostile inputs, deterministic frozen records,
@@ -558,9 +558,9 @@ and real graphpaper built-in layout/SVG compatibility. The existing Inbox and
 support-triage core model goldens are unchanged by the adapter work.
 
 Static adapter suites in
-[`server.test.mjs`](../packages/mission-pipeline-graphpaper/test/server.test.mjs),
-[`viewer-data.test.mjs`](../packages/mission-pipeline-graphpaper/test/viewer-data.test.mjs),
-and [`browser.test.mjs`](../packages/mission-pipeline-graphpaper/test/browser.test.mjs)
+[`server.test.mjs`](../packages/switchyard-graphpaper/test/server.test.mjs),
+[`viewer-data.test.mjs`](../packages/switchyard-graphpaper/test/viewer-data.test.mjs),
+and [`browser.test.mjs`](../packages/switchyard-graphpaper/test/browser.test.mjs)
 cover escaped SSR/inert JSON, real ELK and fallback layout, fixed asset
 bytes/ETags, strict model/details validation, exact selection identity, stale
 asynchronous responses, deep links, keyboard panel wiring, and teardown/failed
@@ -602,7 +602,7 @@ as Inbox's plan states; no Inbox adoption or deployed verification is claimed.
 
 ## Extraction and adoption plan
 
-1. **Engine projections — complete in unreleased 1.1.0** (this repository):
+1. **Engine projections — complete in unreleased 2.1.0** (this repository):
    `projectGraphDisplay`, `projectUnitPath`, the goal manifest,
    `projectGoalClosures`, and `graphDefinitionDiff`, with golden tests over
    the fixture graphs and the support-triage example. Additive exports; no
@@ -613,7 +613,7 @@ as Inbox's plan states; no Inbox adoption or deployed verification is claimed.
    example's `presentationCoverage` is the seed). Prove behaviour preservation
    with a golden test: the SDK's model for Inbox's frozen graph8 snapshot
    equals Inbox's current model modulo the new metadata block. Separate package
-   at `packages/mission-pipeline-graphpaper`, not part of the engine payload.
+   at `packages/switchyard-graphpaper`, not part of the engine payload.
 3. **Static server and browser adapters — implementation and automated checks
    added in unreleased 0.1.0; supported local Browser checks recorded**:
    `renderPipelineFigure`, `viewerAssets`, and `mountPipelineViewer` provide
@@ -641,14 +641,14 @@ SDK feature.
 
 - **Keep per-consumer integrations.** Rejected: the second consumer rebuilds
   about 4,100 lines and re-learns the identity and truthfulness rules.
-- **Put rendering into mission-pipeline.** Rejected: the engine imports Node
+- **Put rendering into Switchyard.** Rejected: the engine imports Node
   built-ins and its own files only, and its import-boundary test enforces it;
   graphpaper and elkjs are browser-shaped dependencies.
 - **Fork graphpaper for pipeline-specific layout.** Rejected: graphpaper's
   public model, options, class contract, and accessibility work already fit;
   the SDK adds only the pipeline vocabulary on top.
 - **A React wrapper first.** Rejected for now: Inbox renders on the server
-  and hydrates with a vanilla module under a strict CSP; a `mission-pipeline-
+  and hydrates with a vanilla module under a strict CSP; a `switchyard-
   graphpaper/react` entry can wrap `mountPipelineViewer` later without
   changing the core, and should be added only when a consumer using React
   exists.

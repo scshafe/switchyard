@@ -8,17 +8,17 @@ no timing or accuracy claim is made.
 
 Source:
 
-- [`test/fixtures/mission-pipeline/support-triage-example.mjs`](../test/fixtures/mission-pipeline/support-triage-example.mjs)
+- [`test/fixtures/switchyard/support-triage-example.mjs`](../test/fixtures/switchyard/support-triage-example.mjs)
   holds the graph, the comparison graph, the fixtures, the ports, the harness,
   and the presentation table.
-- [`test/mission-pipeline-support-triage-example.test.mjs`](../test/mission-pipeline-support-triage-example.test.mjs)
+- [`test/switchyard-support-triage-example.test.mjs`](../test/switchyard-support-triage-example.test.mjs)
   runs every path described here and keeps this page honest, including the
   diagram below, which is derived from the sealed graph and compared verbatim.
 
 Run it:
 
 ```sh
-npm run build && node --test test/mission-pipeline-support-triage-example.test.mjs
+npm run build && node --test test/switchyard-support-triage-example.test.mjs
 ```
 
 The pattern this example applies is explained in
@@ -133,17 +133,17 @@ are outside the goal; their decisions close the workflow, not the goal. The
 overloaded comparison graph seals the same goal with one member, `triage`,
 whose `proposed` and `standard` resolve it and whose `uncertain` escalates.
 
-The engine's display projection is available in unreleased 1.1.0. Using the
+The engine's display projection is available in unreleased 2.1.0. Using the
 fixture's exports, a consumer can derive the structure and check that its goal
 manifest describes the same exact graph:
 
 ```js
 import assert from "node:assert/strict";
-import { projectGraphDisplay } from "mission-pipeline";
+import { projectGraphDisplay } from "@scshafe/switchyard";
 import {
   COMPILED_SUPPORT_TRIAGE_GRAPH,
   SUPPORT_TRIAGE_GOAL_MANIFEST
-} from "./test/fixtures/mission-pipeline/support-triage-example.mjs";
+} from "./test/fixtures/switchyard/support-triage-example.mjs";
 
 const display = projectGraphDisplay(COMPILED_SUPPORT_TRIAGE_GRAPH);
 assert.deepEqual({ ...display.graph }, { ...SUPPORT_TRIAGE_GOAL_MANIFEST.graph });
@@ -153,7 +153,7 @@ assert.deepEqual({ ...display.graph }, { ...SUPPORT_TRIAGE_GOAL_MANIFEST.graph }
 same package instance; a transported sealed definition must be compiled again.
 Its result carries structural depth, merged arrows, marking nodes, fan-outs,
 joins, and terminals. The names and diagram above remain consumer-owned
-presentation. The [separate static graphpaper SDK](../packages/mission-pipeline-graphpaper/README.md)
+presentation. The [separate static graphpaper SDK](../packages/switchyard-graphpaper/README.md)
 builds this example's frozen `DiagramModel` in unreleased 0.1.0. Its static
 server/browser adapters now provide SVG plus inert model JSON, fixed assets,
 selection, deep links, and an optional authorized details panel. Automated

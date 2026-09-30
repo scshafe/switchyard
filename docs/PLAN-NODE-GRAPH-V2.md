@@ -366,7 +366,7 @@ specification. They are below N0 and do not reopen its binding decisions.
 
 - `npm test` — 344 passed, 0 failed. This includes the complete N1/N2 suite,
   N3 publication/store/routing coverage, and every guard's prove-it-bites case.
-- `node --test test/mission-pipeline-graph-store.test.mjs test/mission-pipeline-memory-unit-store.test.mjs test/mission-pipeline-store-routing.test.mjs`
+- `node --test test/switchyard-graph-store.test.mjs test/switchyard-memory-unit-store.test.mjs test/switchyard-store-routing.test.mjs`
   — 51 passed, 0 failed: 10 GraphStore cases, 34 MemoryUnitStore cases, and 7
   pure routing/join-arithmetic cases.
 - The reusable `registerUnitStoreConformanceTests` contract contributes 33 of
@@ -374,7 +374,7 @@ specification. They are below N0 and do not reopen its binding decisions.
   each of the eight settle checkpoints. Every pre-commit crash exposes neither
   side of the position change; post-commit reply loss replays one settlement
   and the complete successor set.
-- `node --test test/mission-pipeline-node-ports.test.mjs test/mission-pipeline-node-turn.test.mjs`
+- `node --test test/switchyard-node-ports.test.mjs test/switchyard-node-turn.test.mjs`
   — 65 passed, 0 failed against the N2 boundary.
 - `npm run check`, `npm run verify`, and `npm run test:fresh-clone` — release
   payload, reproducible artifact, clean install, generated-output parity, and

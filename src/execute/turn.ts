@@ -91,7 +91,7 @@ function validateNodeRef(value: unknown, label: string): SwitchyardNodeRef {
 
 /**
  * The exact below-N0 fingerprint formula recorded in the phase plan. The
- * configuration slot was sealed as the constant `"default"` before 1.1.0; a
+ * configuration slot was sealed as the constant `"default"` before 2.1.0; a
  * node that declares a configuration ref fills it with that ref's digest, and
  * a node that declares none is byte-identical to before.
  */

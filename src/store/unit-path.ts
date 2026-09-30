@@ -35,7 +35,7 @@ import {
 import { validateGraphDefinitionRef } from "./graph-store.js";
 import type { UnitJourneyRecord } from "./unit-store.js";
 
-export const UNIT_PATH_SCHEMA_VERSION = "mission-pipeline-unit-path.v1" as const;
+export const UNIT_PATH_SCHEMA_VERSION = "switchyard-unit-path.v1" as const;
 export const MAX_UNIT_PATH_RECORDS = 100_000;
 
 /** Journeys carry refs and receipts, never payloads; the budget is generous but finite. */

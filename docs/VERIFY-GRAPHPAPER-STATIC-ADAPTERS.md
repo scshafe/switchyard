@@ -1,6 +1,6 @@
 # Static graphpaper adapters: verification record
 
-2026-09-11, unreleased SDK 0.1.0 and engine 1.1.0.
+2026-09-11, unreleased SDK 0.1.0 and engine 2.1.0.
 
 Static adapters are implemented. Supported local Browser interaction and
 responsive checks now have a real-browser witness; activating reduced motion
@@ -11,7 +11,7 @@ implemented APIs, consumer recommendations, and remaining proposals.
 ## Current continuation: repository and Browser access
 
 Before file changes, the checkout was clean on
-`codex/1.1.0-engine-projections`, HEAD
+`codex/2.1.0-engine-projections`, HEAD
 `f8c8a8de6a7980d005dfb84811d4f923d2478fc2`.
 
 - The first normal @Browser request to `http://127.0.0.1:55829/` returned

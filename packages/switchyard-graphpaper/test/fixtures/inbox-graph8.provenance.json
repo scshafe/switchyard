@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "mission-pipeline-graphpaper-inbox-witness.v1",
+  "schemaVersion": "switchyard-graphpaper-inbox-witness.v1",
   "sourceRepository": "inbox-pipeline",
   "sourceCommit": "cb082c21bb844fc82a351c3e8a3645a653219c47",
   "sourceFiles": {

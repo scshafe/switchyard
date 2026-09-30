@@ -39,7 +39,7 @@ import {
 } from "../graph/definition.js";
 
 /**
- * The pre-1.1.0 request shape. It names a run, an item, a stage, and one
+ * The pre-2.1.0 request shape. It names a run, an item, a stage, and one
  * attempt counter, none of which a v2 node turn has; hosts that still speak
  * it keep working, and removing it is a major.
  */

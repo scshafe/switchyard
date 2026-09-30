@@ -34,7 +34,7 @@ import { MAX_GRAPH_NODES, type GraphDefinitionRef } from "./definition.js";
 import { predicateOutcomes } from "./edge.js";
 import { snapshotGraphValidationData } from "./limits.js";
 
-export const GOAL_MANIFEST_SCHEMA_VERSION = "mission-pipeline-goal-manifest.v1" as const;
+export const GOAL_MANIFEST_SCHEMA_VERSION = "switchyard-goal-manifest.v1" as const;
 export const GOAL_RESOLUTION_KINDS = ["resolved", "escalated"] as const;
 export type GoalResolutionKind = (typeof GOAL_RESOLUTION_KINDS)[number];
 

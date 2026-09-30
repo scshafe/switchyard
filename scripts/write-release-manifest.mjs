@@ -73,7 +73,7 @@ async function manifestLines(tarball) {
 async function writeSdkManifest(packageRoot) {
   const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
   const { name, version } = packageJson;
-  if (name !== "mission-pipeline-graphpaper") {
+  if (name !== "switchyard-graphpaper") {
     throw new Error(`unexpected SDK package name: ${String(name)}`);
   }
   if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
@@ -102,7 +102,7 @@ try {
   const lines = await manifestLines(join(scratch, report.basename));
   await writeFile(resolve(root, identity.manifest), `${lines.join("\n")}\n`, "utf8");
   console.log(JSON.stringify({ result: "written", manifest: identity.manifest, fileCount: lines.length }));
-  await writeSdkManifest(resolve(root, "packages/mission-pipeline-graphpaper"));
+  await writeSdkManifest(resolve(root, "packages/switchyard-graphpaper"));
 } finally {
   await rm(scratch, { force: true, recursive: true });
 }

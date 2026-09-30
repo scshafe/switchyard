@@ -1,7 +1,7 @@
 import type { GoalManifest, GraphDefinition, GraphDefinitionRef, GraphDisplayProjection, TerminalOutcome } from "@scshafe/switchyard";
 
-export const PIPELINE_PRESENTATION_SCHEMA_VERSION = "mission-pipeline-presentation.v1" as const;
-export const PIPELINE_DIAGRAM_SCHEMA_VERSION = "mission-pipeline-diagram.v1" as const;
+export const PIPELINE_PRESENTATION_SCHEMA_VERSION = "switchyard-presentation.v1" as const;
+export const PIPELINE_DIAGRAM_SCHEMA_VERSION = "switchyard-diagram.v1" as const;
 
 export interface PresentationRow {
   readonly label: string;

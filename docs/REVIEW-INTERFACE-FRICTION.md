@@ -1,7 +1,7 @@
 # Review: interface and code-design friction for focused-objective graphs
 
 **Status: findings and proposals (2026-09-10); P1, P2, P3, P4, P5, P6, and
-P9 implemented in unreleased 1.1.0 the same day. P7 and P8 implemented on
+P9 implemented in unreleased 2.1.0 the same day. P7 and P8 implemented on
 2026-09-11 at the user’s request; the original P8 assessment is retained below.**
 Everything under "What works today" was verified against the source and tests
 named. Each proposal names its compatibility
@@ -19,7 +19,7 @@ place the API made the pattern in
 
 | Capability | Where | Verified by |
 | --- | --- | --- |
-| Strict per-node outcome vocabularies, versioned with the node ref | `src/graph/outcome.ts`, `src/graph/definition.ts:329-334` | `test/mission-pipeline-graph.test.mjs` |
+| Strict per-node outcome vocabularies, versioned with the node ref | `src/graph/outcome.ts`, `src/graph/definition.ts:329-334` | `test/switchyard-graph.test.mjs` |
 | Compile-time completeness: every outcome routes unconditionally or is terminal; conditional arms are additive | `src/graph/compile.ts:251-269` | graph tests; the example's "removing an escalation route" test |
 | Node definition signature {kind, input, outcome set} bound to (ref id, version) within a graph and across published graphs | `src/graph/compile.ts:166-197`, `src/store/graph-store.ts:51-64` | graph and graph-store tests |
 | Closed edge predicate language: outcome, anyOf, outcome + field equality over the output artifact | `src/graph/edge.ts`, `src/store/routing.ts` | routing tests |
@@ -57,7 +57,7 @@ With omitted `compose` or `compose: "select"`, a join **synchronizes
 predecessors and selects one accepted artifact**. Opt-in envelope joins now
 embed accepted payloads; see P7 below. The default does not combine payloads.
 A valid example is the `join` fixture in
-`test/fixtures/mission-pipeline/node-graph-v2-fixtures.mjs`: `start` fans out
+`test/fixtures/switchyard/node-graph-v2-fixtures.mjs`: `start` fans out
 to `branch-a` and `branch-b`, both emit `unit-artifact.v1`, and `join`
 (`require: "all"`) queues once with branch A's artifact and both offers in its
 provenance. Inbox's plan records the same conclusion and chose a sequential
@@ -82,12 +82,12 @@ to consume.
 **Workaround.** Each consumer projects its own; the example's `journeyPath`
 and `openQueues` helpers.
 
-**Implemented (1.1.0).** `projectUnitPath` in `src/store/unit-path.ts`:
+**Implemented (2.1.0).** `projectUnitPath` in `src/store/unit-path.ts`:
 
 ```ts
 export function projectUnitPath(journey: unknown): UnitPathProjection;
 interface UnitPathProjection {
-  readonly schemaVersion: "mission-pipeline-unit-path.v1";
+  readonly schemaVersion: "switchyard-unit-path.v1";
   readonly unitId: string; readonly graph: GraphDefinitionRef; readonly seedArtifact: ArtifactRef;
   readonly entryNodeId: string; readonly records: number; readonly lastSequence: number; readonly lastRecordedAt: string;
   readonly nodes: Readonly<Record<string, UnitPathNode>>;   // absent node = never queued
@@ -107,10 +107,10 @@ and graph identity, and every queue reference, and refuses anything else.
 "Delivered" is deliberately absent: delivery is an outbox and relay fact the
 consumer supplies.
 
-**Compatibility.** Additive export; the 1.1.0 release manifest pins it. No
+**Compatibility.** Additive export; the 2.1.0 release manifest pins it. No
 store or port change.
 
-**Tests.** `test/mission-pipeline-unit-path.test.mjs`: the support-triage
+**Tests.** `test/switchyard-unit-path.test.mjs`: the support-triage
 positive, provider-outage, and ambiguous fixtures; a retry recorded through
 the store API (open occurrence in `failed` state, then settled on attempt 2);
 `all` join offers, queueing with provenance, and a late offer; an
@@ -131,7 +131,7 @@ builds one for every node/outcome pair, then checks it with a preflight.
 
 **Workaround.** Consumer-owned output binding tables plus tests.
 
-**Implemented (1.1.0).** An optional per-node `outputs` map:
+**Implemented (2.1.0).** An optional per-node `outputs` map:
 
 ```ts
 readonly outputs?: Readonly<Record<string, ContractId>>;   // outcome -> the contract this outcome carries onward
@@ -157,7 +157,7 @@ requires a new node version, exactly as an outcome change does. Consumer
 store projects only kind, input, and outcomes, so the added conformance cases
 bite there until it does.
 
-**Tests.** `test/mission-pipeline-node-contracts.test.mjs` (validation,
+**Tests.** `test/switchyard-node-contracts.test.mjs` (validation,
 digest, compile-time edge and join checks, reuse rule, signature conflict,
 completion-time check), two new `graph-store-conformance` cases (map
 comparison and the cross-graph conflict), and the example, which declares
@@ -175,13 +175,13 @@ explicit goal/step manifest; its candidate graph uses a naming prefix.
 **Workaround.** Naming conventions, presentation groupings (the example's
 `goals` table), and per-goal path tests.
 
-**Implemented (1.1.0).** A non-executable companion document in
+**Implemented (2.1.0).** A non-executable companion document in
 `src/graph/goals.ts`, sealed against the exact graph and with no effect on
 the graph digest:
 
 ```ts
 interface GoalManifest {
-  readonly schemaVersion: "mission-pipeline-goal-manifest.v1";
+  readonly schemaVersion: "switchyard-goal-manifest.v1";
   readonly graph: GraphDefinitionRef;                    // taken from the definition, never from the draft
   readonly goals: readonly {
     readonly goalId: string;
@@ -223,7 +223,7 @@ runtime. The manifest pins the graph digest, so any definition change
 re-seals it from the unchanged draft. The graph-core import allowlist gains
 `src/graph/goals.ts`.
 
-**Tests.** `test/mission-pipeline-goal-manifest.test.mjs`: sealing and
+**Tests.** `test/switchyard-goal-manifest.test.mjs`: sealing and
 re-validation; exact identity (another graph, a moved digest, an edited
 document, a tampered definition); every membership and outcome rule by its
 message; a cycle, fan-out inside versus out, re-entry after closing, and a
@@ -245,7 +245,7 @@ or bump the node ref version (which forces re-declaring the outcome
 vocabulary at the new version), or supply `executionIdentityDigest` on every
 claim from the host.
 
-**Implemented (1.1.0).** The reserved slot is filled:
+**Implemented (2.1.0).** The reserved slot is filled:
 
 ```ts
 readonly configuration?: { readonly id: string; readonly version: number; readonly digest: string };
@@ -266,7 +266,7 @@ byte-identical fingerprints, keys, and digests (the golden vectors are
 unchanged). `WorkerNodeTurnContext` gains an optional key; hosts that forward
 a snapshot context to `executeNodeTurnAttempt` must forward it too.
 
-**Tests.** `test/mission-pipeline-node-contracts.test.mjs` (ref validation on
+**Tests.** `test/switchyard-node-contracts.test.mjs` (ref validation on
 every kind, graph digest and signature behaviour, fingerprint arithmetic with
 and without the ref and with a binding, context snapshot, direct attempt
 refusal on a missing or different ref, and a memory-store run whose journey
@@ -282,7 +282,7 @@ turn cap of 64.
 
 **Workaround.** Consumer tests and turn caps.
 
-**Implemented (1.1.0).** `graphTurnBudget` in `src/graph/budget.ts`, taking
+**Implemented (2.1.0).** `graphTurnBudget` in `src/graph/budget.ts`, taking
 the sealed definition so validation is the compiler's:
 
 ```ts
@@ -293,7 +293,7 @@ interface GraphTurnBudget {
   readonly cycleEdges: readonly { edgeId: string; from: string; to: string }[];   // back edges of a DFS from the entry
   readonly nodes: Readonly<Record<string, { kind; join: boolean; maxAttempts; depth; maxOccurrences; maxTurns }>>;
   readonly maxDepth: number | null; readonly maxTurns: number | null;              // null when cyclic
-  readonly maxTurnsByKind: Readonly<Record<MissionPipelineNodeKind, number | null>>;
+  readonly maxTurnsByKind: Readonly<Record<SwitchyardNodeKind, number | null>>;
 }
 ```
 
@@ -305,7 +305,7 @@ may fire, so it is an upper bound: the support-triage graph's worst case is
 
 **Compatibility.** Additive; listed in the graph-core import allowlist.
 
-**Tests.** `test/mission-pipeline-graph-budget.test.mjs`: the linear,
+**Tests.** `test/switchyard-graph-budget.test.mjs`: the linear,
 router, join, and escalation-ladder fixtures; convergence without a join
 versus duplicate edges from one source; the example's exact worst case; a
 two-node cycle and a self-loop; validation delegation and frozen,
@@ -320,19 +320,19 @@ and `attemptIndex`, and must invent a mapping to call a resolved binding.
 
 **Workaround.** Each host maps by hand.
 
-**Implemented (1.1.0).** A v2 request shape and a builder in
+**Implemented (2.1.0).** A v2 request shape and a builder in
 `src/model/invoker.ts`; the old shape stays accepted until the next major:
 
 ```ts
 interface ModelTurnInvocationRequest {
   readonly unitId: string; readonly queueId: string; readonly nodeId: string;
-  readonly nodeRef: MissionPipelineNodeRef; readonly attemptNumber: number; readonly attemptIndex: number;
+  readonly nodeRef: SwitchyardNodeRef; readonly attemptNumber: number; readonly attemptIndex: number;
   readonly idempotencyKey: string;                        // the journey's own attempt identity
   readonly inputArtifact: ArtifactRef;                    // content identity of `input`
   readonly input: unknown; readonly binding: ModelStageBinding;
 }
 function modelTurnInvocationRequest(fields: {
-  context: WorkerNodeTurnContext; input: unknown; bindingRef: MissionPipelineNodeBindingRef; binding: ModelStageBinding;
+  context: WorkerNodeTurnContext; input: unknown; bindingRef: SwitchyardNodeBindingRef; binding: ModelStageBinding;
 }): ModelTurnInvocationRequest;
 type AnyModelInvocationRequest = ModelInvocationRequest | ModelTurnInvocationRequest;   // what ResolvedModelBinding.invoke accepts
 ```
@@ -354,7 +354,7 @@ shape and passes it through unchanged, so resolvers written for the old
 shape keep receiving it from the hosts that send it. Removing the old shape
 is a major.
 
-**Tests.** `test/mission-pipeline-model-turn-invocation.test.mjs`: the
+**Tests.** `test/switchyard-model-turn-invocation.test.mjs`: the
 request built from a snapshot context and the exact sealed binding; refusal
 of a forged context, a stray field on either level, a ref whose digest or
 identity names another binding, and an accessor-bearing context read zero
@@ -372,15 +372,15 @@ configuration identities.
 
 **Workaround.** Sequential accumulation.
 
-**Implemented (unreleased 1.1.0, 2026-09-11).** An opt-in join composition mode:
+**Implemented (unreleased 2.1.0, 2026-09-11).** An opt-in join composition mode:
 
 ```ts
-// implemented optional MissionPipelineJoin key
+// implemented optional SwitchyardJoin key
 readonly compose?: "select" | "envelope";  // default "select" (today's behaviour)
 ```
 
 With `"envelope"`, the queued input artifact is a reserved
-`mission-pipeline.join-input.v1` envelope that carries, in sealed
+`switchyard.join-input.v1` envelope that carries, in sealed
 `join.inbound` order, every accepted offer's artifact ref and its provenance,
 plus the unit, graph, join node, and requirement. The join node's declared
 input must be that reserved contract (mirroring the `join_unsatisfiable`
@@ -409,7 +409,7 @@ replay ports). For model and agent turns, returned completions whose validation
 fails are different: the engine preserves their already-validated receipts. Agent transport
 uncertainty also has separate recovery semantics, described below.
 
-**Implemented (unreleased 1.1.0, 2026-09-11):**
+**Implemented (unreleased 2.1.0, 2026-09-11):**
 `withDeclaredFailureOutcomes` now handles code/model/definite-agent failures
 with explicit invocation-local evidence, receipt precedence, and exact-attempt
 receipt retention. The user explicitly requested implementation after the
@@ -471,10 +471,10 @@ Evidence checked for this assessment:
   model. The two Inbox implementations demonstrate reuse potential, not a
   second consumer's policy for physical attempts.
 - This repository's
-  [`support-triage-example.mjs`](../test/fixtures/mission-pipeline/support-triage-example.mjs)
+  [`support-triage-example.mjs`](../test/fixtures/switchyard/support-triage-example.mjs)
   fixture resolver throws the scripted `dependency_unavailable` error without
   attaching usage. The
-  [example test](../test/mission-pipeline-support-triage-example.test.mjs)
+  [example test](../test/switchyard-support-triage-example.test.mjs)
   proves bounded retries, no successor, and zero recorded receipts for that
   fixture. It does not establish whether a real provider admitted work.
 
@@ -517,8 +517,8 @@ construction failure, cancellation, and replay/agent uncertainty. Acceptance
 tests must prove those cases through the runner and its journal/outbox, as
 well as mapping, pass-through, immutable capability capture, and construction
 guards. Existing receipt-prefix, exact-attempt evidence, and agent-reclaim
-tests in [`mission-pipeline-node-ports.test.mjs`](../test/mission-pipeline-node-ports.test.mjs)
-and [`mission-pipeline-node-turn.test.mjs`](../test/mission-pipeline-node-turn.test.mjs)
+tests in [`switchyard-node-ports.test.mjs`](../test/switchyard-node-ports.test.mjs)
+and [`switchyard-node-turn.test.mjs`](../test/switchyard-node-turn.test.mjs)
 remain the behavior to preserve. The subsequent implementation covers all three
 port kinds under the explicit contract above; no independent consumer adoption
 or receipt-policy agreement is claimed.
@@ -531,7 +531,7 @@ the example's `codePortByNode`).
 
 **Workaround.** The `switch`.
 
-**Implemented (1.1.0).** `codeNodePortByNode` in `src/execute/code-port.ts`:
+**Implemented (2.1.0).** `codeNodePortByNode` in `src/execute/code-port.ts`:
 
 ```ts
 export function codeNodePortByNode(bodies: unknown): CodeNodePort;   // { [nodeId]: async (input, context) => completion }
@@ -545,7 +545,7 @@ port) before any body runs. The support-triage example now uses it.
 
 **Compatibility.** Additive.
 
-**Tests.** `test/mission-pipeline-code-port.test.mjs`: dispatch and
+**Tests.** `test/switchyard-code-port.test.mjs`: dispatch and
 pass-through; unregistered, `constructor`, and null contexts rejected with no
 body invoked; construction guards for Proxies, accessors, non-functions,
 symbol keys, and invalid identifiers; capture-once semantics; and a real
@@ -571,18 +571,18 @@ engine run that dead-letters an orphan node on its first attempt.
 
 | # | Proposal | Value | Size | Risk | Status |
 | --- | --- | --- | --- | --- | --- |
-| P1 | `projectUnitPath` execution-state projection | high: unblocks the SDK and testing | small | none | implemented in 1.1.0 |
-| P5 | Turn budget helper | medium | small | none | implemented in 1.1.0 |
-| P9 | Code port by node | low but universal | tiny | none | implemented in 1.1.0 |
-| P2 | Declared output contracts, compile-time edge check | high: makes contract chains provable | medium | additive key; adapters compare a new signature field | implemented in 1.1.0 |
-| P4 | Configuration ref in the fingerprint | medium: fixes silent policy drift | small | additive key | implemented in 1.1.0 |
-| P3 | Goal manifest and closure projection | medium: expresses the consumer invariant | medium | additive modules | implemented in 1.1.0 |
-| P6 | v2 model request shape | low | small | none | implemented in 1.1.0 |
-| P8 | Declared failure helper | medium | invocation evidence and policy | receipt retention and unresolved agent work | implemented in 1.1.0; downstream receipt-policy agreement remains unverified |
-| P7 | Join input envelope | high when branches need aggregation | large | new opt-in store semantics, conformance additions, Postgres parity | implemented in 1.1.0; Inbox durable candidate covered, permanent pin pending |
+| P1 | `projectUnitPath` execution-state projection | high: unblocks the SDK and testing | small | none | implemented in 2.1.0 |
+| P5 | Turn budget helper | medium | small | none | implemented in 2.1.0 |
+| P9 | Code port by node | low but universal | tiny | none | implemented in 2.1.0 |
+| P2 | Declared output contracts, compile-time edge check | high: makes contract chains provable | medium | additive key; adapters compare a new signature field | implemented in 2.1.0 |
+| P4 | Configuration ref in the fingerprint | medium: fixes silent policy drift | small | additive key | implemented in 2.1.0 |
+| P3 | Goal manifest and closure projection | medium: expresses the consumer invariant | medium | additive modules | implemented in 2.1.0 |
+| P6 | v2 model request shape | low | small | none | implemented in 2.1.0 |
+| P8 | Declared failure helper | medium | invocation evidence and policy | receipt retention and unresolved agent work | implemented in 2.1.0; downstream receipt-policy agreement remains unverified |
+| P7 | Join input envelope | high when branches need aggregation | large | new opt-in store semantics, conformance additions, Postgres parity | implemented in 2.1.0; Inbox durable candidate covered, permanent pin pending |
 
 P1, P2, P3, P4, P5, P6, and P9 are implemented in unreleased package version
-1.1.0: additive keys and exports, no store migration, and two new graph-store
+2.1.0: additive keys and exports, no store migration, and two new graph-store
 conformance cases. Consumers that persist node definition signatures must
 compare `outputs` too; Inbox's Postgres graph store still needs that adapter
 follow-up before it passes those cases.
@@ -598,8 +598,8 @@ graphs and the support-triage example. The graph definitions, example
 presentation, Mermaid diagram, and goal-manifest seals remain unchanged and
 verified, and the package payload manifest is regenerated for the new modules.
 
-The [separately packaged static SDK core](../packages/mission-pipeline-graphpaper/README.md)
-is implemented in unreleased 0.1.0 under `packages/mission-pipeline-graphpaper`,
+The [separately packaged static SDK core](../packages/switchyard-graphpaper/README.md)
+is implemented in unreleased 0.1.0 under `packages/switchyard-graphpaper`,
 outside the engine payload. Extraction step 2 adds `buildPipelineDiagram`,
 `validatePresentation`, static legend/render options, exact graph/presentation
 metadata, and explicit unclaimed-terminal fallbacks. Golden models cover the

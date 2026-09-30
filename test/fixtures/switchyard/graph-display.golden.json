@@ -1,6 +1,6 @@
 {
   "filter-chain": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "fixture.filter-chain",
       "version": 1,
@@ -94,7 +94,7 @@
     "joins": []
   },
   "outcome-router": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "fixture.outcome-router",
       "version": 1,
@@ -199,7 +199,7 @@
     "joins": []
   },
   "escalation-ladder": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "fixture.escalation-ladder",
       "version": 1,
@@ -418,7 +418,7 @@
     ]
   },
   "human-in-the-middle": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "fixture.human-in-the-middle",
       "version": 1,
@@ -512,7 +512,7 @@
     "joins": []
   },
   "join": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "fixture.join",
       "version": 1,
@@ -681,7 +681,7 @@
     ]
   },
   "shadow-lane": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "fixture.shadow-lane",
       "version": 1,
@@ -774,7 +774,7 @@
     "joins": []
   },
   "support-triage": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "example.support-triage",
       "version": 1,
@@ -1160,7 +1160,7 @@
     "joins": []
   },
   "support-triage-monolith": {
-    "schemaVersion": "mission-pipeline-graph-display.v1",
+    "schemaVersion": "switchyard-graph-display.v1",
     "graph": {
       "id": "example.support-triage-monolith",
       "version": 1,

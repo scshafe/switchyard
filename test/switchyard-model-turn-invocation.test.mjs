@@ -161,7 +161,7 @@ test("model turn invocation: a verified resolved binding passes either request s
   assert.equal(calls[0].request, request);
   assert.equal(calls[0].signal, controller.signal);
 
-  // Hosts that still send the pre-1.1.0 shape reach the same resolver.
+  // Hosts that still send the pre-2.1.0 shape reach the same resolver.
   const legacy = Object.freeze({
     runId: "unit-42",
     itemId: "queue-7",

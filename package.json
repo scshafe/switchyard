@@ -1,6 +1,6 @@
 {
   "name": "@scshafe/switchyard",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
@@ -46,7 +46,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "build": "pnpm run clean && tsc -p tsconfig.json && tsc -p packages/mission-pipeline-graphpaper/tsconfig.json",
+    "build": "pnpm run clean && tsc -p tsconfig.json && tsc -p packages/switchyard-graphpaper/tsconfig.json",
     "clean": "node scripts/clean.mjs",
     "test": "node --test test/*.test.mjs",
     "test:v1-deletion": "node scripts/check-v1-deletion.mjs",

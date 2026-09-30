@@ -27,7 +27,7 @@ import {
   type UnitPathUsage
 } from "./unit-path.js";
 
-export const GOAL_CLOSURES_SCHEMA_VERSION = "mission-pipeline-goal-closures.v1" as const;
+export const GOAL_CLOSURES_SCHEMA_VERSION = "switchyard-goal-closures.v1" as const;
 
 export type GoalClosureStatus = "unentered" | "open" | "dead" | "closed";
 

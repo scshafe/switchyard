@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inspect } from "node:util";
 import test from "node:test";
-import { renderPipelineFigure, viewerAssets } from "mission-pipeline-graphpaper/server";
+import { renderPipelineFigure, viewerAssets } from "switchyard-graphpaper/server";
 
 const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/support-triage.static.golden.json", import.meta.url), "utf8"));
 const embeddedModel = (html) => {
@@ -219,7 +219,7 @@ test("server rejects malformed or future-mode models and executable option exten
   model.metadata.pipeline.mode = "run";
   await assert.rejects(renderPipelineFigure(model), /static|mode/u);
   const wrongSchema = fixture();
-  wrongSchema.metadata.pipeline.schemaVersion = "mission-pipeline-diagram.v2";
+  wrongSchema.metadata.pipeline.schemaVersion = "switchyard-diagram.v2";
   await assert.rejects(renderPipelineFigure(wrongSchema), /schema/u);
   for (const options of [{ layoutEngine: null }, { layoutEngine: {} }, { nodeRenderers: {} }, { caption: () => "<script>bad</script>" }]) {
     await assert.rejects(renderPipelineFigure(fixture(), options));
@@ -270,7 +270,7 @@ test("viewerAssets exposes only the fixed installed files with immutable exact E
   assert.equal(assets["viewer.js"].body.split('from "./graphpaper.js"').length, 2);
   assert.ok(!assets["viewer.js"].body.includes('from "graphpaper"'));
   for (const name of ["viewer.js", "viewer-data.js", "viewer-defaults.js", "types.js"]) {
-    assert.doesNotMatch(assets[name].body, /(?:from|import\()\s*["'](?:node:|mission-pipeline)/u);
+    assert.doesNotMatch(assets[name].body, /(?:from|import\()\s*["'](?:node:|@scshafe\/switchyard)/u);
   }
 });
 

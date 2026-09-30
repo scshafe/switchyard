@@ -16,8 +16,8 @@ registerHooks({
 });
 const [engine, sdk, serverSdk, fixture, { default: ELK }] = await Promise.all([
   import("../lib/index.js"),
-  import("../packages/mission-pipeline-graphpaper/lib/index.js"),
-  import("../packages/mission-pipeline-graphpaper/lib/server.js"),
+  import("../packages/switchyard-graphpaper/lib/index.js"),
+  import("../packages/switchyard-graphpaper/lib/server.js"),
   import("../test/fixtures/switchyard/support-triage-example.mjs"),
   import("elkjs/lib/elk.bundled.js")
 ]);

@@ -7,6 +7,19 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
+## 2.1.0 — unreleased (rebase trial of codex/1.1.0-engine-projections)
+
+The additive engine work first prepared as 1.1.0, rebased onto 2.0.0 with
+the Switchyard names: graph display projection and definition diff, unit
+path and goal manifest/closure projections, turn budget, code port by node,
+declared node outputs and configuration refs, join input envelopes
+(`switchyard.join-input.v1`) and declared failure recovery, plus the
+separately packaged, unpublished `switchyard-graphpaper` 0.1.0 SDK. New
+schema versions use the `switchyard-` prefix (`switchyard-graph-display.v1`,
+`switchyard-graph-definition-diff.v1`, `switchyard-unit-path.v1`,
+`switchyard-goal-manifest.v1`, `switchyard-goal-closures.v1`; SDK:
+`switchyard-presentation.v1`, `switchyard-diagram.v1`).
+
 ## 2.0.0 — 2026-09-30
 
 Breaking rename: the package is now **Switchyard**. The name "mission" came

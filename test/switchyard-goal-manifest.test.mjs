@@ -75,8 +75,8 @@ test("goal manifest: identity is exact — another graph, a moved digest, or an 
   assert.throws(() => validateGoalManifestDocument(stray), /unknown key\(s\) "notes"/);
 
   assert.throws(
-    () => createGoalManifest(SUPPORT_TRIAGE_GRAPH, { schemaVersion: "mission-pipeline-goal-manifest.v2", goals: SUPPORT_TRIAGE_GOALS_DRAFT.goals }),
-    /schemaVersion must be "mission-pipeline-goal-manifest\.v1" \(got "mission-pipeline-goal-manifest\.v2"\)/
+    () => createGoalManifest(SUPPORT_TRIAGE_GRAPH, { schemaVersion: "switchyard-goal-manifest.v2", goals: SUPPORT_TRIAGE_GOALS_DRAFT.goals }),
+    /schemaVersion must be "switchyard-goal-manifest\.v1" \(got "switchyard-goal-manifest\.v2"\)/
   );
   // The graph ref comes from the definition, never from the draft.
   assert.throws(
@@ -371,8 +371,8 @@ test("goal closures: a path reports unentered goals, a close by a synthesized jo
     /goal closures: graph mismatch — manifest describes example\.support-triage@1 [0-9a-f]{64}, unit unit-1 ran on fixture\.join@1/
   );
   assert.throws(
-    () => projectGoalClosures(manifest, { ...pathFor({}, {}), schemaVersion: "mission-pipeline-unit-path.v2" }),
-    /unit path schemaVersion must be "mission-pipeline-unit-path\.v1"/
+    () => projectGoalClosures(manifest, { ...pathFor({}, {}), schemaVersion: "switchyard-unit-path.v2" }),
+    /unit path schemaVersion must be "switchyard-unit-path\.v1"/
   );
   const tampered = plain(manifest);
   tampered.goals[0].goalId = "renamed";

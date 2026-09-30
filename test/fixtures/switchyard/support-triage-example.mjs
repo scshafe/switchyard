@@ -9,7 +9,7 @@
 // per-node code port adapter are the package's actual public API. The helpers
 // at the bottom (journeyPath, modelCallsFor) are test conveniences; the
 // engine's own execution-state projection is `projectUnitPath` in
-// `store/unit-path`, exercised by test/mission-pipeline-unit-path.test.mjs.
+// `store/unit-path`, exercised by test/switchyard-unit-path.test.mjs.
 //
 // The narrative for this graph lives in docs/EXAMPLE-SUPPORT-TRIAGE.md.
 

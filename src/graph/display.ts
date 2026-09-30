@@ -16,7 +16,7 @@ import type {
 } from "./definition.js";
 import { isUnconditionalOutcomePredicate, predicateOutcomes } from "./edge.js";
 
-export const GRAPH_DISPLAY_SCHEMA_VERSION = "mission-pipeline-graph-display.v1" as const;
+export const GRAPH_DISPLAY_SCHEMA_VERSION = "switchyard-graph-display.v1" as const;
 
 export interface GraphDisplayNode {
   readonly nodeId: string;

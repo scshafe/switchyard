@@ -1,6 +1,6 @@
 # P7 join inputs and P8 declared failures
 
-Implemented on 2026-09-11 at the user's request in unreleased engine 1.1.0.
+Implemented on 2026-09-11 at the user's request in unreleased engine 2.1.0.
 The SDK remains a separate, unreleased 0.1.0 package. These changes add an
 optional join key and helper modules; they add no store migration and change
 no existing fixture graph seals. The verification below records the reviewed
@@ -11,7 +11,7 @@ agreement on provider accounting; downstream evidence has its own record.
 
 ## P7: embedded accepted-branch inputs
 
-`MissionPipelineJoin.compose?: "select" | "envelope"` is implemented.
+`SwitchyardJoin.compose?: "select" | "envelope"` is implemented.
 Omitting the key retains the old sealed bytes and selection behavior. Explicit
 `"select"` has the same runtime behavior but, as additional definition data,
 changes the graph digest. Unknown values and present `undefined` are rejected.
@@ -19,11 +19,11 @@ changes the graph digest. Unknown values and present `undefined` are rejected.
 An envelope join must declare this input:
 
 ```ts
-import { JOIN_INPUT_ARTIFACT_CONTRACT } from "mission-pipeline";
+import { JOIN_INPUT_ARTIFACT_CONTRACT } from "@scshafe/switchyard";
 
 // Fields of an otherwise complete node definition:
 const aggregation = {
-  input: JOIN_INPUT_ARTIFACT_CONTRACT, // mission-pipeline.join-input.v1
+  input: JOIN_INPUT_ARTIFACT_CONTRACT, // switchyard.join-input.v1
   join: {
     inbound: ["facts-to-aggregate", "policy-to-aggregate"],
     require: "all" as const,
@@ -40,7 +40,7 @@ payload as its normal input; it receives no store capability.
 
 `JoinInputPayload` contains:
 
-- `schemaVersion: "mission-pipeline.join-input.v1"`, `unitId`, exact `graph`
+- `schemaVersion: "switchyard.join-input.v1"`, `unitId`, exact `graph`
   ref, `nodeId`, `nodeRef`, optional join `configuration`, and sealed `require`.
 - `accepted`, in sealed `join.inbound` order. Each entry contains `edgeId`,
   `sourceNodeId`, `sourceNodeRef`, optional `sourceConfiguration`,
@@ -144,7 +144,7 @@ import {
   createArtifactEnvelope,
   ExecutionFailureError,
   withDeclaredFailureOutcomes
-} from "mission-pipeline";
+} from "@scshafe/switchyard";
 
 const port = withDeclaredFailureOutcomes({
   async invoke(_input, _binding, _context, evidence) {
@@ -232,7 +232,7 @@ restore fast path:
   `executeNodeTurnAttempt`; its declared review outcome, artifact contract,
   and scripted zero receipt passed validation (exit 0).
 - At the recorded pre-commit verification, `git diff --check` passed. Branch was
-  `codex/1.1.0-engine-projections`, HEAD
+  `codex/2.1.0-engine-projections`, HEAD
   `f8c8a8de6a7980d005dfb84811d4f923d2478fc2`. Existing static viewer fixes are
   preserved; fixture definitions/seals, package versions, and frozen schemas
   were unchanged. No commit, push, merge, publication, or user-server restart

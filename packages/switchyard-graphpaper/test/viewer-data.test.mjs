@@ -5,7 +5,7 @@ import test from "node:test";
 // Exercise the validator shipped beside the public browser entry, including in
 // the offline installed-package gate. This is a private test seam, not an API.
 const { captureViewerRecord, snapshotViewerData, validateStaticModel, validateNodeDetails } = await import(
-  new URL("./viewer-data.js", import.meta.resolve("mission-pipeline-graphpaper/browser"))
+  new URL("./viewer-data.js", import.meta.resolve("switchyard-graphpaper/browser"))
 );
 
 const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/support-triage.static.golden.json", import.meta.url), "utf8"));
@@ -93,7 +93,7 @@ test("viewer data requires the exact static schema and consistent graph aliases"
     assert.throws(() => validateStaticModel(value), /pipeline.mode/u);
   }
   const future = fixture();
-  future.metadata.pipeline.schemaVersion = "mission-pipeline-diagram.v2";
+  future.metadata.pipeline.schemaVersion = "switchyard-diagram.v2";
   assert.throws(() => validateStaticModel(future), /pipeline.schemaVersion/u);
   for (const [key, replacement] of [["graphId", "different"], ["graphVersion", 2], ["graphDigest", "f".repeat(64)], ["highlighted", true]]) {
     const value = fixture();

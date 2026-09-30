@@ -524,14 +524,14 @@
     "highlighted": false,
     "unclaimedTerminals": [],
     "pipeline": {
-      "schemaVersion": "mission-pipeline-diagram.v1",
+      "schemaVersion": "switchyard-diagram.v1",
       "graph": {
         "id": "example.support-triage",
         "version": 1,
         "digest": "7f06a0fa6ec1fa1ddb1a156bc1ec647fb63dca17634e7608dfb5680675aad8c3"
       },
       "mode": "static",
-      "presentationDigest": "d07d555a3690fe00019458dbb5def1e8a890ef5b2c0280e03a66e4076264b8cb",
+      "presentationDigest": "c629d95724d34d1622108c68b8e059e830a8b0ff418143b1e0ae04b263167474",
       "unclaimedTerminals": []
     }
   }

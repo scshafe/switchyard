@@ -1,7 +1,7 @@
 {
-  "name": "mission-pipeline-graphpaper",
+  "name": "switchyard-graphpaper",
   "version": "0.1.0",
-  "description": "Pure graphpaper diagram models from mission-pipeline projections and consumer presentation.",
+  "description": "Pure graphpaper diagram models from Switchyard projections and consumer presentation.",
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=22.22.0 <23 || >=24.18.0 <25" },
@@ -15,7 +15,7 @@
   },
   "files": ["src", "lib", "assets/pipeline.css", "README.md", "LICENSE"],
   "sideEffects": false,
-  "peerDependencies": { "@scshafe/switchyard": "^1.1.0", "graphpaper": "^0.5.0", "elkjs": "^0.10.2" },
+  "peerDependencies": { "@scshafe/switchyard": "^2.1.0", "graphpaper": "^0.5.0", "elkjs": "^0.10.2" },
   "peerDependenciesMeta": { "graphpaper": { "optional": true }, "elkjs": { "optional": true } },
   "scripts": {
     "build": "tsc -p tsconfig.json",

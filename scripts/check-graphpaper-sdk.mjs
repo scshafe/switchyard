@@ -11,11 +11,11 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const sdkRoot = join(root, "packages/mission-pipeline-graphpaper");
+const sdkRoot = join(root, "packages/switchyard-graphpaper");
 const graphpaperRoot = join(root, "node_modules/graphpaper");
 const elkRoot = join(root, "node_modules/elkjs");
 const graphpaperCommit = "89240f15c171a26009430ad7eb45eb85ac2567aa";
-const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-graphpaper-check-"));
+const scratch = await mkdtemp(join(tmpdir(), "switchyard-graphpaper-check-"));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -144,11 +144,11 @@ function parseManifest(text) {
 
 try {
   const packageJson = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf8"));
-  assert.equal(packageJson.name, "mission-pipeline-graphpaper");
+  assert.equal(packageJson.name, "switchyard-graphpaper");
   assert.equal(packageJson.version, "0.1.0");
   assert.deepEqual(packageJson.dependencies ?? {}, {});
   assert.deepEqual(packageJson.optionalDependencies ?? {}, {});
-  assert.deepEqual(packageJson.peerDependencies, { "@scshafe/switchyard": "^1.1.0", graphpaper: "^0.5.0", elkjs: "^0.10.2" });
+  assert.deepEqual(packageJson.peerDependencies, { "@scshafe/switchyard": "^2.1.0", graphpaper: "^0.5.0", elkjs: "^0.10.2" });
   assert.deepEqual(packageJson.peerDependenciesMeta, { graphpaper: { optional: true }, elkjs: { optional: true } }, "the unrelated registry graphpaper must not be auto-installed; ELK is optional except for full viewer assets");
   assert.deepEqual(Object.keys(packageJson.exports).sort(), [".", "./browser", "./package.json", "./server"]);
 
@@ -197,11 +197,14 @@ try {
   }
 
   const rootMetadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-  const lock = JSON.parse(await readFile(join(root, "package-lock.json"), "utf8"));
+  const lock = await readFile(join(root, "pnpm-lock.yaml"), "utf8");
   assert.equal(rootMetadata.devDependencies.graphpaper, `git+https://github.com/scshafe/graphpaper.git#${graphpaperCommit}`);
-  const lockedGraphpaper = lock.packages["node_modules/graphpaper"];
-  assert.equal(lockedGraphpaper.version, "0.5.0");
-  assert.match(lockedGraphpaper.resolved, new RegExp(`github\\.com[/:]scshafe/graphpaper\\.git#${graphpaperCommit}$`));
+  // pnpm records the Git pin as a packages: entry keyed by the exact commit.
+  const lockedGraphpaper = new RegExp(
+    `\\n  graphpaper@git\\+(?:ssh://git@|https://)github\\.com[/:]scshafe/graphpaper\\.git#${graphpaperCommit}:\\n` +
+    `    resolution: \\{commit: ${graphpaperCommit}, [^\\n]*type: git\\}\\n    version: 0\\.5\\.0\\n`
+  );
+  assert.match(lock, lockedGraphpaper, "pnpm-lock.yaml must pin graphpaper 0.5.0 to the exact Git commit");
   const graphpaperMetadata = JSON.parse(await readFile(join(graphpaperRoot, "package.json"), "utf8"));
   assert.equal(graphpaperMetadata.name, "graphpaper");
   assert.equal(graphpaperMetadata.version, "0.5.0");
@@ -216,7 +219,7 @@ try {
   await writeFile(join(consumer, "package.json"), `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`);
   await run("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=optional", engine.path, first.path, graphpaper.path, elk.path], { cwd: consumer, show: true });
   await cp(join(sdkRoot, "test"), join(consumer, "test"), { recursive: true });
-  await cp(join(root, "test/fixtures/mission-pipeline"), join(consumer, "test/fixtures/mission-pipeline"), { recursive: true });
+  await cp(join(root, "test/fixtures/switchyard"), join(consumer, "test/fixtures/switchyard"), { recursive: true });
   const testFiles = (await walk(join(consumer, "test"))).filter((path) => path.endsWith(".test.mjs"));
   assert.ok(testFiles.length > 0, "SDK packed consumer must run at least one test suite");
   await run(process.execPath, ["--test", ...testFiles], { cwd: consumer, show: true });
@@ -224,9 +227,9 @@ try {
   await writeFile(join(consumer, "smoke.mjs"), `
 import assert from "node:assert/strict";
 import { compileGraph, projectGraphDisplay } from "@scshafe/switchyard";
-import { buildPipelineDiagram, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION } from "mission-pipeline-graphpaper";
+import { buildPipelineDiagram, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION } from "switchyard-graphpaper";
 import { layoutDiagram, renderDiagramSvg } from "graphpaper";
-import { renderPipelineFigure, viewerAssets } from "mission-pipeline-graphpaper/server";
+import { renderPipelineFigure, viewerAssets } from "switchyard-graphpaper/server";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { SUPPORT_TRIAGE_GRAPH, SUPPORT_TRIAGE_PRESENTATION, SUPPORT_TRIAGE_GOAL_MANIFEST } from "./test/fixtures/switchyard/support-triage-example.mjs";
 const projection = projectGraphDisplay(compileGraph(SUPPORT_TRIAGE_GRAPH));
@@ -250,12 +253,12 @@ console.log("SDK packed server figure + ELK + complete viewer assets smoke passe
   await run(process.execPath, ["smoke.mjs"], { cwd: consumer, show: true });
 
   await writeFile(join(consumer, "smoke.ts"), `
-import { buildPipelineDiagram, validatePresentation, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION, type PipelinePresentation, type BuildPipelineDiagramInput, type PipelineDiagramMetadata } from "mission-pipeline-graphpaper";
+import { buildPipelineDiagram, validatePresentation, pipelineLegend, PIPELINE_RENDER_OPTIONS, PIPELINE_PRESENTATION_SCHEMA_VERSION, type PipelinePresentation, type BuildPipelineDiagramInput, type PipelineDiagramMetadata } from "switchyard-graphpaper";
 import type { GraphDisplayProjection, GraphDefinition, GoalManifest } from "@scshafe/switchyard";
 import type { DiagramModel, DiagramLegendEntry, DiagramRenderOptions } from "graphpaper";
-import { renderPipelineFigure, viewerAssets, type RenderPipelineFigureOptions } from "mission-pipeline-graphpaper/server";
-import { mountPipelineViewer, type MountPipelineViewerOptions, type PipelineViewerHandle } from "mission-pipeline-graphpaper/browser";
-import type { NodeDetails } from "mission-pipeline-graphpaper";
+import { renderPipelineFigure, viewerAssets, type RenderPipelineFigureOptions } from "switchyard-graphpaper/server";
+import { mountPipelineViewer, type MountPipelineViewerOptions, type PipelineViewerHandle } from "switchyard-graphpaper/browser";
+import type { NodeDetails } from "switchyard-graphpaper";
 const projection = undefined as unknown as GraphDisplayProjection;
 const definition = undefined as unknown as GraphDefinition;
 const goalManifest = undefined as unknown as GoalManifest;

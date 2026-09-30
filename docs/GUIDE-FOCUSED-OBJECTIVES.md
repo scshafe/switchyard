@@ -214,7 +214,7 @@ exact node and attempt key (`captureCompletion` in `src/execute/turn.ts`).
   running. A typed `ExecutionFailureError` declares a definite failure and
   has different engine behavior.
 
-**Exists (unreleased 1.1.0):** `withDeclaredFailureOutcomes` implements an
+**Exists (unreleased 2.1.0):** `withDeclaredFailureOutcomes` implements an
 opt-in code/model/agent wrapper with captured admission and usage evidence,
 input/context/binding snapshots, and explicit receipt policy. Models require
 a policy returning one receipt; captured receipts take precedence. Definite
@@ -288,7 +288,7 @@ Valid uses of selection:
 
 - A race: `{ nOf: 1 }` between a human decision and a timer callback, where
   either artifact satisfies the same contract (the `escalation-ladder`
-  fixture in `test/fixtures/mission-pipeline/node-graph-v2-fixtures.mjs`).
+  fixture in `test/fixtures/switchyard/node-graph-v2-fixtures.mjs`).
 - A barrier: `all` over branches that each carry the same accumulating
   context, where the join body only needs to know that both finished and the
   selected artifact is as good as any.

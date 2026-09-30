@@ -31,7 +31,7 @@ const mockUrl = `data:text/javascript,${encodeURIComponent(mockSource)}`;
 const hooks = registerHooks({ resolve(specifier, context, nextResolve) {
   return specifier === "graphpaper" ? { url: mockUrl, shortCircuit: true } : nextResolve(specifier, context);
 } });
-const { mountPipelineViewer } = await import("mission-pipeline-graphpaper/browser");
+const { mountPipelineViewer } = await import("switchyard-graphpaper/browser");
 hooks.deregister();
 delete globalThis.__pipelineViewerGraphpaperTest;
 

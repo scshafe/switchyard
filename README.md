@@ -43,7 +43,7 @@ database clients, provider SDKs, credential loaders, or host frameworks.
 Consumers implement the exported store and node-kind ports.
 
 The repository also contains the separately packaged, unreleased
-[`mission-pipeline-graphpaper` static SDK](packages/mission-pipeline-graphpaper/README.md).
+[`switchyard-graphpaper` static SDK](packages/switchyard-graphpaper/README.md).
 It builds graphpaper diagram data from engine projections and consumer
 presentation and provides static server figures/assets plus browser
 selection, deep links, and an authorized details seam. It is excluded from
@@ -149,7 +149,7 @@ most once per unit. Unsatisfiable joins emit the declared engine outcome;
 offers arriving after a fired join are journey-recorded no-ops. By default a
 join selects one accepted artifact. `join.compose: "envelope"` instead supplies
 all offers accepted at resolution, with embedded payloads and exact provenance,
-under `JOIN_INPUT_ARTIFACT_CONTRACT` (`mission-pipeline.join-input.v1`).
+under `JOIN_INPUT_ARTIFACT_CONTRACT` (`switchyard.join-input.v1`).
 See the [P7/P8 contracts](docs/IMPLEMENTED-P7-P8.md) for aggregation and explicit
 failure-to-outcome policy, including downstream adapter requirements.
 
