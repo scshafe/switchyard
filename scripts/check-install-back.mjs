@@ -1,5 +1,5 @@
 // Install-back check for the publish workflow: given a consumer directory in
-// which `pnpm add --save-exact @scshafe/mission-pipeline@<version>` has run,
+// which `pnpm add --save-exact @scshafe/switchyard@<version>` has run,
 // read the integrity pnpm recorded (and verified against the downloaded bytes)
 // from the consumer's pnpm-lock.yaml and require it to equal every expected
 // integrity passed on the command line (the local pack of the tag, the

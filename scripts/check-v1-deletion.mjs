@@ -17,9 +17,9 @@ import { projectRoot, readReleaseIdentity } from "./release-identity.mjs";
 // The current release manifest path and version come from the project's own
 // package.json, never from a hardcoded literal (probe roots reuse them).
 const projectRelease = await readReleaseIdentity(projectRoot);
-const root = process.env.MISSION_PIPELINE_V1_GUARD_PROBE_ROOT === undefined
+const root = process.env.SWITCHYARD_V1_GUARD_PROBE_ROOT === undefined
   ? projectRoot
-  : resolve(process.env.MISSION_PIPELINE_V1_GUARD_PROBE_ROOT);
+  : resolve(process.env.SWITCHYARD_V1_GUARD_PROBE_ROOT);
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(import.meta.url);
 
@@ -122,13 +122,13 @@ async function runProbe(probeRoot) {
   return execFileAsync(process.execPath, [scriptPath], {
     env: {
       ...process.env,
-      MISSION_PIPELINE_V1_GUARD_PROBE_ROOT: probeRoot
+      SWITCHYARD_V1_GUARD_PROBE_ROOT: probeRoot
     }
   });
 }
 
 async function makeProbeRoot() {
-  const probeRoot = await mkdtemp(join(tmpdir(), "mission-pipeline-v1-deletion-"));
+  const probeRoot = await mkdtemp(join(tmpdir(), "switchyard-v1-deletion-"));
   for (const path of requiredPaths) await writeProbeFile(probeRoot, path);
   await writeProbeFile(
     probeRoot,
@@ -157,7 +157,7 @@ async function proveFamily(name, expected, mutate) {
         `v1 deletion guard ${name} proof failed for the wrong reason:\n${rejection}`
       );
     }
-    console.log(`Mission Pipeline v1 deletion guard prove-it-bites rejected ${name} family.`);
+    console.log(`Switchyard v1 deletion guard prove-it-bites rejected ${name} family.`);
   } finally {
     await rm(probeRoot, { recursive: true, force: true });
   }
@@ -215,5 +215,5 @@ if (root === projectRoot) {
 }
 
 console.log(
-  `Mission Pipeline v1 deletion guard passed (${forbiddenPaths.length} retired paths, ${forbiddenSymbols.length} retired symbols${root === projectRoot ? ", 4 prove-it-bites families" : ""}).`
+  `Switchyard v1 deletion guard passed (${forbiddenPaths.length} retired paths, ${forbiddenSymbols.length} retired symbols${root === projectRoot ? ", 4 prove-it-bites families" : ""}).`
 );

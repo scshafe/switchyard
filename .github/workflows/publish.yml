@@ -199,7 +199,7 @@ jobs:
           cd "$consumer"
           printf '{\n  "private": true,\n  "type": "module"\n}\n' > package.json
           printf '@scshafe:registry=%s\n' "$REGISTRY" > .npmrc
-          pnpm add --save-exact --ignore-scripts "@scshafe/mission-pipeline@$VERSION"
+          pnpm add --save-exact --ignore-scripts "@scshafe/switchyard@$VERSION"
 
       - name: Compare registry integrity with the local pack
         run: >-
@@ -208,7 +208,7 @@ jobs:
 
       - name: JS and TS smoke imports against the registry install
         env:
-          MISSION_PIPELINE_SMOKE_CONSUMER: ${{ runner.temp }}/consumer
+          SWITCHYARD_SMOKE_CONSUMER: ${{ runner.temp }}/consumer
         run: node scripts/check-pack-install.mjs
 
       - name: Create the GitHub Release with digests
@@ -220,12 +220,12 @@ jobs:
           COMMIT: ${{ needs.publish.outputs.commit }}
         run: |
           set -euo pipefail
-          manifest="release/scshafe-mission-pipeline-$VERSION.payload.sha256"
+          manifest="release/scshafe-switchyard-$VERSION.payload.sha256"
           [[ -f "$manifest" ]] || { echo "::error::missing $manifest"; exit 1; }
           manifest_sha256="$(sha256sum "$manifest" | cut -d' ' -f1)"
           notes="$RUNNER_TEMP/release-notes.md"
           {
-            echo "@scshafe/mission-pipeline $VERSION, published to GitHub Packages ($REGISTRY) from $COMMIT."
+            echo "@scshafe/switchyard $VERSION, published to GitHub Packages ($REGISTRY) from $COMMIT."
             echo
             echo "| Artifact | Digest |"
             echo "| --- | --- |"

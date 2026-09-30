@@ -7,13 +7,13 @@ import { fileURLToPath } from "node:url";
 import { PNPM_PACK_ARGS, singlePackReport } from "./release-identity.mjs";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-// With MISSION_PIPELINE_SMOKE_CONSUMER set to a directory that already has
+// With SWITCHYARD_SMOKE_CONSUMER set to a directory that already has
 // the package installed (the publish workflow's install-back of the registry
 // version), skip pack+install and run the same smokes there.
-const installedConsumer = process.env.MISSION_PIPELINE_SMOKE_CONSUMER;
+const installedConsumer = process.env.SWITCHYARD_SMOKE_CONSUMER;
 const scratch = installedConsumer
   ? undefined
-  : await mkdtemp(join(tmpdir(), "mission-pipeline-pack-"));
+  : await mkdtemp(join(tmpdir(), "switchyard-pack-"));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -60,15 +60,15 @@ try {
 
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   const smoke = `
-    import * as root from "@scshafe/mission-pipeline";
-    import { createGraphDefinition } from "@scshafe/mission-pipeline/graph/definition";
-    import { compileGraph } from "@scshafe/mission-pipeline/graph/compile";
-    import { nodeTurnIdempotencyKey } from "@scshafe/mission-pipeline/execute/turn";
-    import { runClaimedUnitTurn } from "@scshafe/mission-pipeline/execute/unit-runner";
-    import { validateModelStageBinding } from "@scshafe/mission-pipeline/model/binding";
-    import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "@scshafe/mission-pipeline/agent/step";
-    import { compileGateFlow } from "@scshafe/mission-pipeline/gate/compiler";
-    import metadata from "@scshafe/mission-pipeline/package.json" with { type: "json" };
+    import * as root from "@scshafe/switchyard";
+    import { createGraphDefinition } from "@scshafe/switchyard/graph/definition";
+    import { compileGraph } from "@scshafe/switchyard/graph/compile";
+    import { nodeTurnIdempotencyKey } from "@scshafe/switchyard/execute/turn";
+    import { runClaimedUnitTurn } from "@scshafe/switchyard/execute/unit-runner";
+    import { validateModelStageBinding } from "@scshafe/switchyard/model/binding";
+    import { AGENT_STEP_REQUEST_SCHEMA_VERSION } from "@scshafe/switchyard/agent/step";
+    import { compileGateFlow } from "@scshafe/switchyard/gate/compiler";
+    import metadata from "@scshafe/switchyard/package.json" with { type: "json" };
 
     const graph = createGraphDefinition({
       graphId: "install.smoke",
@@ -128,7 +128,7 @@ try {
     ];
     for (const subpath of retiredSubpaths) {
       try {
-        await import("@scshafe/mission-pipeline/" + subpath);
+        await import("@scshafe/switchyard/" + subpath);
         throw new Error("retired subpath resolved: " + subpath);
       } catch (error) {
         if (String(error?.message).startsWith("retired subpath resolved:")) throw error;
@@ -159,10 +159,10 @@ try {
       type TurnExecutionStore,
       type TurnRunnerStore,
       type WorkerNodeTurnContext
-    } from "@scshafe/mission-pipeline";
-    import type { UnitStore } from "@scshafe/mission-pipeline/store/unit-store";
-    import type { ModelInvocationRequest } from "@scshafe/mission-pipeline/model/invoker";
-    import type { AgentStepExecutor } from "@scshafe/mission-pipeline/agent/executor-port";
+    } from "@scshafe/switchyard";
+    import type { UnitStore } from "@scshafe/switchyard/store/unit-store";
+    import type { ModelInvocationRequest } from "@scshafe/switchyard/model/invoker";
+    import type { AgentStepExecutor } from "@scshafe/switchyard/agent/executor-port";
 
     const exported = {
       compileGraph,
@@ -224,8 +224,8 @@ try {
   ], { cwd: consumer });
   console.log(
     installedConsumer === undefined
-      ? "Mission Pipeline packed-install runtime + TypeScript smoke passed."
-      : `Mission Pipeline installed-consumer runtime + TypeScript smoke passed (${consumer}).`
+      ? "Switchyard packed-install runtime + TypeScript smoke passed."
+      : `Switchyard installed-consumer runtime + TypeScript smoke passed (${consumer}).`
   );
 } finally {
   if (scratch !== undefined) await rm(scratch, { force: true, recursive: true });

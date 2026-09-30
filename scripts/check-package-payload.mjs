@@ -104,5 +104,5 @@ if (missing.length > 0 || unexpected.length > 0) {
 }
 
 console.log(
-  `Mission Pipeline package payload passed (${actual.size} exact files).`
+  `Switchyard package payload passed (${actual.size} exact files).`
 );

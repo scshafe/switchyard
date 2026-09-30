@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-clone-"));
+const scratch = await mkdtemp(join(tmpdir(), "switchyard-clone-"));
 const clone = join(scratch, "candidate");
 
 async function run(command, args, options = {}) {

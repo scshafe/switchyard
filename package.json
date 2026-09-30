@@ -1,23 +1,23 @@
 {
-  "name": "@scshafe/mission-pipeline",
-  "version": "1.0.1",
+  "name": "@scshafe/switchyard",
+  "version": "2.0.0",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
-  "author": "mission-pipeline contributors",
+  "author": "switchyard contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scshafe/mission-pipeline.git"
+    "url": "https://github.com/scshafe/switchyard.git"
   },
   "bugs": {
-    "url": "https://github.com/scshafe/mission-pipeline/issues"
+    "url": "https://github.com/scshafe/switchyard/issues"
   },
-  "homepage": "https://github.com/scshafe/mission-pipeline#readme",
+  "homepage": "https://github.com/scshafe/switchyard#readme",
   "keywords": [
     "agents",
     "node-graph",
     "durable-execution",
-    "mission-control",
+    "workflow",
     "pipeline"
   ],
   "engines": {

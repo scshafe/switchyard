@@ -1,9 +1,34 @@
 # Changelog
 
-All notable changes to `@scshafe/mission-pipeline` are recorded here. Versions
+All notable changes to `@scshafe/switchyard` are recorded here. Versions
 follow [SemVer](https://semver.org/). A release is the annotated tag
 `v<x.y.z>` on a commit on `main` whose `package.json` version is `<x.y.z>`;
-published versions are never deleted, replaced or reused.
+published versions are never deleted, replaced or reused. Versions up to and
+including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
+below are kept as written.
+
+## 2.0.0 — 2026-09-30
+
+Breaking rename: the package is now **Switchyard**. The name "mission" came
+from the library's origin as a Mission Control component, and Mission Control
+is being retired. Engine semantics are unchanged: graphs, outcome edges, joins,
+per-node queues, settlement and evidence behave exactly as in 1.0.1. There are
+no compatibility aliases for any old name.
+
+### Package
+
+- The package is `@scshafe/switchyard` (was `@scshafe/mission-pipeline`), and
+  the repository is `https://github.com/scshafe/switchyard`. Consumers replace
+  the dependency and change every `@scshafe/mission-pipeline` and
+  `@scshafe/mission-pipeline/<subpath>` import specifier to
+  `@scshafe/switchyard` and `@scshafe/switchyard/<subpath>`; the subpaths are
+  unchanged. `@scshafe/mission-pipeline` 1.0.1 stays published and receives no
+  further releases.
+- The release manifest is
+  `release/scshafe-switchyard-2.0.0.payload.sha256`.
+- Release tooling environment variables: `MISSION_PIPELINE_SMOKE_CONSUMER` is
+  now `SWITCHYARD_SMOKE_CONSUMER`, and `MISSION_PIPELINE_V1_GUARD_PROBE_ROOT` is
+  now `SWITCHYARD_V1_GUARD_PROBE_ROOT`.
 
 ## 1.0.1 — 2026-09-29
 

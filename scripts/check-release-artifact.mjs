@@ -18,7 +18,7 @@ import {
 
 const identity = await readReleaseIdentity(root);
 const manifestPath = resolve(root, identity.manifest);
-const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-release-"));
+const scratch = await mkdtemp(join(tmpdir(), "switchyard-release-"));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
