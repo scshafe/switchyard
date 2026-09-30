@@ -1,13 +1,21 @@
-# @scshafe/mission-pipeline
+# @scshafe/switchyard
 
-Mission Pipeline is a dependency-free, digest-sealed node-graph engine for
-durable unit journeys. Every node has its own queue. Completing one node turn
-atomically appends evidence, evaluates deterministic outcome edges, advances
-join state, queues every satisfied successor, appends outbox events, and
-releases the turn lease.
+Switchyard is a dependency-free, digest-sealed node-graph engine for durable
+unit journeys. Units move through a graph of `code`, `model`, `agent`, `human`
+and `callback` nodes the way cars move through a rail yard: every node is a
+track with its own durable queue, a completed turn's outcome throws the
+switches (the sealed outcome edges) that send the unit on, and a join couples
+arrivals from several inbound edges before the unit proceeds. Completing one
+node turn atomically appends evidence, evaluates deterministic outcome edges,
+advances join state, queues every satisfied successor, appends outbox events,
+and releases the turn lease.
 
-Version 1.0 is the node-graph-only major release. There is no compatibility
-execution path for the retired traversal engine.
+Version 2.0 is the rename from `@scshafe/mission-pipeline` (1.0.1) to
+`@scshafe/switchyard`: engine semantics are those of 1.0, while the package
+name, the `MissionPipeline*` exports and the stored identifiers changed, with
+no compatibility aliases. [`CHANGELOG.md`](CHANGELOG.md) lists every old and
+new name. There is no compatibility execution path for the retired v1
+traversal engine.
 
 ## Install
 
@@ -22,11 +30,11 @@ Authenticate in user-level npm/pnpm config or through `NODE_AUTH_TOKEN` in CI,
 then depend on an exact version:
 
 ```sh
-pnpm add --save-exact @scshafe/mission-pipeline@1.0.1
+pnpm add --save-exact @scshafe/switchyard@2.0.0
 ```
 
-Import specifiers are `@scshafe/mission-pipeline` and
-`@scshafe/mission-pipeline/<subpath>`.
+Import specifiers are `@scshafe/switchyard` and
+`@scshafe/switchyard/<subpath>`.
 
 ## Runtime boundary
 
@@ -45,7 +53,7 @@ Supported runtimes:
 import {
   compileGraph,
   createGraphDefinition
-} from "@scshafe/mission-pipeline";
+} from "@scshafe/switchyard";
 
 const graph = createGraphDefinition({
   graphId: "example.review",
@@ -85,9 +93,9 @@ const graph = createGraphDefinition({
   edges: [
     {
       edgeId: "clean-to-review",
-      source: "filter",
-      target: "review",
-      when: { outcome: "clean" }
+      from: "filter",
+      when: { outcome: "clean" },
+      to: ["review"]
     }
   ],
   terminals: [
@@ -176,7 +184,7 @@ build output and is not committed.
 
 1. On a branch: bump `version` in `package.json`, add a `## <x.y.z> — <date>`
    section to `CHANGELOG.md`, run `pnpm run build && pnpm run release:manifest`
-   to write `release/scshafe-mission-pipeline-<x.y.z>.payload.sha256`, run
+   to write `release/scshafe-switchyard-<x.y.z>.payload.sha256`, run
    `pnpm run verify`, and merge to `main`.
 2. After CI is green on `main`, push the annotated tag `v<x.y.z>` on that
    commit. `.github/workflows/publish.yml` refuses a tag that is not on

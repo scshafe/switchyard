@@ -18,7 +18,7 @@ import {
   singlePackReport
 } from "./release-identity.mjs";
 
-const scratch = await mkdtemp(join(tmpdir(), "mission-pipeline-manifest-"));
+const scratch = await mkdtemp(join(tmpdir(), "switchyard-manifest-"));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {

@@ -10,9 +10,9 @@ import { validateArtifactEnvelope, validateArtifactRef } from "../contracts/arti
 import { digest } from "../contracts/digest.js";
 import type { UsageReceipt } from "../contracts/usage-receipt.js";
 import {
-  validateMissionPipelineNode,
-  type MissionPipelineNode,
-  type MissionPipelineNodeRef
+  validateSwitchyardNode,
+  type SwitchyardNode,
+  type SwitchyardNodeRef
 } from "../graph/definition.js";
 import {
   assertIdentifier,
@@ -49,7 +49,7 @@ export interface NodeTurnIdempotencyInput {
   readonly unitId: string;
   readonly nodeId: string;
   readonly attemptNumber: number;
-  readonly nodeRef: MissionPipelineNodeRef;
+  readonly nodeRef: SwitchyardNodeRef;
   readonly fingerprint: string;
   readonly inputDigest: string;
   readonly executionIdentityDigest?: string;
@@ -75,7 +75,7 @@ function frozenNullRecord<T extends object>(value: T): T {
   ) as T;
 }
 
-function validateNodeRef(value: unknown, label: string): MissionPipelineNodeRef {
+function validateNodeRef(value: unknown, label: string): SwitchyardNodeRef {
   const raw = captureCapabilityRecord(
     value,
     [...NODE_REF_KEYS],
@@ -90,7 +90,7 @@ function validateNodeRef(value: unknown, label: string): MissionPipelineNodeRef 
 
 /** The exact below-N0 fingerprint formula recorded in the phase plan. */
 export function nodeExecutionFingerprint(nodeRaw: unknown): string {
-  const node = validateMissionPipelineNode(nodeRaw, "node execution fingerprint");
+  const node = validateSwitchyardNode(nodeRaw, "node execution fingerprint");
   const binding = Object.hasOwn(node, "binding") ? node.binding : undefined;
   return digest({
     bindingFingerprint: binding?.bindingDigest ?? "none",
@@ -322,7 +322,7 @@ export interface WorkerNodePorts {
 }
 
 export interface ExecuteNodeTurnAttemptInput {
-  readonly node: MissionPipelineNode;
+  readonly node: SwitchyardNode;
   readonly context: WorkerNodeTurnContext;
   readonly inputArtifact: ArtifactEnvelope;
   readonly ports: WorkerNodePorts;
@@ -330,7 +330,7 @@ export interface ExecuteNodeTurnAttemptInput {
 }
 
 function assertContextMatchesNode(
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   context: WorkerNodeTurnContext,
   inputArtifact: ArtifactEnvelope,
   executionIdentityDigest: string | undefined
@@ -380,7 +380,7 @@ function assertContextMatchesNode(
 }
 
 function captureCompletion(
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   idempotencyKey: string,
   rawResult: unknown
 ): NodeTurnCompletion {
@@ -454,7 +454,7 @@ export async function executeNodeTurnAttempt(
     ["node", "context", "inputArtifact", "ports"],
     "executeNodeTurnAttempt input"
   );
-  const node = validateMissionPipelineNode(raw.node, "executeNodeTurnAttempt node");
+  const node = validateSwitchyardNode(raw.node, "executeNodeTurnAttempt node");
   if (node.kind === "human" || node.kind === "callback") {
     throw new WorkerNodeKindError(node.nodeId, node.kind);
   }

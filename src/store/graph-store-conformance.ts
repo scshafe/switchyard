@@ -12,7 +12,7 @@ import {
   createGraphDefinition,
   graphDefinitionRef,
   type GraphDefinition,
-  type MissionPipelineNodeKind
+  type SwitchyardNodeKind
 } from "../graph/definition.js";
 import {
   GraphLoadDigestConflictError,
@@ -32,7 +32,7 @@ const TURN = Object.freeze({
 
 interface NodeDraftOptions {
   readonly refId?: string;
-  readonly kind?: MissionPipelineNodeKind;
+  readonly kind?: SwitchyardNodeKind;
   readonly input?: string;
   readonly principal?: string;
 }
@@ -40,7 +40,7 @@ interface NodeDraftOptions {
 interface ConformanceNodeDraft {
   readonly nodeId: string;
   readonly ref: { readonly id: string; readonly version: number };
-  readonly kind: MissionPipelineNodeKind;
+  readonly kind: SwitchyardNodeKind;
   readonly input: string;
   readonly outcomes: { readonly version: number; readonly outcomes: readonly string[] };
   readonly principal: { readonly id: string };

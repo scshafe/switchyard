@@ -1,4 +1,4 @@
-# @scshafe/mission-pipeline Agent Contract
+# @scshafe/switchyard Agent Contract
 
 A managed library under the SCSHAFE library standard (`scshafe-library` v1).
 It is published to GitHub Packages and deploys nothing. Read `README.md` and
@@ -9,6 +9,12 @@ It is published to GitHub Packages and deploys nothing. Read `README.md` and
 - The package is dependency-free: `src/` imports `node:` built-ins and its own
   relative modules only (`test/import-boundary.test.mjs` enforces this). Never
   add a runtime dependency, database client, provider SDK or credential loader.
+- Exported names use the `Switchyard*` / `SWITCHYARD_*` prefix and stored or
+  wire identifiers the `switchyard.` / `switchyard-` prefix. The 1.x names
+  were retired in 2.0.0 without aliases: never reintroduce them or add a
+  compatibility alias. `docs/DESIGN-NODE-GRAPH-V2.md`,
+  `docs/PLAN-NODE-GRAPH-V2.md` and past `CHANGELOG.md` entries are dated
+  records and keep their original names.
 - There is no v1 traversal engine; `scripts/check-v1-deletion.mjs` keeps the
   retired paths and symbols out.
 - `lib/` is build output and is never committed. Build it with
@@ -19,12 +25,12 @@ It is published to GitHub Packages and deploys nothing. Read `README.md` and
 - `.npmrc` holds only `@scshafe:registry=https://npm.pkg.github.com`. Never
   commit a credential, `_authToken` line or token to any file.
 - The payload is the `files` whitelist in `package.json`; the release manifest
-  `release/scshafe-mission-pipeline-<version>.payload.sha256` pins every
+  `release/scshafe-switchyard-<version>.payload.sha256` pins every
   packed file's sha256. A payload change (including `package.json`, `README.md`
   or `CHANGELOG.md`) needs `pnpm run build && pnpm run release:manifest` in the
   same commit.
 - Test and consumer imports use the scoped specifiers
-  `@scshafe/mission-pipeline` and `@scshafe/mission-pipeline/<subpath>`.
+  `@scshafe/switchyard` and `@scshafe/switchyard/<subpath>`.
 
 ## Verification
 

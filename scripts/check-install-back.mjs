@@ -1,5 +1,5 @@
 // Install-back check for the publish workflow: given a consumer directory in
-// which `pnpm add --save-exact @scshafe/mission-pipeline@<version>` has run,
+// which `pnpm add --save-exact @scshafe/switchyard@<version>` has run,
 // read the integrity pnpm recorded (and verified against the downloaded bytes)
 // from the consumer's pnpm-lock.yaml and require it to equal every expected
 // integrity passed on the command line (the local pack of the tag, the
@@ -55,12 +55,15 @@ let resolved;
 if (resolved === undefined) {
   throw new Error(`${name} is not a dependency of the consumer's root importer`);
 }
-if (resolved !== version) {
+// pnpm appends the resolved peers to the importer's version, e.g.
+// `0.5.1(elkjs@0.10.2)`; the `packages:` key carries the bare version.
+const bare = resolved.replace(/\(.*\)$/, "");
+if (bare !== version) {
   throw new Error(`consumer resolved ${name}@${resolved}, expected exactly ${version}`);
 }
 
 // packages: -> '<name>@<version>': -> resolution: {integrity: sha512-...}
-const key = `${name}@${resolved}`;
+const key = `${name}@${bare}`;
 let integrity;
 {
   let section = "";

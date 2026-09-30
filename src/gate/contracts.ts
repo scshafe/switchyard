@@ -12,7 +12,7 @@
 // hand-written LOUD validators.
 // CHANGES in the promotion:
 //   - the module is named GATE, not decision (design critique finding 13 —
-//     mission-swarm owns a "decision ledger"; the pipeline node kind is
+//     another system owned a "decision ledger"; the pipeline node kind is
 //     "gate"), so the vocabulary is Gate* and the schema versions are
 //     gate-*.v1. The TRANSITION vocabulary is kept EXACT (advance |
 //     internal_escalation | valid_decision | human_escalation) and the goal

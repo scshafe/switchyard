@@ -1,6 +1,6 @@
 // execute/ports.ts — strict host ports for one v2 node turn.
 //
-// These are capability seams, not implementations. Mission Pipeline supplies
+// These are capability seams, not implementations. Switchyard supplies
 // a minimal, frozen context and an already contract-validated input payload;
 // hosts bind the code/model/agent bodies and the authenticated human/callback
 // completion paths. No port receives graph routing, store, lease-token,
@@ -21,10 +21,10 @@ import {
 } from "../contracts/usage-receipt.js";
 import {
   type GraphDefinitionRef,
-  type MissionPipelineNode,
-  type MissionPipelineNodeBindingRef,
-  type MissionPipelineNodeKind,
-  type MissionPipelineNodeRef
+  type SwitchyardNode,
+  type SwitchyardNodeBindingRef,
+  type SwitchyardNodeKind,
+  type SwitchyardNodeRef
 } from "../graph/definition.js";
 import { snapshotGraphValidationData } from "../graph/limits.js";
 import {
@@ -42,7 +42,7 @@ import {
   deepFrozenClone
 } from "../internal/evidence.js";
 import { captureCapabilityRecord } from "../internal/capability.js";
-import { validateMissionPipelineNode } from "../graph/definition.js";
+import { validateSwitchyardNode } from "../graph/definition.js";
 
 export const MAX_AGENT_TURN_USAGE_RECEIPTS = 256;
 export const ENGINE_JOIN_UNSATISFIABLE_OUTCOME = "join_unsatisfiable" as const;
@@ -54,7 +54,7 @@ export interface WorkerNodeTurnContext {
   readonly queueId: string;
   readonly unitId: string;
   readonly nodeId: string;
-  readonly nodeRef: MissionPipelineNodeRef;
+  readonly nodeRef: SwitchyardNodeRef;
   readonly attemptNumber: number;
   /** 1-based retry ordinal within this queue occurrence. */
   readonly attemptIndex: number;
@@ -85,7 +85,7 @@ export interface AgentNodeTurnCompletion extends NodeTurnCompletion {
   readonly usage?: readonly UsageReceipt[];
 }
 
-export type NodePortCompletion<K extends MissionPipelineNodeKind> =
+export type NodePortCompletion<K extends SwitchyardNodeKind> =
   K extends "model"
     ? ModelNodeTurnCompletion
     : K extends "agent"
@@ -346,14 +346,14 @@ function asCompletionSnapshot(
  * `join_unsatisfiable` is engine-produced and can never be claimed by a host
  * body. Extra routing/spawn/timer keys fail under the closed result shape.
  */
-export function validateNodeTurnCompletion<K extends MissionPipelineNodeKind>(
-  nodeRaw: MissionPipelineNode & { readonly kind: K },
+export function validateNodeTurnCompletion<K extends SwitchyardNodeKind>(
+  nodeRaw: SwitchyardNode & { readonly kind: K },
   value: unknown | NodeTurnCompletionSnapshot,
   label = "node turn completion"
 ): NodePortCompletion<K> {
   const completion = asCompletionSnapshot(value, label);
   try {
-    const node = validateMissionPipelineNode(nodeRaw, `${label}: node`) as MissionPipelineNode & {
+    const node = validateSwitchyardNode(nodeRaw, `${label}: node`) as SwitchyardNode & {
       readonly kind: K;
     };
     const raw = completion.value;
@@ -455,7 +455,7 @@ function snapshotGraphRef(value: unknown, label: string): GraphDefinitionRef {
   });
 }
 
-function snapshotNodeRef(value: unknown, label: string): MissionPipelineNodeRef {
+function snapshotNodeRef(value: unknown, label: string): SwitchyardNodeRef {
   const raw = assertPlainObject(value, label);
   assertStrictKeys(raw, NODE_REF_KEYS, label);
   assertRequiredKeys(raw, NODE_REF_KEYS, label);
@@ -523,7 +523,7 @@ export interface CodeNodePort {
 export interface ModelNodePort {
   readonly invoke: (
     input: unknown,
-    binding: MissionPipelineNodeBindingRef,
+    binding: SwitchyardNodeBindingRef,
     context: WorkerNodeTurnContext
   ) => Promise<ModelNodeTurnCompletion>;
 }

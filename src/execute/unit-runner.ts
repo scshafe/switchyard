@@ -18,8 +18,8 @@ import { compileGraph } from "../graph/compile.js";
 import {
   validateGraphDefinition,
   type GraphDefinition,
-  type MissionPipelineNode,
-  type MissionPipelineNodeRef
+  type SwitchyardNode,
+  type SwitchyardNodeRef
 } from "../graph/definition.js";
 import {
   assertIdentifier,
@@ -150,7 +150,7 @@ export interface PrepareTurnAttemptInput {
   readonly unitId: string;
   readonly nodeId: string;
   readonly leaseToken: string;
-  readonly nodeRef: MissionPipelineNodeRef;
+  readonly nodeRef: SwitchyardNodeRef;
   readonly fingerprint: string;
   readonly inputDigest: string;
   readonly maxAttempts: number;
@@ -735,7 +735,7 @@ function captureExecutionStore(store: unknown): TurnExecutionStore {
 
 function attemptKey(
   claim: ClaimedUnitTurn | ExternalUnitTurnInspection,
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   attemptNumber: number
 ): string {
   const executionIdentityDigest = claimExecutionIdentityDigest(claim);
@@ -753,7 +753,7 @@ function attemptKey(
 function captureAttemptIdentity(
   raw: Readonly<Record<string, unknown>>,
   claim: ClaimedUnitTurn | ExternalUnitTurnInspection,
-  node: MissionPipelineNode
+  node: SwitchyardNode
 ): PreparedAttemptIdentity {
   const attemptNumber = assertSafePositiveInt(
     raw.attemptNumber,
@@ -784,7 +784,7 @@ function captureAttemptIdentity(
 function capturePreparation(
   value: unknown,
   claim: ClaimedUnitTurn,
-  node: MissionPipelineNode
+  node: SwitchyardNode
 ): TurnAttemptPreparation {
   const raw = captureCapabilityRecord(
     value,
@@ -898,7 +898,7 @@ function capturePreparation(
 async function prepareAttempt(
   store: Pick<TurnExecutionStore, "prepareTurnAttempt">,
   claim: ClaimedUnitTurn,
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   priorNonterminalAttempt?: PreparedAttemptIdentity
 ): Promise<TurnAttemptPreparation> {
   const executionIdentityDigest = claimExecutionIdentityDigest(claim);
@@ -946,7 +946,7 @@ async function prepareAttempt(
 
 function captureCacheResult(
   value: unknown,
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   expectedDigest: string
 ): CacheTurnCompletionResult {
   const raw = captureCapabilityRecord(
@@ -991,7 +991,7 @@ function captureCacheResult(
 async function cacheCompletion(
   store: TurnExecutionStore,
   claim: ClaimedUnitTurn,
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   attempt: PreparedAttemptIdentity,
   completion: NodeTurnCompletion,
   completionDigest: string,
@@ -1239,7 +1239,7 @@ function captureDigestList(value: unknown, label: string): readonly string[] | u
 
 function failureUsage(
   error: unknown,
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   attempt: PreparedAttemptIdentity
 ): readonly UsageReceipt[] {
   if (node.kind !== "model" && node.kind !== "agent") return Object.freeze([]);
@@ -1278,7 +1278,7 @@ function captureTurnFailure(
   error: unknown,
   attempt: PreparedAttemptIdentity,
   maxAttempts: number,
-  node: MissionPipelineNode
+  node: SwitchyardNode
 ): CapturedTurnFailure {
   const classified = classifyExecutionFailure(error);
   return Object.freeze({
@@ -1522,14 +1522,14 @@ async function settleCompletion(
 export interface TurnOutboxContext extends PreparedAttemptIdentity {
   readonly queueId: string;
   readonly unitId: string;
-  readonly node: MissionPipelineNode;
+  readonly node: SwitchyardNode;
   readonly reused: boolean;
 }
 
 export interface TurnFailureOutboxContext extends PreparedAttemptIdentity {
   readonly queueId: string;
   readonly unitId: string;
-  readonly node: MissionPipelineNode;
+  readonly node: SwitchyardNode;
   readonly errorCode: string;
   readonly retryable: boolean;
   readonly terminal: boolean;
@@ -2214,7 +2214,7 @@ function sameOptionalString(left: string | undefined, right: string | undefined)
 function assertExactExternalSettlement(
   settled: SettledExternalUnitTurn,
   inspection: ExternalUnitTurnInspection,
-  node: MissionPipelineNode,
+  node: SwitchyardNode,
   principalId: string,
   actorId: string,
   completionDigest: string,

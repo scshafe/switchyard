@@ -30,7 +30,7 @@
 
 import { digest } from "../contracts/digest.js";
 import { validateContractId, type ContractId } from "../contracts/artifact.js";
-import type { MissionPipelineNodeBindingRef } from "../graph/definition.js";
+import type { SwitchyardNodeBindingRef } from "../graph/definition.js";
 import type { PersonaRef, PromptStackRef } from "../prompt/contracts.js";
 import {
   assertEnum,
@@ -288,7 +288,7 @@ export function validateModelStageBinding(value: unknown): ModelStageBinding {
  * Project a sealed binding to the content-addressed reference carried by a v2
  * model node.
  */
-export function modelStageBindingRef(bindingRaw: unknown): MissionPipelineNodeBindingRef {
+export function modelStageBindingRef(bindingRaw: unknown): SwitchyardNodeBindingRef {
   const binding = validateModelStageBinding(bindingRaw);
   return { kind: "model", bindingId: binding.bindingId, version: binding.version, bindingDigest: binding.bindingDigest };
 }
@@ -298,7 +298,7 @@ export function modelStageBindingRef(bindingRaw: unknown): MissionPipelineNodeBi
  * every mismatch (kind, identity, and ABOVE ALL the digest: a ref must prove
  * it names THIS exact sealed payload).
  */
-export function resolveModelBindingRef(ref: MissionPipelineNodeBindingRef, bindingRaw: unknown): ModelStageBinding {
+export function resolveModelBindingRef(ref: SwitchyardNodeBindingRef, bindingRaw: unknown): ModelStageBinding {
   ref = deepFrozenClone(ref, "model binding resolution ref");
   const binding = validateModelStageBinding(bindingRaw);
   if (ref.kind !== "model") {

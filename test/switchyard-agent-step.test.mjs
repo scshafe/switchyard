@@ -7,15 +7,15 @@ import {
   AGENT_STEP_RESULT_SCHEMA_VERSION,
   validateAgentStepRequest,
   validateAgentStepResult
-} from "@scshafe/mission-pipeline/agent/step";
+} from "@scshafe/switchyard/agent/step";
 import {
   createFakeAgentStepExecutor,
   fakeUsageReceipt
-} from "@scshafe/mission-pipeline/agent/fake-executor";
+} from "@scshafe/switchyard/agent/fake-executor";
 
 const mirror = (name) => new URL(`../schemas/${name}`, import.meta.url);
 const fixture = (name) =>
-  new URL(`./fixtures/mission-pipeline/${name}`, import.meta.url);
+  new URL(`./fixtures/switchyard/${name}`, import.meta.url);
 
 const ENVIRONMENT = Object.freeze({
   schemaVersion: "environment-descriptor.v1",

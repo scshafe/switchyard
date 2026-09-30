@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createArtifactEnvelope } from "@scshafe/mission-pipeline/contracts/artifact";
+import { createArtifactEnvelope } from "@scshafe/switchyard/contracts/artifact";
 import {
   evaluateJoinThreshold,
   isJoinSatisfiable,
   isJoinThresholdSatisfied,
   matchingOutcomeEdges,
   outcomePredicateMatches
-} from "@scshafe/mission-pipeline/store/routing";
+} from "@scshafe/switchyard/store/routing";
 
 const output = createArtifactEnvelope("routing-output.v1", {
   risk: "high",

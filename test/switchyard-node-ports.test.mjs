@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   artifactRef,
   createArtifactEnvelope
-} from "@scshafe/mission-pipeline/contracts/artifact";
+} from "@scshafe/switchyard/contracts/artifact";
 import {
   ENGINE_JOIN_UNSATISFIABLE_OUTCOME,
   MAX_AGENT_TURN_USAGE_RECEIPTS,
@@ -14,11 +14,11 @@ import {
   snapshotNodeTurnCompletion,
   snapshotWorkerNodeTurnContext,
   validateNodeTurnCompletion
-} from "@scshafe/mission-pipeline/execute/ports";
+} from "@scshafe/switchyard/execute/ports";
 import {
   MODEL_BINDING,
   node
-} from "./fixtures/mission-pipeline/node-graph-v2-fixtures.mjs";
+} from "./fixtures/switchyard/node-graph-v2-fixtures.mjs";
 
 const RECEIPT = Object.freeze({
   schemaVersion: "usage-receipt.v1",

@@ -3,10 +3,10 @@
 import {
   graphDefinitionRef,
   JOIN_UNSATISFIABLE_ARTIFACT_CONTRACT,
-  MISSION_PIPELINE_ENGINE_PRINCIPAL_ID,
+  SWITCHYARD_ENGINE_PRINCIPAL_ID,
   validateGraphDefinition,
   type GraphDefinitionRef,
-  type MissionPipelineNode,
+  type SwitchyardNode,
   type TerminalOutcome
 } from "./definition.js";
 import {
@@ -18,10 +18,10 @@ import {
 export interface CompiledGraph {
   readonly graph: GraphDefinitionRef;
   readonly entry: string;
-  readonly nodes: readonly MissionPipelineNode[];
+  readonly nodes: readonly SwitchyardNode[];
   readonly edges: readonly Edge[];
   readonly terminals: readonly TerminalOutcome[];
-  readonly nodesById: Readonly<Record<string, MissionPipelineNode>>;
+  readonly nodesById: Readonly<Record<string, SwitchyardNode>>;
   readonly edgesById: Readonly<Record<string, Edge>>;
   readonly inboundByNode: Readonly<Record<string, readonly Edge[]>>;
   readonly outboundByNode: Readonly<Record<string, readonly Edge[]>>;
@@ -31,7 +31,7 @@ function pairKey(nodeId: string, outcome: string): string {
   return `${nodeId}\u0000${outcome}`;
 }
 
-function refKey(node: MissionPipelineNode): string {
+function refKey(node: SwitchyardNode): string {
   return `${node.ref.id}\u0000${node.ref.version}`;
 }
 
@@ -49,10 +49,10 @@ function frozenRecord<T>(entries: readonly (readonly [string, T])[]): Readonly<R
   return Object.freeze(record);
 }
 
-function validateBindingRules(node: MissionPipelineNode): void {
-  if (node.principal.id === MISSION_PIPELINE_ENGINE_PRINCIPAL_ID) {
+function validateBindingRules(node: SwitchyardNode): void {
+  if (node.principal.id === SWITCHYARD_ENGINE_PRINCIPAL_ID) {
     throw new Error(
-      `Graph node ${node.nodeId} cannot use reserved engine principal ${MISSION_PIPELINE_ENGINE_PRINCIPAL_ID}`
+      `Graph node ${node.nodeId} cannot use reserved engine principal ${SWITCHYARD_ENGINE_PRINCIPAL_ID}`
     );
   }
   const binding = Object.hasOwn(node, "binding") ? node.binding : undefined;
@@ -167,7 +167,7 @@ export function compileGraph(definitionRaw: unknown): CompiledGraph {
   // nodeId, and join are graph-instance configuration; dispatch kind, input
   // contract, and outcome vocabulary are definition-bound. Pure compilation
   // proves this within a graph; publish stores enforce it across graphs.
-  const definitionByRef = new Map<string, MissionPipelineNode>();
+  const definitionByRef = new Map<string, SwitchyardNode>();
   for (const node of definition.nodes) {
     const key = refKey(node);
     const existing = definitionByRef.get(key);

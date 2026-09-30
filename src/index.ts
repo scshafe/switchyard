@@ -1,4 +1,4 @@
-// mission-pipeline — the dependency-free, digest-sealed node-graph engine.
+// Switchyard — the dependency-free, digest-sealed node-graph engine.
 // Every durable unit position is a per-node queue occurrence. One turn settles
 // atomically with its journey evidence, routing, successor queues, and outbox.
 //

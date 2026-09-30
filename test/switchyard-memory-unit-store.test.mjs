@@ -1,29 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createArtifactEnvelope } from "@scshafe/mission-pipeline/contracts/artifact";
+import { createArtifactEnvelope } from "@scshafe/switchyard/contracts/artifact";
 import {
   createGraphDefinition,
   graphDefinitionRef
-} from "@scshafe/mission-pipeline/graph/definition";
-import { ExecutionFailureError } from "@scshafe/mission-pipeline/execute/failure";
+} from "@scshafe/switchyard/graph/definition";
+import { ExecutionFailureError } from "@scshafe/switchyard/execute/failure";
 import {
   recordHumanNodeDecision,
   runNextUnitTurn
-} from "@scshafe/mission-pipeline/execute/unit-runner";
+} from "@scshafe/switchyard/execute/unit-runner";
 import {
   nodeExecutionFingerprint,
   nodeTurnCompletionDigest
-} from "@scshafe/mission-pipeline/execute/turn";
-import { nodeTurnSettlementDigest } from "@scshafe/mission-pipeline/execute/turn-evidence";
+} from "@scshafe/switchyard/execute/turn";
+import { nodeTurnSettlementDigest } from "@scshafe/switchyard/execute/turn-evidence";
 import {
   registerUnitStoreConformanceTests
-} from "@scshafe/mission-pipeline/store/unit-store-conformance";
-import { MemoryGraphStore } from "@scshafe/mission-pipeline/store/memory-graph-store";
+} from "@scshafe/switchyard/store/unit-store-conformance";
+import { MemoryGraphStore } from "@scshafe/switchyard/store/memory-graph-store";
 import {
   MEMORY_UNIT_STORE_STATE_SNAPSHOT_SCHEMA_VERSION,
   MemoryUnitStore
-} from "@scshafe/mission-pipeline/store/memory-unit-store";
+} from "@scshafe/switchyard/store/memory-unit-store";
 
 function memoryDriver() {
   let epoch = Date.parse("2026-08-27T12:00:00.000Z");

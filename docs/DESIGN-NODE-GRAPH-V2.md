@@ -1,5 +1,14 @@
 # DESIGN — The node-graph execution model (v2)
 
+> **Historical record (read with the 2.0.0 rename).** This document was
+> written and ratified while the package was `mission-pipeline`, and it is
+> kept as written. Since 2.0.0 the package is `@scshafe/switchyard`:
+> `MissionPipelineNode`, `MissionPipelineUnit` and the other `MissionPipeline*`
+> names are `SwitchyardNode`, `SwitchyardUnit` and so on, and the
+> `mission_pipeline.*` / `mission-pipeline*` identifiers carry the
+> `switchyard` prefix (see `CHANGELOG.md`, 2.0.0). The engine semantics
+> recorded here are unchanged.
+
 **Status: RATIFIED by the operator, 2026-08-27; N0 complete.** Direction set by the
 operator: one abstract node interface, one abstract unit interface, per-turn
 atomicity, and outcome-conditional routing evaluated after every turn — in the

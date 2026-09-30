@@ -1,7 +1,7 @@
-# Node-graph engine guide
+# Switchyard engine guide
 
-The runtime has one durable position model: a unit journey projected into
-literal per-node queues.
+The Switchyard runtime has one durable position model: a unit journey
+projected into literal per-node queues.
 
 ```mermaid
 flowchart LR
@@ -28,4 +28,6 @@ is fully settled and queued at every satisfied successor. No intermediate
 position is observable.
 
 See the [ratified design](DESIGN-NODE-GRAPH-V2.md) for semantics and the
-[phase plan](PLAN-NODE-GRAPH-V2.md) for executable evidence.
+[phase plan](PLAN-NODE-GRAPH-V2.md) for executable evidence. Both are dated
+records written before the 2.0.0 rename and use the 1.x names; `CHANGELOG.md`
+maps them to the current ones.

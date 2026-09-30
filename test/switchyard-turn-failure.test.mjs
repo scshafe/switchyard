@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   ExecutionFailureError,
   classifyExecutionFailure
-} from "@scshafe/mission-pipeline/execute/failure";
+} from "@scshafe/switchyard/execute/failure";
 
 test("shared failure taxonomy preserves the stable retryable/terminal code families", () => {
   assert.deepEqual(classifyExecutionFailure(new Error("compiled digest mismatch")), {

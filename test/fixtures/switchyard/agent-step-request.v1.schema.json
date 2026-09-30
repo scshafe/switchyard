@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://mission-pipeline.local/agent/agent-step-request.v1.schema.json",
+  "$id": "https://switchyard.local/agent/agent-step-request.v1.schema.json",
   "title": "AgentStepRequest v1",
-  "description": "The frozen contract mission-pipeline hands an AgentStepExecutor to run one kind:\"agent\" node. mission-pipeline OWNS this contract (design critique finding 3); the EAL ships the single adapter that maps it onto a TurnExecutor and asserts the required `environment` is a subset of what the bound environment grants. The `environment` field carries the descriptor the step REQUIRES (an environment-descriptor.v1 value); mission-pipeline never interprets its capabilities — it is a data carrier here.",
+  "description": "The frozen contract Switchyard hands an AgentStepExecutor to run one kind:\"agent\" node. Switchyard OWNS this contract (design critique finding 3); the EAL ships the single adapter that maps it onto a TurnExecutor and asserts the required `environment` is a subset of what the bound environment grants. The `environment` field carries the descriptor the step REQUIRES (an environment-descriptor.v1 value); Switchyard never interprets its capabilities — it is a data carrier here.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "stage", "environment", "brief", "idempotencyKey", "deadlineMs"],
