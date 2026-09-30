@@ -1,6 +1,6 @@
-// agent/step.ts — the FROZEN agent-step contract (mission-restructure B6).
+// agent/step.ts — the FROZEN agent-step contract (restructure increment B6).
 //
-// mission-pipeline OWNS this contract (design critique finding 3): an agent
+// Switchyard OWNS this contract (design critique finding 3): an agent
 // node is one turn of an EAL-executed agent — a brief + input artifacts + an
 // environment descriptor in, a typed artifact out. The frozen sources live at
 // schemas/agent-step-{request,result}.v1.schema.json; these runtime types +
@@ -12,7 +12,7 @@
 //     inbox and the JobTrack side carried; each element is floor-validated by
 //     validateUsageReceipt. It may be EMPTY only for status infra_error (the
 //     invocation never usably reached a provider).
-//   - `environment` carries the descriptor the step REQUIRES. mission-pipeline
+//   - `environment` carries the descriptor the step REQUIRES. Switchyard
 //     is a DATA CARRIER for it (structural validation only) — the fail-closed
 //     "requested descriptor ⊆ what the bound environment grants" assertion is
 //     the EAL adapter's job (A5), never this package's (the machine-ignorance

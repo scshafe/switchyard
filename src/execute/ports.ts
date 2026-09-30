@@ -1,6 +1,6 @@
 // execute/ports.ts — strict host ports for one v2 node turn.
 //
-// These are capability seams, not implementations. Mission Pipeline supplies
+// These are capability seams, not implementations. Switchyard supplies
 // a minimal, frozen context and an already contract-validated input payload;
 // hosts bind the code/model/agent bodies and the authenticated human/callback
 // completion paths. No port receives graph routing, store, lease-token,

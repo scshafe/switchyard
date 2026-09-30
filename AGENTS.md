@@ -9,6 +9,12 @@ It is published to GitHub Packages and deploys nothing. Read `README.md` and
 - The package is dependency-free: `src/` imports `node:` built-ins and its own
   relative modules only (`test/import-boundary.test.mjs` enforces this). Never
   add a runtime dependency, database client, provider SDK or credential loader.
+- Exported names use the `Switchyard*` / `SWITCHYARD_*` prefix and stored or
+  wire identifiers the `switchyard.` / `switchyard-` prefix. The 1.x names
+  were retired in 2.0.0 without aliases: never reintroduce them or add a
+  compatibility alias. `docs/DESIGN-NODE-GRAPH-V2.md`,
+  `docs/PLAN-NODE-GRAPH-V2.md` and past `CHANGELOG.md` entries are dated
+  records and keep their original names.
 - There is no v1 traversal engine; `scripts/check-v1-deletion.mjs` keeps the
   retired paths and symbols out.
 - `lib/` is build output and is never committed. Build it with

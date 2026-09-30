@@ -1,13 +1,21 @@
 # @scshafe/switchyard
 
-Mission Pipeline is a dependency-free, digest-sealed node-graph engine for
-durable unit journeys. Every node has its own queue. Completing one node turn
-atomically appends evidence, evaluates deterministic outcome edges, advances
-join state, queues every satisfied successor, appends outbox events, and
-releases the turn lease.
+Switchyard is a dependency-free, digest-sealed node-graph engine for durable
+unit journeys. Units move through a graph of `code`, `model`, `agent`, `human`
+and `callback` nodes the way cars move through a rail yard: every node is a
+track with its own durable queue, a completed turn's outcome throws the
+switches (the sealed outcome edges) that send the unit on, and a join couples
+arrivals from several inbound edges before the unit proceeds. Completing one
+node turn atomically appends evidence, evaluates deterministic outcome edges,
+advances join state, queues every satisfied successor, appends outbox events,
+and releases the turn lease.
 
-Version 1.0 is the node-graph-only major release. There is no compatibility
-execution path for the retired traversal engine.
+Version 2.0 is the rename from `@scshafe/mission-pipeline` (1.0.1) to
+`@scshafe/switchyard`: engine semantics are those of 1.0, while the package
+name, the `MissionPipeline*` exports and the stored identifiers changed, with
+no compatibility aliases. [`CHANGELOG.md`](CHANGELOG.md) lists every old and
+new name. There is no compatibility execution path for the retired v1
+traversal engine.
 
 ## Install
 
@@ -85,9 +93,9 @@ const graph = createGraphDefinition({
   edges: [
     {
       edgeId: "clean-to-review",
-      source: "filter",
-      target: "review",
-      when: { outcome: "clean" }
+      from: "filter",
+      when: { outcome: "clean" },
+      to: ["review"]
     }
   ],
   terminals: [

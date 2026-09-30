@@ -84,6 +84,16 @@ input; journey evidence sealed by 1.x does not verify against 2.0.0 digests.
 There is no migration: start 2.0.0 stores empty, or rewrite the identifiers
 and re-seal the evidence in the consumer.
 
+### Other
+
+- `validateSwitchyardNode`'s default error label is `switchyard node` (was
+  `mission pipeline node`).
+- README and source comments describe the package as Switchyard. The README
+  graph example now uses the real edge keys (`from`, `when`, `to`); the 1.x
+  example's `source`/`target` keys were rejected by the strict validator.
+- `docs/DESIGN-NODE-GRAPH-V2.md` and `docs/PLAN-NODE-GRAPH-V2.md` are dated
+  records and keep the 1.x names, under a note that maps them to 2.0.0.
+
 ## 1.0.1 — 2026-09-29
 
 First version published to GitHub Packages. No API or runtime behaviour change

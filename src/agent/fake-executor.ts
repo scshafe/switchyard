@@ -1,5 +1,5 @@
 // agent/fake-executor.ts — a scriptable AgentStepExecutor for hermetic tests
-// (mission-pipeline's own suite and any host's). It never reaches a provider;
+// (Switchyard's own suite and any host's). It never reaches a provider;
 // it returns whatever the script dictates, so hosts can exercise the frozen
 // request/result boundary deterministically.
 //

@@ -268,7 +268,7 @@ function validateJoin(value: unknown, label: string): SwitchyardJoin {
 /** Validate one v2 node contract without resolving graph-level references. */
 export function validateSwitchyardNode(
   value: unknown,
-  label = "mission pipeline node"
+  label = "switchyard node"
 ): SwitchyardNode {
   value = snapshotGraphValidationData(value, label);
   const raw = assertPlainObject(value, label);
