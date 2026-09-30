@@ -53,8 +53,13 @@ Graphs without settings seal byte-for-byte as before (same digests).
 
 For subject `X` (ids use `::`: `~` is not in the identifier grammar that turn
 keys, evidence and store records share, and widening it would be a wire
-change). Synthesized refs are `<X.ref.id>::approval|review|rework` at
-`X.ref.version`; every synthesized node uses `X.turn`.
+change). Every synthesized node uses `X.turn` and `X.ref.version`. Its ref id
+encodes everything its definition signature depends on, because graph stores
+register one signature per ref across all published graphs:
+`<X.ref.id>::approval.<human|model>`,
+`<X.ref.id>::review.<human|model>.<single|rounds|retry>` and
+`<X.ref.id>::rework`. The same node definition can therefore be approved by a
+person in one graph and by a model in another without a publication conflict.
 
 | Node | kind / principal | input | outcomes → outputs |
 |---|---|---|---|
