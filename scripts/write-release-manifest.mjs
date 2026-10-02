@@ -1,3 +1,15 @@
+// scshafe-dev release script. Master copy: scshafe/scshafe-dev
+// release/scripts/write-release-manifest.mjs, copied verbatim into each
+// library by `dev new` (D-5). Do not edit it in a library.
+//
+// KNOWN LOCAL DIFFERENCE (scshafe-dev drift lesson WM5, "second manifest for
+// a sub-package SDK"): this copy is the master plus writeSdkManifest(), which
+// also writes release/switchyard-graphpaper-<version>.payload.sha256 for the
+// separately packaged static SDK in packages/switchyard-graphpaper (LIB-16);
+// scripts/check-graphpaper-sdk.mjs reads that manifest back. The master has
+// no sub-package, so this file cannot be the master verbatim; everything else
+// in it is. Re-sync from the master and keep only this addition.
+//
 // Write release/<scope>-<name>-<version>.payload.sha256 from a fresh pack:
 // one line per packed entry, `<sha256>  <path>`, in code-unit path order. The
 // digests are taken from the packed bytes exactly as check-release-artifact.mjs
@@ -9,7 +21,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -19,7 +31,8 @@ import {
   singlePackReport
 } from "./release-identity.mjs";
 
-const scratch = await mkdtemp(join(tmpdir(), "switchyard-manifest-"));
+const identity = await readReleaseIdentity(root);
+const scratch = await mkdtemp(join(tmpdir(), `${identity.base}-manifest-`));
 
 async function run(command, args, options = {}) {
   const child = spawn(command, args, {
@@ -92,7 +105,6 @@ async function writeSdkManifest(packageRoot) {
 }
 
 try {
-  const identity = await readReleaseIdentity(root);
   const report = singlePackReport(
     await run("pnpm", [...PNPM_PACK_ARGS, "--pack-destination", scratch])
   );
@@ -100,6 +112,7 @@ try {
     throw new Error("packed identity does not match package.json");
   }
   const lines = await manifestLines(join(scratch, report.basename));
+  await mkdir(resolve(root, "release"), { recursive: true });
   await writeFile(resolve(root, identity.manifest), `${lines.join("\n")}\n`, "utf8");
   console.log(JSON.stringify({ result: "written", manifest: identity.manifest, fileCount: lines.length }));
   await writeSdkManifest(resolve(root, "packages/switchyard-graphpaper"));
