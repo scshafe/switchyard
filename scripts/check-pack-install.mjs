@@ -115,6 +115,20 @@ async function probe(consumer, fileName, source) {
   await run(process.execPath, [fileName], { cwd: consumer });
 }
 
+// A peer "resolves" from the consumer if its root or its package.json is
+// importable, or, for a package that exports only subpaths and no
+// ./package.json (@tiptap/pm, scshafe-ui's editor phase), if its directory is
+// linked into the consumer's node_modules. Shared by both probes below.
+const PEER_PRESENT = `
+  import { existsSync } from "node:fs";
+  const present = (name) => {
+    for (const specifier of [name, name + "/package.json"]) {
+      try { import.meta.resolve(specifier); return true; } catch {}
+    }
+    return existsSync(new URL("./node_modules/" + name + "/package.json", import.meta.url));
+  };
+`;
+
 // Every peer of this phase is a direct, exact dependency of the consumer and
 // resolves from it: a peer pnpm only auto-installs is not importable from the
 // consumer itself (switchyard-postgres 0.1.0's release job).
@@ -128,15 +142,8 @@ async function assertDirectPeers(consumer, peers) {
     );
   }
   if (peers.length === 0) return;
-  await probe(consumer, "peers-probe.mjs", `
-    const missing = [];
-    for (const name of ${JSON.stringify(peers.map((peer) => peer.name))}) {
-      let found = false;
-      for (const specifier of [name, name + "/package.json"]) {
-        try { import.meta.resolve(specifier); found = true; break; } catch {}
-      }
-      if (!found) missing.push(name);
-    }
+  await probe(consumer, "peers-probe.mjs", `${PEER_PRESENT}
+    const missing = ${JSON.stringify(peers.map((peer) => peer.name))}.filter((name) => !present(name));
     if (missing.length > 0) throw new Error("peers not resolvable from the consumer: " + missing.join(", "));
   `);
 }
@@ -148,11 +155,8 @@ async function assertAbsentPeers(consumer, peers) {
   const json = await consumerJson(consumer);
   const present = peers.filter((peer) => json.dependencies?.[peer.name] !== undefined);
   if (present.length > 0) throw new Error(`consumer must not depend on ${present.map((peer) => peer.name).join(", ")} yet`);
-  await probe(consumer, "absent-probe.mjs", `
-    const found = [];
-    for (const name of ${JSON.stringify(peers.map((peer) => peer.name))}) {
-      try { import.meta.resolve(name); found.push(name); } catch {}
-    }
+  await probe(consumer, "absent-probe.mjs", `${PEER_PRESENT}
+    const found = ${JSON.stringify(peers.map((peer) => peer.name))}.filter(present);
     if (found.length > 0) throw new Error("optional peers resolvable before their phase: " + found.join(", "));
   `);
 }
