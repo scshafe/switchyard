@@ -32,10 +32,10 @@
   },
   "files": {
     "inbox-graph8.source.json": {
-      "sha256": "2fe8e53525ef0124f2817e63dde82c9f4ed8051c15b141de4b89b0f299a29792"
+      "sha256": "87411aad66cec6b79c1aba476af00c760100286d0d8dc73c83eeac882347d016"
     },
     "inbox-graph8.static.golden.json": {
-      "sha256": "5b0a2554dbbfd89ace08b542d3560d86e751041fe63e63c92bca2032b1e1c184"
+      "sha256": "06858ad30ac400389c80092c36fcd4b1097226f0c4bcd9730ed4c1f7f86d790f"
     }
   },
   "comparison": "SDK static diagram equals the independent Inbox model after removing only SDK metadata.pipeline. The golden uses frozen model labels with SDK historical omitted; historical lifecycle rendering is tested separately.",
