@@ -29,6 +29,15 @@ It is published to GitHub Packages and deploys nothing. Read `README.md` and
   packed file's sha256. A payload change (including `package.json`, `README.md`
   or `CHANGELOG.md`) needs `pnpm run build && pnpm run release:manifest` in the
   same commit.
+- The release kit (`scripts/check-*.mjs` except `check-graphpaper-sdk.mjs` and
+  `check-v1-deletion.mjs`, `clean.mjs`, `release-identity.mjs`,
+  `smoke-peers.mjs`, `write-release-manifest.mjs`, `ci.yml`, `publish.yml`)
+  is scshafe-dev's master, verbatim. Repository inputs live in
+  `scripts/release.config.mjs`; the packed-install smokes are `test/smoke/`.
+  One known local difference: `write-release-manifest.mjs` also writes the
+  static SDK's manifest (drift lesson WM5, see its header). Do not edit the
+  kit here; change `release.config.mjs`, or change the master and re-sync
+  (`dev check --diff`).
 - Test and consumer imports use the scoped specifiers
   `@scshafe/switchyard` and `@scshafe/switchyard/<subpath>`.
 

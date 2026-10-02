@@ -80,7 +80,9 @@ const engineImports = new Set([
 ]);
 
 function assertImportBoundary(path, source, knownFiles) {
-  const sourceRoot = join(sdkRoot, path.includes(`${sep}src${sep}`) ? "src" : "lib");
+  // Classify by the path inside the SDK: the checkout itself may sit under a
+  // directory named src (~/src/switchyard), which an absolute-path test misreads.
+  const sourceRoot = join(sdkRoot, relative(sdkRoot, path).split(sep)[0] === "src" ? "src" : "lib");
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const sourceTypeScript = sourceRoot.endsWith(`${sep}src`);
   const module = basename(path).replace(/(?:\.d)?\.(?:ts|js)$/, "");
