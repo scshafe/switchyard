@@ -4,7 +4,7 @@
   "private": true,
   "description": "My first switchyard graph.",
   "engines": {
-    "node": ">=22.22.0 <23 || >=24.18.0 <25"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25"
   },
   "dependencies": {
     "@scshafe/switchyard": "2.3.0",

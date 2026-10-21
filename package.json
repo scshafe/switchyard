@@ -1,6 +1,6 @@
 {
   "name": "@scshafe/switchyard",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Standalone, dependency-free, digest-sealed node-graph engine for host applications.",
   "type": "module",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "pipeline"
   ],
   "engines": {
-    "node": ">=22.22.0 <23 || >=24.18.0 <25"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25"
   },
   "packageManager": "pnpm@10.34.5",
   "main": "./lib/index.js",

@@ -4,7 +4,7 @@
   "description": "Pure graphpaper diagram models from Switchyard projections and consumer presentation.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=22.22.0 <23 || >=24.18.0 <25" },
+  "engines": { "node": ">=22.23.4 <23 || >=24.22.1 <25" },
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {

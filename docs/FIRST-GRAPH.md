@@ -51,7 +51,7 @@ Three nodes you write, three ideas:
 ## Prerequisites
 
 - A Linux or macOS shell (the guide was run on Arch Linux).
-- **Node.js 22.22 or later 22.x, or 24.18 or later 24.x.** Check with
+- **Node.js 22.23.4 or later 22.x, or 24.22.1 or later 24.x.** Check with
   `node -v`.
 - **pnpm 10.** If `pnpm -v` does not print `10.x`, get it with corepack,
   which ships with Node 22 and 24: `corepack enable pnpm`, then
@@ -119,7 +119,7 @@ it wrote):
   "private": true,
   "description": "My first switchyard graph.",
   "engines": {
-    "node": ">=22.22.0 <23 || >=24.18.0 <25"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25"
   }
 }
 ```
@@ -178,7 +178,7 @@ code import only the packages its own `package.json` names.)
   "private": true,
   "description": "My first switchyard graph.",
   "engines": {
-    "node": ">=22.22.0 <23 || >=24.18.0 <25"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25"
   },
   "dependencies": {
     "@scshafe/switchyard": "2.3.0",
@@ -1834,7 +1834,7 @@ access errors a new reader may meet.
   `micro-USD`): a receipt without observed counts charged 0. Use
   `unavailableUsageReceipt()`.
 - **`Unsupported engine`** from pnpm, or syntax errors from Node: use Node
-  22.22+ or 24.18+.
+  22.23.4+ or 24.22.1+.
 - **`EACCES`** from `corepack enable pnpm` or `npm install -g pnpm@10`: your
   Node is installed system-wide. Put the pnpm shim in your own directory
   instead: `corepack enable --install-directory ~/.local/bin pnpm` (with
