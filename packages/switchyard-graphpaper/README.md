@@ -47,7 +47,7 @@ pnpm add --save-exact elkjs@0.10.2
 
 The repository's dev dependency and lockfile pin that exact version; the SDK
 does not bundle it. The engine still has zero runtime dependencies. Supported
-Node versions match the engine: `>=22.22.0 <23 || >=24.18.0 <25`.
+Node versions match the engine: `>=22.23.4 <23 || >=24.22.1 <25`.
 
 ## Static model
 

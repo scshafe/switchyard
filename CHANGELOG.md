@@ -7,7 +7,20 @@ published versions are never deleted, replaced or reused. Versions up to and
 including 1.0.1 were published as `@scshafe/mission-pipeline`; their entries
 below are kept as written.
 
-## 2.4.0 — unreleased (draft: readable failures)
+## 2.4.1 — 2026-10-21
+
+Security floor for the Node.js 2026-10-21 security releases (CVE-2026-111497
+Brotli decoder, CVE-2026-105483 / CVE-2026-106069 TLS hostname checks,
+CVE-2026-105482 `dns.resolve`, plus OpenSSL, undici and c-ares updates). No
+API, graph, digest, store contract, schema or wire change.
+
+- `engines.node` is `>=22.23.4 <23 || >=24.22.1 <25`, the patched releases of
+  both lines (was `>=22.22.0 <23 || >=24.18.0 <25`); CI tests those endpoints
+  and `.node-version` is 24.22.1. The unpublished `switchyard-graphpaper`
+  0.1.0 SDK and the first-graph example (and guide) use the same range; the
+  SDK's release manifest is regenerated for its `package.json`.
+
+## 2.4.0 — 2026-09-30
 
 Additive. No graph, digest, store contract, schema or wire change: a store
 that implements the 2.3.0 `UnitStore` contract (switchyard-postgres 0.2.0

@@ -62,8 +62,8 @@ goal scopes, and Inbox adoption remain proposed.
 
 Supported runtimes:
 
-- Node.js `>=22.22.0 <23`
-- Node.js `>=24.18.0 <25`
+- Node.js `>=22.23.4 <23`
+- Node.js `>=24.22.1 <25`
 
 ## Graph contracts
 
